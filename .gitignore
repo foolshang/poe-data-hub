@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Runtime data: cache, logs, SQLite DB, secrets. data/samples/ is the
+# exception -- curated reference samples (spec 11's "hit it once, save the
+# response" rule) doubling as test fixtures, so they're tracked. Files
+# prefixed "_" under samples/ are throwaway exploration dumps, not fixtures.
+data/*
+!data/samples/
+data/samples/_*
+# Runtime-overwritten on every successful builds-search decode, not a fixture.
+data/samples/last_good_builds.bin
+
+*.log
+.env
+service-account*.json
+
+.claude/settings.local.json

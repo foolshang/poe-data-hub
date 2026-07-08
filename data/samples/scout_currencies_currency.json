@@ -1,0 +1,302 @@
+{
+  "CurrentPage": 1,
+  "Pages": 8,
+  "Total": 38,
+  "Items": [
+    {
+      "CurrencyItemId": 18,
+      "ItemId": 295,
+      "CurrencyCategoryId": 21,
+      "ApiId": "mirror",
+      "Text": "Mirror of Kalandra",
+      "CategoryApiId": "currency",
+      "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lEdXBsaWNhdGUiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/26bc31680e/CurrencyDuplicate.png",
+      "ItemMetadata": {
+        "name": "Mirror of Kalandra",
+        "base_type": "Mirror of Kalandra",
+        "icon": "https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lEdXBsaWNhdGUiLCJ3IjoxLCJoIjoxLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/b7f5cc7884/CurrencyDuplicate.png",
+        "stack_size": 1,
+        "max_stack_size": 10,
+        "description": "Right click this item then left click an equipable non-unique item to apply it. Mirrored copies cannot be modified.",
+        "effect": [
+          "Creates a Mirrored copy of an item"
+        ]
+      },
+      "PriceLogs": [
+        {
+          "Price": 4463437.643649423,
+          "Time": "2026-07-08T00:00:00",
+          "Quantity": 244
+        },
+        {
+          "Price": 5012954.523069889,
+          "Time": "2026-07-07T00:00:00",
+          "Quantity": 908
+        },
+        {
+          "Price": 4948759.366752559,
+          "Time": "2026-07-06T00:00:00",
+          "Quantity": 944
+        },
+        {
+          "Price": 4606404.6995492345,
+          "Time": "2026-07-05T00:00:00",
+          "Quantity": 966
+        },
+        {
+          "Price": 5043393.6717845285,
+          "Time": "2026-07-04T00:00:00",
+          "Quantity": 967
+        },
+        {
+          "Price": 4810469.38078535,
+          "Time": "2026-07-03T00:00:00",
+          "Quantity": 915
+        },
+        {
+          "Price": 4424573.563158249,
+          "Time": "2026-07-02T00:00:00",
+          "Quantity": 904
+        }
+      ],
+      "CurrentPrice": 4394707.165654825,
+      "CurrentQuantity": 40
+    },
+    {
+      "CurrencyItemId": 271,
+      "ItemId": 4287,
+      "CurrencyCategoryId": 21,
+      "ApiId": "hinekoras-lock",
+      "Text": "Hinekora's Lock",
+      "CategoryApiId": "currency",
+      "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvSGluZWtvcmFzTG9jayIsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/ab2163ae06/HinekorasLock.png",
+      "ItemMetadata": {
+        "name": "Hinekora's Lock",
+        "base_type": "Hinekora's Lock",
+        "icon": "https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvSGluZWtvcmFzTG9jayIsInciOjEsImgiOjEsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/40f6bbbb39/HinekorasLock.png",
+        "stack_size": 1,
+        "max_stack_size": 10,
+        "description": "Right click this item then left click an item to apply it.",
+        "effect": [
+          "Allows an item to foresee the result of the next Currency item used on it\nModifying the item in any way removes the ability to foresee"
+        ]
+      },
+      "PriceLogs": [
+        {
+          "Price": 975465.1379383527,
+          "Time": "2026-07-08T00:00:00",
+          "Quantity": 580
+        },
+        {
+          "Price": 1021933.2604568665,
+          "Time": "2026-07-07T00:00:00",
+          "Quantity": 2349
+        },
+        {
+          "Price": 1008249.8463132292,
+          "Time": "2026-07-06T00:00:00",
+          "Quantity": 2393
+        },
+        {
+          "Price": 971552.5809363615,
+          "Time": "2026-07-05T00:00:00",
+          "Quantity": 2652
+        },
+        {
+          "Price": 1032989.2773289516,
+          "Time": "2026-07-04T00:00:00",
+          "Quantity": 2716
+        },
+        {
+          "Price": 1016731.190929222,
+          "Time": "2026-07-03T00:00:00",
+          "Quantity": 2458
+        },
+        {
+          "Price": 932806.1901466218,
+          "Time": "2026-07-02T00:00:00",
+          "Quantity": 2448
+        }
+      ],
+      "CurrentPrice": 994498.468434879,
+      "CurrentQuantity": 72
+    },
+    {
+      "CurrencyItemId": 17,
+      "ItemId": 294,
+      "CurrencyCategoryId": 21,
+      "ApiId": "fracturing-orb",
+      "Text": "Fracturing Orb",
+      "CategoryApiId": "currency",
+      "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvRnJhY3R1cmluZ09yYiIsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/8b85ed1dc2/FracturingOrb.png",
+      "ItemMetadata": {
+        "name": "Fracturing Orb",
+        "base_type": "Fracturing Orb",
+        "icon": "https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvRnJhY3R1cmluZ09yYiIsInciOjEsImgiOjEsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/c88bcda072/FracturingOrb.png",
+        "stack_size": 1,
+        "max_stack_size": 20,
+        "description": "Right click this item then left click a rare item to apply it. Cannot be used on Fractured items.",
+        "effect": [
+          "Fracture a random modifier on a rare item with at least 4 modifiers, locking it in place."
+        ]
+      },
+      "PriceLogs": [
+        {
+          "Price": 7838.823424318582,
+          "Time": "2026-07-08T00:00:00",
+          "Quantity": 22714
+        },
+        {
+          "Price": 7881.941045824885,
+          "Time": "2026-07-07T00:00:00",
+          "Quantity": 92112
+        },
+        {
+          "Price": 9011.874025235542,
+          "Time": "2026-07-06T00:00:00",
+          "Quantity": 98764
+        },
+        {
+          "Price": 10032.239223540057,
+          "Time": "2026-07-05T00:00:00",
+          "Quantity": 105728
+        },
+        {
+          "Price": 8112.181660817358,
+          "Time": "2026-07-04T00:00:00",
+          "Quantity": 102390
+        },
+        {
+          "Price": 5401.77810838451,
+          "Time": "2026-07-03T00:00:00",
+          "Quantity": 113061
+        },
+        {
+          "Price": 4322.016004313397,
+          "Time": "2026-07-02T00:00:00",
+          "Quantity": 122811
+        }
+      ],
+      "CurrentPrice": 8096.065830149445,
+      "CurrentQuantity": 3083
+    },
+    {
+      "CurrencyItemId": 266,
+      "ItemId": 4277,
+      "CurrencyCategoryId": 21,
+      "ApiId": "perfect-chaos-orb",
+      "Text": "Perfect Chaos Orb",
+      "CategoryApiId": "currency",
+      "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxSYXJlIiwic2NhbGUiOjEsInJlYWxtIjoicG9lMiJ9XQ/c0ca392a78/CurrencyRerollRare.png",
+      "ItemMetadata": {
+        "name": "Perfect Chaos Orb",
+        "base_type": "Perfect Chaos Orb",
+        "icon": "https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxSYXJlIiwidyI6MSwiaCI6MSwic2NhbGUiOjEsInJlYWxtIjoicG9lMiJ9XQ/20cd0159b7/CurrencyRerollRare.png",
+        "stack_size": 1,
+        "max_stack_size": 20,
+        "description": "Right click this item then left click a rare item to apply it.",
+        "effect": [
+          "Removes a random modifier and augments a Rare item with a new random modifier"
+        ]
+      },
+      "PriceLogs": [
+        {
+          "Price": 5458.354412865302,
+          "Time": "2026-07-08T00:00:00",
+          "Quantity": 37982
+        },
+        {
+          "Price": 5114.6853019438495,
+          "Time": "2026-07-07T00:00:00",
+          "Quantity": 170824
+        },
+        {
+          "Price": 4454.606985823753,
+          "Time": "2026-07-06T00:00:00",
+          "Quantity": 172336
+        },
+        {
+          "Price": 4106.166336291701,
+          "Time": "2026-07-05T00:00:00",
+          "Quantity": 202187
+        },
+        {
+          "Price": 4802.324645982392,
+          "Time": "2026-07-04T00:00:00",
+          "Quantity": 177363
+        },
+        {
+          "Price": 4969.661491930771,
+          "Time": "2026-07-03T00:00:00",
+          "Quantity": 176619
+        },
+        {
+          "Price": 4063.3443114941,
+          "Time": "2026-07-02T00:00:00",
+          "Quantity": 180239
+        }
+      ],
+      "CurrentPrice": 5344.80629673629,
+      "CurrentQuantity": 5379
+    },
+    {
+      "CurrencyItemId": 270,
+      "ItemId": 4285,
+      "CurrencyCategoryId": 21,
+      "ApiId": "perfect-exalted-orb",
+      "Text": "Perfect Exalted Orb",
+      "CategoryApiId": "currency",
+      "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lBZGRNb2RUb1JhcmUiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/ad7c366789/CurrencyAddModToRare.png",
+      "ItemMetadata": {
+        "name": "Perfect Exalted Orb",
+        "base_type": "Perfect Exalted Orb",
+        "icon": "https://web.poecdn.com/gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lBZGRNb2RUb1JhcmUiLCJ3IjoxLCJoIjoxLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/4ef5836606/CurrencyAddModToRare.png",
+        "stack_size": 1,
+        "max_stack_size": 20,
+        "description": "Right click this item then left click a rare item to apply it. Rare items can have up to six random modifiers.",
+        "effect": [
+          "Augments a Rare item with a new random modifier"
+        ]
+      },
+      "PriceLogs": [
+        {
+          "Price": 2087.844172017334,
+          "Time": "2026-07-08T00:00:00",
+          "Quantity": 60931
+        },
+        {
+          "Price": 1963.8122296129422,
+          "Time": "2026-07-07T00:00:00",
+          "Quantity": 284014
+        },
+        {
+          "Price": 1957.4278167232342,
+          "Time": "2026-07-06T00:00:00",
+          "Quantity": 270255
+        },
+        {
+          "Price": 1875.2830429650703,
+          "Time": "2026-07-05T00:00:00",
+          "Quantity": 303133
+        },
+        {
+          "Price": 2059.5625739128204,
+          "Time": "2026-07-04T00:00:00",
+          "Quantity": 283755
+        },
+        {
+          "Price": 1932.447186161462,
+          "Time": "2026-07-03T00:00:00",
+          "Quantity": 251754
+        },
+        {
+          "Price": 1678.28061907333,
+          "Time": "2026-07-02T00:00:00",
+          "Quantity": 273616
+        }
+      ],
+      "CurrentPrice": 2075.6227745142546,
+      "CurrentQuantity": 9945
+    }
+  ]
+}

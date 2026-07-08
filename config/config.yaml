@@ -1,0 +1,56 @@
+# poe-data-hub configuration
+
+firebase:
+  project_id: poe-hub-b4723
+  bucket: poe-data-hub
+
+# Phase 1-2: PoE2 only. PoE1 added in a later phase.
+game_versions:
+  - poe2
+
+league:
+  # Leave blank: the auto-detected non-excluded league is used as "main".
+  # Only set this when two non-excluded (non-Standard/Hardcore/Ruthless)
+  # leagues are active at once (an overlapping event league) and the
+  # auto-picked "first candidate" guess needs to be pinned to the real
+  # challenge league.
+  league_override: ""
+  cache_ttl_seconds: 43200 # 12h
+
+ggg:
+  # trade2/data/stats is the one GGG endpoint this project touches (spec 3.5).
+  # Fetched once, cached to disk, refreshed weekly.
+  stats_cache_ttl_seconds: 604800 # 7d
+
+rate_limits:
+  # seconds between requests, per host
+  "poe.ninja": 2
+  "poe2scout.com": 2
+  "www.pathofexile.com": 2
+  "api.steampowered.com": 2
+
+http:
+  max_retries: 3
+  timeout_seconds: 15
+
+schedule:
+  prices_interval_minutes: 20
+  meta_cron_hour_thailand: 2
+  # 1 = single run/day at meta_cron_hour_thailand (normal operation).
+  # >1 = that many evenly-spaced runs/day instead (bump this and restart the
+  # service during the first few days of a new league, per spec section 9).
+  meta_runs_per_day_league_start: 1
+  cleanup_hour_thailand: 4
+
+meta:
+  sample_per_slot: 100 # NOTE: poe.ninja's builds-search endpoint has no known
+                       # pagination param -- observed to always return its
+                       # default top-100 page regardless of this value. Kept
+                       # here per spec; see src/fetchers/ninja_builds.py.
+  min_mod_count: 5
+
+retention:
+  char_items_days: 90
+  meta_files_days: 30
+  failed_responses_days: 30
+  log_rotate_days: 7

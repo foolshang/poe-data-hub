@@ -1,0 +1,19 @@
+[Unit]
+Description=poe-data-hub scheduler (prices, meta, cleanup jobs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=poe-data-hub
+WorkingDirectory=/opt/poe-data-hub
+Environment=GOOGLE_APPLICATION_CREDENTIALS=/opt/poe-data-hub/data/service-account.json
+ExecStart=/opt/poe-data-hub/.venv/bin/python -m src.main --serve
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=poe-data-hub
+
+[Install]
+WantedBy=multi-user.target

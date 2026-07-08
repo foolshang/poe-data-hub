@@ -1,0 +1,88 @@
+# Archetype classification rules (spec 7.2). Edit this file to retune
+# classification without touching code — src/processing/archetyper.py just
+# walks these lists in order.
+#
+# Input per character: main_skill (gem name, may be None) + weapon base_type
+# (from the "weapon" slot item, may be None).
+# Output: one of the fixed archetype values below, or "unknown".
+#
+# Matching is case-insensitive substring matching against the main skill's
+# gem name. Order matters within each category: first match wins. Category
+# priority is fixed in code: minion > totem_trap_mine > element > (weapon
+# fallback for melee/bow/crossbow attacks) > unknown.
+
+archetypes:
+  - attack-melee
+  - attack-bow
+  - attack-crossbow
+  - spell-fire
+  - spell-cold
+  - spell-lightning
+  - spell-chaos
+  - spell-physical
+  - minion
+  - totem-trap-mine
+  - unknown
+
+# Gem name contains any of these -> "minion", regardless of weapon/element.
+minion_keywords:
+  - "Summon"
+  - "Raise"
+  - "Herald of Purity"
+  - "Spectral Wolf"
+  - "Skeletal"
+
+# Gem name contains any of these -> "totem-trap-mine".
+totem_trap_mine_keywords:
+  - "Totem"
+  - "Trap"
+  - "Mine"
+
+# Gem name contains any of these -> the matching "spell-<element>", UNLESS
+# spell_only_keywords below also matches and disagrees (elements checked in
+# this fixed order: fire, cold, lightning, chaos, physical).
+element_keywords:
+  fire:
+    - "Fire"
+    - "Ignite"
+    - "Burn"
+    - "Flame"
+    - "Ash"
+    - "Ember"
+    - "Molten"
+  cold:
+    - "Cold"
+    - "Ice"
+    - "Frost"
+    - "Freeze"
+    - "Chill"
+    - "Glacial"
+    - "Winter"
+  lightning:
+    - "Lightning"
+    - "Shock"
+    - "Storm"
+    - "Thunder"
+    - "Spark"
+    - "Galvanic"
+  chaos:
+    - "Chaos"
+    - "Poison"
+    - "Blight"
+    - "Plague"
+    - "Desecrate"
+    - "Wither"
+  physical:
+    - "Physical"
+    - "Bleed"
+    - "Rupture"
+    - "Sunder"
+
+# Fallback when the gem name carries no element/minion/totem-trap-mine
+# signal: classify as an attack archetype from the equipped weapon's base
+# type. "Bow"/"Crossbow" checked first (substring of base_type); anything
+# else with a weapon equipped falls to attack-melee.
+weapon_attack_fallback:
+  Bow: attack-bow
+  Crossbow: attack-crossbow
+  default: attack-melee
