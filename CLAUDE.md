@@ -26,6 +26,13 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   `value` + `value_currency` + `divine_value`.
 - Fetchers must validate responses before use (spec 10.1b) and never crash
   the job on a bad/empty response — log + stale-while-error instead.
+- **GGG's `trade2/data/stats` returns a persistent 403 from cloud-provider
+  IPs** (confirmed 2026-07-09 from the production GCE VM, `35.188.24.245` —
+  works fine from a residential/dev IP, blocked identically regardless of
+  User-Agent). `ModNormalizer.load()` falls back to the on-disk cache past
+  its TTL if a refresh fails, rather than crashing the whole meta job — this
+  is load-bearing on the deploy VM, don't remove it. If GGG ever unblocks
+  cloud IPs this becomes a no-op safety net, not a regression.
 
 ## Layout
 

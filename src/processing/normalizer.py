@@ -87,15 +87,27 @@ class ModNormalizer:
     def load(self, force_refresh: bool = False) -> None:
         raw = None if force_refresh else self._read_cache()
         if raw is None:
-            raw = self._fetch_and_cache()
+            try:
+                raw = self._fetch_and_cache()
+            except Exception as e:
+                stale = self._read_cache(ignore_ttl=True)
+                if stale is None:
+                    raise
+                log.warning(
+                    "normalizer: trade2 stats refresh failed (%s) -- falling back to stale disk cache "
+                    "(some environments, e.g. cloud-hosted VMs, get a persistent 403 from GGG's API even "
+                    "though it works fine from a residential IP; see CLAUDE.md)",
+                    e,
+                )
+                raw = stale
         self._build_index(raw)
 
-    def _read_cache(self) -> Optional[dict[str, Any]]:
+    def _read_cache(self, ignore_ttl: bool = False) -> Optional[dict[str, Any]]:
         if not self._cache_path.exists():
             return None
         try:
             envelope = json.loads(self._cache_path.read_text(encoding="utf-8"))
-            if time.time() - envelope.get("fetched_at", 0) > self._ttl:
+            if not ignore_ttl and time.time() - envelope.get("fetched_at", 0) > self._ttl:
                 return None
             return envelope["data"]
         except (OSError, ValueError, KeyError):

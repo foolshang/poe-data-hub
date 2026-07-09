@@ -210,6 +210,8 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
         round(normalizer.unmapped_count / normalizer.processed_count * 100, 2)
         if normalizer.processed_count else 0.0
     )
+    peak_rss_mb = _peak_memory_mb()
+    log.info("meta job: peak RSS = %s MB", peak_rss_mb if peak_rss_mb is not None else "unknown (non-Unix)")
     _update_meta_status(
         publisher,
         data=data,
@@ -222,10 +224,23 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
             "characters_failed": cache.failed_count,
             "mods_processed": normalizer.processed_count,
             "unmapped_mod_pct": unmapped_pct,
+            "peak_rss_mb": peak_rss_mb,
         },
     )
 
     return data
+
+
+def _peak_memory_mb() -> Optional[float]:
+    """Peak resident set size of this process since start, in MB. Linux's
+    `ru_maxrss` is in KB (macOS uses bytes, but this only runs on the Linux
+    deploy target); returns None on platforms without the `resource` module
+    (e.g. Windows dev machines)."""
+    try:
+        import resource
+    except ImportError:
+        return None
+    return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
 
 
 def _update_status(publisher: PricesPublisher, ok: bool, data: dict[str, Any]) -> None:

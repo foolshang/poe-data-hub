@@ -100,6 +100,46 @@ def test_unmapped_mod_is_logged_not_raised(normalizer: ModNormalizer, tmp_path):
     assert "not a real mod" in entry["text"]
 
 
+def test_stale_cache_used_when_refresh_fails(tmp_path):
+    """Regression test for the 2026-07-10 VM deploy incident: GGG's trade2
+    API returns a persistent 403 to some cloud-hosted IPs. A refresh failure
+    must fall back to whatever's on disk (even past its TTL) instead of
+    crashing the whole meta job."""
+    payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
+    cache_path = tmp_path / "stats_cache.json"
+
+    http1 = _FakeHttpClient(payload)
+    n1 = ModNormalizer(http_client=http1, cache_path=cache_path, unmapped_log_path=tmp_path / "u.log")
+    n1.load()
+
+    # Make the cache look expired, then simulate the endpoint being blocked.
+    envelope = json.loads(cache_path.read_text(encoding="utf-8"))
+    envelope["fetched_at"] = 0
+    cache_path.write_text(json.dumps(envelope), encoding="utf-8")
+
+    class _FailingHttpClient:
+        def get_json(self, url):
+            raise RuntimeError("403 Forbidden")
+
+    n2 = ModNormalizer(http_client=_FailingHttpClient(), cache_path=cache_path, unmapped_log_path=tmp_path / "u.log")
+    n2.load()  # must not raise
+
+    result = n2.normalize("+87 to maximum Life", "explicit")
+    assert result[0].stat_id == "explicit.stat_3299347043"
+
+
+def test_no_cache_and_refresh_fails_raises(tmp_path):
+    class _FailingHttpClient:
+        def get_json(self, url):
+            raise RuntimeError("403 Forbidden")
+
+    n = ModNormalizer(
+        http_client=_FailingHttpClient(), cache_path=tmp_path / "nope.json", unmapped_log_path=tmp_path / "u.log"
+    )
+    with pytest.raises(RuntimeError, match="403"):
+        n.load()
+
+
 def test_cache_is_used_on_second_load(tmp_path):
     payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
     http = _FakeHttpClient(payload)
