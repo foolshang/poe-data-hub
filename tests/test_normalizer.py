@@ -140,7 +140,7 @@ def test_no_cache_and_refresh_fails_raises(tmp_path):
         n.load()
 
 
-def test_cache_is_used_on_second_load(tmp_path):
+def test_ggg_direct_writes_disk_cache_for_later_fallback(tmp_path):
     payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
     http = _FakeHttpClient(payload)
     cache_path = tmp_path / "stats_cache.json"
@@ -148,11 +148,101 @@ def test_cache_is_used_on_second_load(tmp_path):
     n1 = ModNormalizer(http_client=http, cache_path=cache_path, unmapped_log_path=tmp_path / "u.log")
     n1.load()
     assert http.calls == 1
+    assert n1.stats_source == "ggg_direct"
+    assert cache_path.exists()
 
-    n2 = ModNormalizer(http_client=http, cache_path=cache_path, unmapped_log_path=tmp_path / "u.log")
-    n2.load()
-    assert http.calls == 1  # served from disk cache, no second fetch
+    result = n1.normalize("+87 to maximum Life", "explicit")
+    assert result[0].stat_id == "explicit.stat_3299347043"
 
+
+class _FirebaseFakeHttpClient:
+    """Distinguishes the Firebase stats-cache URL from the GGG endpoint so
+    tests can tell which tier actually served the data."""
+
+    def __init__(self, firebase_envelope=None, ggg_payload=None, firebase_should_fail=False):
+        self._firebase_envelope = firebase_envelope
+        self._ggg_payload = ggg_payload
+        self._firebase_should_fail = firebase_should_fail
+        self.firebase_calls = 0
+        self.ggg_calls = 0
+
+    def get_json(self, url):
+        if "firebase" in url or "storage.googleapis.com" in url:
+            self.firebase_calls += 1
+            if self._firebase_should_fail:
+                raise RuntimeError("404 not found")
+            return self._firebase_envelope
+        self.ggg_calls += 1
+        if self._ggg_payload is None:
+            raise RuntimeError("403 Forbidden")
+        return self._ggg_payload
+
+
+def test_firebase_used_first_when_configured(tmp_path):
+    payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FirebaseFakeHttpClient(firebase_envelope={"fetched_at": 1720000000.0, "data": payload})
+    n = ModNormalizer(
+        http_client=http, cache_path=tmp_path / "c.json", unmapped_log_path=tmp_path / "u.log",
+        firebase_stats_url="https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json",
+    )
+    n.load()
+    assert http.firebase_calls == 1
+    assert http.ggg_calls == 0
+    assert n.stats_source == "firebase"
+    assert n.stats_fetched_at == 1720000000.0
+    result = n.normalize("+87 to maximum Life", "explicit")
+    assert result[0].stat_id == "explicit.stat_3299347043"
+
+
+def test_falls_through_to_ggg_when_firebase_unavailable(tmp_path):
+    payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FirebaseFakeHttpClient(firebase_should_fail=True, ggg_payload=payload)
+    n = ModNormalizer(
+        http_client=http, cache_path=tmp_path / "c.json", unmapped_log_path=tmp_path / "u.log",
+        firebase_stats_url="https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json",
+    )
+    n.load()
+    assert http.firebase_calls == 1
+    assert http.ggg_calls == 1
+    assert n.stats_source == "ggg_direct"
+
+
+def test_firebase_bad_shape_falls_through_to_ggg(tmp_path):
+    payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FirebaseFakeHttpClient(firebase_envelope={"fetched_at": 1720000000.0, "data": {"nope": True}}, ggg_payload=payload)
+    n = ModNormalizer(
+        http_client=http, cache_path=tmp_path / "c.json", unmapped_log_path=tmp_path / "u.log",
+        firebase_stats_url="https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json",
+    )
+    n.load()
+    assert n.stats_source == "ggg_direct"
+
+
+def test_no_firebase_configured_goes_straight_to_ggg(tmp_path):
+    payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FakeHttpClient(payload)
+    n = ModNormalizer(http_client=http, cache_path=tmp_path / "c.json", unmapped_log_path=tmp_path / "u.log")
+    n.load()
+    assert n.stats_source == "ggg_direct"
+    assert http.calls == 1
+
+
+def test_disk_cache_is_last_resort_when_firebase_and_ggg_both_fail(tmp_path):
+    payload = json.loads(SAMPLE_PATH.read_text(encoding="utf-8"))
+    cache_path = tmp_path / "c.json"
+
+    # Seed the disk cache via a working GGG-direct load first.
+    n1 = ModNormalizer(http_client=_FakeHttpClient(payload), cache_path=cache_path, unmapped_log_path=tmp_path / "u.log")
+    n1.load()
+
+    # Now both Firebase and GGG fail -- must fall back to the seeded disk cache.
+    http2 = _FirebaseFakeHttpClient(firebase_should_fail=True, ggg_payload=None)
+    n2 = ModNormalizer(
+        http_client=http2, cache_path=cache_path, unmapped_log_path=tmp_path / "u.log",
+        firebase_stats_url="https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json",
+    )
+    n2.load()  # must not raise
+    assert n2.stats_source == "disk_cache_stale"
     result = n2.normalize("+87 to maximum Life", "explicit")
     assert result[0].stat_id == "explicit.stat_3299347043"
 

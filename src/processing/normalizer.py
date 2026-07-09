@@ -1,11 +1,22 @@
 """Normalizes item mod text into stat_id-keyed templates (spec section 7.1).
 
-Loads the GGG trade2 `data/stats` table — the one and only GGG endpoint this
-project touches (see CLAUDE.md) — and caches it to disk for up to 7 days.
-Every raw mod line scraped from an item (via ninja_chars, later phase) is
-matched against this table by replacing its numeric rolls with `#` and doing
-an exact lookup against the known template text: GGG's own table already
+Loads the GGG trade2 `data/stats` table and caches it to disk for up to 7
+days. Every raw mod line scraped from an item (via ninja_chars) is matched
+against this table by replacing its numeric rolls with `#` and doing an
+exact lookup against the known template text: GGG's own table already
 represents placeholders as literal `#`, so no per-template regex is needed.
+
+Load order (added 2026-07-10, see CLAUDE.md): **Firebase
+(`internal/stats_cache.json`, refreshed weekly by a GitHub Actions workflow)
+-> direct GGG fetch -> stale on-disk cache as a last resort**. Firebase is
+checked first every call, not just when the local disk cache has expired --
+GGG permanently blocks requests to `trade2/data/stats` from GCP IPs (a 403,
+confirmed live from the production VM), so the direct-GGG tier only ever
+succeeds from non-cloud environments; Firebase is the primary source for
+anything running on the deploy VM. The disk-cache tier ignores its own TTL
+entirely (any stale data beats crashing the whole meta job) since GGG rarely
+removes a `stat_id`, only adds new ones -- staleness there mostly means
+"missing recently-added stats", not "wrong mappings".
 """
 from __future__ import annotations
 
@@ -65,6 +76,11 @@ def _skeletonize(text: str, pattern: "re.Pattern[str]") -> tuple[str, list[float
     return pattern.sub(repl, text), values
 
 
+def _validate_stats_shape(data: Any) -> None:
+    if not isinstance(data, dict) or not isinstance(data.get("result"), list) or not data["result"]:
+        raise ValueError("unexpected trade2 stats shape")
+
+
 class ModNormalizer:
     def __init__(
         self,
@@ -72,6 +88,7 @@ class ModNormalizer:
         cache_path: Path = DEFAULT_CACHE_PATH,
         cache_ttl_seconds: float = 7 * 24 * 60 * 60,
         unmapped_log_path: Path = DEFAULT_UNMAPPED_LOG_PATH,
+        firebase_stats_url: Optional[str] = None,
     ):
         self._http = http_client
         self._cache_path = cache_path
@@ -79,48 +96,91 @@ class ModNormalizer:
         self._ttl = cache_ttl_seconds
         self._unmapped_log_path = unmapped_log_path
         self._unmapped_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._firebase_stats_url = firebase_stats_url
         # mod_kind -> {template text ("+# to maximum Life"): stat_id}
         self._by_kind: dict[str, dict[str, str]] = {}
         self.processed_count = 0
         self.unmapped_count = 0
+        # Populated by load(): where the stats table came from and when that
+        # copy was originally fetched (spec: exposed for status.json's
+        # stats_cache_stale monitoring).
+        self.stats_source: Optional[str] = None
+        self.stats_fetched_at: Optional[float] = None
 
     def load(self, force_refresh: bool = False) -> None:
-        raw = None if force_refresh else self._read_cache()
+        raw: Optional[dict[str, Any]] = None
+        fetched_at: Optional[float] = None
+        source: Optional[str] = None
+
+        if not force_refresh:
+            firebase_result = self._try_firebase()
+            if firebase_result is not None:
+                raw, fetched_at = firebase_result
+                source = "firebase"
+
         if raw is None:
             try:
-                raw = self._fetch_and_cache()
+                raw = self._fetch_from_ggg()
+                fetched_at = time.time()
+                source = "ggg_direct"
+                self._write_disk_cache(raw, fetched_at)
             except Exception as e:
-                stale = self._read_cache(ignore_ttl=True)
-                if stale is None:
+                cached = self._read_disk_cache()
+                if cached is None:
                     raise
+                raw, fetched_at = cached
+                source = "disk_cache_stale"
+                cache_age_days = round((time.time() - fetched_at) / 86400, 1)
                 log.warning(
-                    "normalizer: trade2 stats refresh failed (%s) -- falling back to stale disk cache "
-                    "(some environments, e.g. cloud-hosted VMs, get a persistent 403 from GGG's API even "
-                    "though it works fine from a residential IP; see CLAUDE.md)",
-                    e,
+                    "normalizer: trade2 stats unavailable from Firebase and GGG (%s) -- "
+                    "falling back to disk cache (%s days old; some environments, e.g. cloud-hosted "
+                    "VMs, get a persistent 403 from GGG's API even though it works fine from a "
+                    "residential IP; see CLAUDE.md)",
+                    e, cache_age_days,
                 )
-                raw = stale
+
+        self.stats_source = source
+        self.stats_fetched_at = fetched_at
         self._build_index(raw)
 
-    def _read_cache(self, ignore_ttl: bool = False) -> Optional[dict[str, Any]]:
+    def _try_firebase(self) -> Optional[tuple[dict[str, Any], float]]:
+        if not self._firebase_stats_url:
+            return None
+        try:
+            envelope = self._http.get_json(self._firebase_stats_url)
+            data = envelope["data"]
+            fetched_at = float(envelope["fetched_at"])
+            _validate_stats_shape(data)
+        except Exception as e:
+            log.warning("normalizer: could not load stats from Firebase (%s), falling back", e)
+            return None
+        self._write_disk_cache(data, fetched_at)
+        return data, fetched_at
+
+    def _fetch_from_ggg(self) -> dict[str, Any]:
+        data = self._http.get_json(STATS_URL)
+        _validate_stats_shape(data)
+        return data
+
+    def _read_disk_cache(self) -> Optional[tuple[dict[str, Any], float]]:
+        """Last-resort tier: whatever's on disk, however old -- ignores TTL
+        entirely, since Firebase (refreshed weekly by CI) is the primary
+        freshness guarantee now, not this local file."""
         if not self._cache_path.exists():
             return None
         try:
             envelope = json.loads(self._cache_path.read_text(encoding="utf-8"))
-            if not ignore_ttl and time.time() - envelope.get("fetched_at", 0) > self._ttl:
-                return None
-            return envelope["data"]
+            return envelope["data"], float(envelope["fetched_at"])
         except (OSError, ValueError, KeyError):
-            log.warning("normalizer: could not read stats cache, will refetch", exc_info=True)
+            log.warning("normalizer: could not read disk stats cache", exc_info=True)
             return None
 
-    def _fetch_and_cache(self) -> dict[str, Any]:
-        data = self._http.get_json(STATS_URL)
-        if not isinstance(data, dict) or not isinstance(data.get("result"), list) or not data["result"]:
-            raise ValueError(f"trade2 stats validation failed: unexpected shape from {STATS_URL}")
-        envelope = {"fetched_at": time.time(), "data": data}
-        self._cache_path.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
-        return data
+    def _write_disk_cache(self, data: dict[str, Any], fetched_at: float) -> None:
+        envelope = {"fetched_at": fetched_at, "data": data}
+        try:
+            self._cache_path.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            log.warning("normalizer: could not write disk stats cache", exc_info=True)
 
     def _build_index(self, data: dict[str, Any]) -> None:
         self._by_kind = {}

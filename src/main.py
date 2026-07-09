@@ -42,6 +42,7 @@ log = logging.getLogger("poe_data_hub")
 PRICES_BLOB_PATH = "poe2/prices/latest.json"
 META_BLOB_PATH_LATEST = "poe2/meta/latest.json"
 STATUS_BLOB_PATH = "status.json"
+STATS_CACHE_BLOB_PATH = "internal/stats_cache.json"
 
 
 def _build_http_client(cfg: dict[str, Any]) -> HttpClient:
@@ -135,10 +136,14 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
     by_slot, per_slot_counts = builds_fetcher.fetch_all(snapshot)
     log.info("meta job: fetched %d slot lists: %s", len(by_slot), per_slot_counts)
 
+    firebase_bucket = cfg["firebase"]["bucket"]
     normalizer = ModNormalizer(
-        http, cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60)
+        http,
+        cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
+        firebase_stats_url=f"https://storage.googleapis.com/{firebase_bucket}/{STATS_CACHE_BLOB_PATH}",
     )
     normalizer.load()
+    log.info("meta job: trade2 stats loaded from %s (fetched_at=%s)", normalizer.stats_source, normalizer.stats_fetched_at)
     archetyper = Archetyper()
 
     chars_fetcher = NinjaCharsFetcher(http)
@@ -225,6 +230,8 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
             "mods_processed": normalizer.processed_count,
             "unmapped_mod_pct": unmapped_pct,
             "peak_rss_mb": peak_rss_mb,
+            "stats_source": normalizer.stats_source,
+            "stats_cache_fetched_at": normalizer.stats_fetched_at,
         },
     )
 
@@ -256,6 +263,28 @@ def _update_status(publisher: PricesPublisher, ok: bool, data: dict[str, Any]) -
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
 
 
+STATS_CACHE_MAX_AGE_DAYS = 30
+UNMAPPED_HISTORY_LEN = 7
+
+
+def _check_stats_cache_stale(
+    unmapped_history: list[float], stats_fetched_at: Optional[float], unmapped_pct: float
+) -> list[str]:
+    """Returns a list of human-readable reasons the stats cache looks stale
+    (empty list = looks fine). Two independent checks (spec): cache age, and
+    this run's unmapped% blowing past the recent baseline."""
+    reasons = []
+    if stats_fetched_at is not None:
+        age_days = (time.time() - stats_fetched_at) / 86400
+        if age_days > STATS_CACHE_MAX_AGE_DAYS:
+            reasons.append(f"stats cache is {age_days:.1f} days old (> {STATS_CACHE_MAX_AGE_DAYS})")
+    if unmapped_history:
+        avg = sum(unmapped_history) / len(unmapped_history)
+        if avg > 0 and unmapped_pct > 2 * avg:
+            reasons.append(f"unmapped_mod_pct {unmapped_pct} > 2x recent average {avg:.2f}")
+    return reasons
+
+
 def _update_meta_status(
     publisher: PricesPublisher,
     data: dict[str, Any],
@@ -263,18 +292,29 @@ def _update_meta_status(
     summary: dict[str, Any],
 ) -> None:
     status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
+
+    history = status.get("meta_unmapped_history", [])
+    stale_reasons = _check_stats_cache_stale(history, summary.get("stats_cache_fetched_at"), summary["unmapped_mod_pct"])
+    history.append(summary["unmapped_mod_pct"])
+    status["meta_unmapped_history"] = history[-UNMAPPED_HISTORY_LEN:]
+
     status["last_meta"] = data["generated_at"]
     status["league"] = data["league"]
     status["league_end_at"] = end_at.strftime("%Y-%m-%dT%H:%M:%SZ") if end_at else None
     status["meta_job_summary"] = summary
+    status["stats_cache_stale"] = bool(stale_reasons)
+
+    new_errors = []
+    if stale_reasons:
+        new_errors.append({"ts": data["generated_at"], "job": "meta", "detail": "stats_cache_stale: " + "; ".join(stale_reasons)})
     if summary["unmapped_mod_pct"] >= 5.0:
-        status.setdefault("errors", []).append(
-            {
-                "ts": data["generated_at"], "job": "meta",
-                "detail": f"unmapped_mod_pct={summary['unmapped_mod_pct']} >= 5% threshold",
-            }
+        new_errors.append(
+            {"ts": data["generated_at"], "job": "meta", "detail": f"unmapped_mod_pct={summary['unmapped_mod_pct']} >= 5% threshold"}
         )
+    if new_errors:
+        status.setdefault("errors", []).extend(new_errors)
         status["errors"] = status["errors"][-10:]
+
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
 
 
