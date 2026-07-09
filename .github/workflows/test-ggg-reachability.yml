@@ -1,0 +1,29 @@
+name: Test GGG reachability (temporary)
+
+# Throwaway diagnostic: checks whether GitHub Actions' hosted-runner IP can
+# reach GGG's trade2/data/stats endpoint, since GCP IPs get a permanent 403
+# (see CLAUDE.md). Manual-trigger only -- delete this workflow once the
+# question is answered either way.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show runner's outbound IP
+        run: curl -s https://ifconfig.me || true
+
+      - name: GET trade2/data/stats and report status code
+        run: |
+          code=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            -A "poe-data-hub-stats-refresh/0.1 (contact: foolshang.live@gmail.com)" \
+            "https://www.pathofexile.com/api/trade2/data/stats")
+          echo "HTTP status: $code"
+          echo "Response body (first 500 bytes):"
+          head -c 500 /tmp/resp.json
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::Non-200 response ($code) from GGG"
+            exit 1
+          fi
