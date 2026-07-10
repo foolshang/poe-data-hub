@@ -29,10 +29,22 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
 - **GGG's `trade2/data/stats` returns a persistent 403 from cloud-provider
   IPs** (confirmed 2026-07-09 from the production GCE VM, `35.188.24.245` —
   works fine from a residential/dev IP, blocked identically regardless of
-  User-Agent). `ModNormalizer.load()` falls back to the on-disk cache past
-  its TTL if a refresh fails, rather than crashing the whole meta job — this
-  is load-bearing on the deploy VM, don't remove it. If GGG ever unblocks
-  cloud IPs this becomes a no-op safety net, not a regression.
+  User-Agent). **Never add a code path that calls `trade2/data/stats`
+  directly from the deploy VM** — it will fail every time, permanently, not
+  intermittently. GitHub Actions runners were confirmed reachable instead
+  (3/3 test runs, 3 different IPs, 200 OK — see git history for
+  `.github/workflows/test-ggg-reachability.yml`, since deleted), so
+  `.github/workflows/refresh-stats.yml` (weekly cron + manual trigger) runs
+  `tools/refresh_stats.py` from there and publishes to Firebase Storage at
+  `internal/stats_cache.json`. **This Firebase copy is now the primary
+  source of the stats table for every environment** —
+  `ModNormalizer.load()`'s order is Firebase -> direct GGG fetch -> stale
+  on-disk cache (see `src/processing/normalizer.py` docstring). The
+  GitHub Actions workflow uses its own narrowly-scoped service account
+  (`stats-refresh@poe-hub-b4723.iam.gserviceaccount.com`, IAM-condition
+  restricted to the `internal/` prefix only) — deliberately not the same
+  key as the VM's `service-account.json`, so a compromised CI secret can't
+  touch `poe2/prices` or `poe2/meta`.
 
 ## Layout
 
