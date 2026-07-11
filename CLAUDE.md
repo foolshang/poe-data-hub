@@ -46,6 +46,24 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   key as the VM's `service-account.json`, so a compromised CI secret can't
   touch `poe2/prices` or `poe2/meta`.
 
+- **Monitoring is two independent layers on purpose — never collapse them
+  into one** (added 2026-07-11, after a ~23h silent outage where the VM
+  service was stopped for manual testing and nobody noticed until asked):
+  - **Layer 1** (`src/main._ping_healthcheck`, config `healthchecks.*_ping_url`):
+    the hub pings healthchecks.io itself, but only *after* a job's Firebase
+    publish + readback-verify has already succeeded — not just "the job
+    ran". Watches from the inside; catches everything (process dead, VM
+    dead, network down, job hung) *except* "the hub is alive and pinging
+    but somehow publishing stale/wrong data".
+  - **Layer 2** (`tools/heartbeat_check.py`, `.github/workflows/heartbeat.yml`,
+    hourly): a completely different provider (GitHub Actions, not
+    healthchecks.io) reads the actual public `prices/latest.json` and
+    `status.json` from the outside and checks their timestamps are recent.
+    Catches "Layer 1 says fine but the data is actually stale" and serves
+    as a backup if healthchecks.io itself has an outage.
+  - Ping/check failures in either layer must never fail the underlying job
+    (Layer 1) or need secrets (Layer 2 reads public URLs only).
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source

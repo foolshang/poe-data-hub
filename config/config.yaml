@@ -54,3 +54,12 @@ retention:
   meta_files_days: 30
   failed_responses_days: 30
   log_rotate_days: 7
+
+healthchecks:
+  # Layer-1 dead-man-switch pings (healthchecks.io or compatible), sent only
+  # after a job's Firebase publish + readback-verify succeeds -- not just
+  # "job finished". Optional: leave blank and the hub runs exactly the same,
+  # just without this layer. See CLAUDE.md for the two-layer monitoring
+  # design and recommended healthchecks.io Period/Grace settings.
+  prices_ping_url: "https://hc-ping.com/681a6116-a8f0-42d4-a7e6-3b2685099ccb"
+  meta_ping_url: "https://hc-ping.com/98f50ed8-cff3-4392-9f3a-22af3c996a44"

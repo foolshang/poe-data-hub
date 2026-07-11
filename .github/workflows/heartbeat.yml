@@ -1,0 +1,26 @@
+name: Heartbeat check
+
+# Layer 2 of two independent monitoring layers (see CLAUDE.md -- do not
+# collapse into one). Watches the actual published data from the outside,
+# via a different provider than Layer 1's healthchecks.io pings. No secrets
+# needed: everything it reads is already public.
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Check prices + meta freshness
+        run: python -m tools.heartbeat_check

@@ -55,6 +55,20 @@ def _build_http_client(cfg: dict[str, Any]) -> HttpClient:
     )
 
 
+def _ping_healthcheck(http: HttpClient, url: Optional[str], job_name: str) -> None:
+    """Layer-1 dead-man-switch ping (healthchecks.io or compatible) -- fired
+    only after this job's Firebase publish + readback-verify has already
+    succeeded, not just "the job finished" (see CLAUDE.md). `url` is
+    optional; blank/missing means this layer is off for that job, not an
+    error. A failed ping must never fail the job itself."""
+    if not url:
+        return
+    try:
+        http.get_bytes(url)
+    except Exception as e:
+        log.warning("%s job: healthcheck ping failed (%s) -- not fatal", job_name, e)
+
+
 def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
     http = _build_http_client(cfg)
 
@@ -104,6 +118,7 @@ def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
 
     publisher.publish(data, PRICES_BLOB_PATH, cache_control="public, max-age=300")
     log.info("prices job: published %d currency + %d item entries", len(data["currency"]), len(data["items"]))
+    _ping_healthcheck(http, cfg.get("healthchecks", {}).get("prices_ping_url"), "prices")
 
     _update_status(publisher, ok=(ninja_ok and scout_ok), data=data)
     return data
@@ -210,6 +225,7 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
     publisher.publish(data, META_BLOB_PATH_LATEST, cache_control="public, max-age=3600")
     publisher.publish(data, dated_path, cache_control="public, max-age=3600")
     log.info("meta job: published %d mods (%d before count>=5 filter)", len(data["mods"]), len(all_mod_counts))
+    _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
 
     unmapped_pct = (
         round(normalizer.unmapped_count / normalizer.processed_count * 100, 2)

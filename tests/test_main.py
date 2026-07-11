@@ -1,11 +1,32 @@
 """Unit tests for src/main.py's status.json staleness monitoring
-(_check_stats_cache_stale) and the meta status update flow."""
+(_check_stats_cache_stale), the meta status update flow, and the Layer-1
+healthchecks.io dead-man-switch ping helper."""
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock
 
-from src.main import UNMAPPED_HISTORY_LEN, _check_stats_cache_stale, _update_meta_status
+from src.main import UNMAPPED_HISTORY_LEN, _check_stats_cache_stale, _ping_healthcheck, _update_meta_status
 from src.storage.publisher import PricesPublisher
+
+
+def test_ping_healthcheck_noop_when_url_missing():
+    http = MagicMock()
+    _ping_healthcheck(http, None, "prices")
+    _ping_healthcheck(http, "", "prices")
+    http.get_bytes.assert_not_called()
+
+
+def test_ping_healthcheck_calls_get_bytes_when_url_set():
+    http = MagicMock()
+    _ping_healthcheck(http, "https://hc-ping.com/some-uuid", "prices")
+    http.get_bytes.assert_called_once_with("https://hc-ping.com/some-uuid")
+
+
+def test_ping_healthcheck_failure_does_not_raise():
+    http = MagicMock()
+    http.get_bytes.side_effect = RuntimeError("network blip")
+    _ping_healthcheck(http, "https://hc-ping.com/some-uuid", "meta")  # must not raise
 
 
 def test_no_reasons_when_fresh_and_in_line_with_history():
