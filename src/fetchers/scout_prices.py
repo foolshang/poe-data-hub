@@ -90,13 +90,24 @@ class ScoutPricesFetcher:
         self._failed_dir = failed_responses_dir
         self._failed_dir.mkdir(parents=True, exist_ok=True)
 
-    def fetch_all(self, league: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    def fetch_all(self, league: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        """Returns (entries, per_category) where per_category is
+        {category_name: {"ok": bool, "count": int}} (see NinjaPricesFetcher
+        .fetch_all's docstring for why -- same sample.per_category.scout
+        shape). Unlike ninja, scout fetches every category in one request
+        (spec 3.2), so there's no per-category fetch/skip step -- every
+        category name that shows up in the response is "ok": True by
+        construction. A category configured in _CATEGORY_INFO but absent
+        from this league's response simply won't appear here at all (not
+        reported as "ok": False, since scout gives no way to distinguish
+        "this category doesn't exist for this league" from "it failed")."""
         div_price, chaos_div_price = self._fetch_rates(league)
         entries = self._fetch_items(league, div_price, chaos_div_price)
-        counts: dict[str, int] = {}
+        per_category: dict[str, dict[str, Any]] = {}
         for e in entries:
-            counts[e["category"]] = counts.get(e["category"], 0) + 1
-        return entries, counts
+            cat = per_category.setdefault(e["category"], {"ok": True, "count": 0})
+            cat["count"] += 1
+        return entries, per_category
 
     def _fetch_rates(self, league: str) -> tuple[float, Optional[float]]:
         url = f"{_BASE}/Leagues"

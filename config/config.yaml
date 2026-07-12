@@ -4,9 +4,10 @@ firebase:
   project_id: poe-hub-b4723
   bucket: poe-data-hub
 
-# Phase 1-2: PoE2 only. PoE1 added in a later phase.
+# Phase 7: PoE1 prices added alongside PoE2 (meta is still PoE2-only).
 game_versions:
   - poe2
+  - poe1
 
 league:
   # Leave blank: the auto-detected non-excluded league is used as "main".
@@ -14,7 +15,15 @@ league:
   # leagues are active at once (an overlapping event league) and the
   # auto-picked "first candidate" guess needs to be pinned to the real
   # challenge league.
-  league_override: ""
+  poe2_override: ""
+  # PoE1 currently has exactly this situation: poe.ninja's league list has
+  # both "Ancestors" (the id for the "Return of the Ancients" time-limited
+  # event) and "Mirage" (the real 3.28 challenge league) active, and
+  # nothing in the API flags which is which -- "Ancestors" alphabetically
+  # sorts first, so the auto-guess picks it as "main", which is backwards.
+  # Confirmed via web search 2026-07-05 (see Bot-Poe-Discord's price.py) --
+  # Mirage is main, Ancestors is the event layered on top of it.
+  poe1_override: "Mirage"
   cache_ttl_seconds: 43200 # 12h
 
 ggg:

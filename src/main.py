@@ -32,17 +32,34 @@ from src.processing.aggregator import aggregate_jewels, aggregate_slot, compute_
 from src.processing.archetyper import Archetyper
 from src.processing.normalizer import ModNormalizer
 from src.storage.local_db import LocalDb
-from src.storage.publisher import PricesPublisher, build_meta_schema, build_prices_schema
+from src.storage.publisher import (
+    PricesPublisher,
+    build_index_schema,
+    build_meta_schema,
+    build_prices_schema,
+    sanitize_league_filename,
+)
 from src.utils.config import load_config
 from src.utils.http_client import HttpClient
 from src.utils.rate_limiter import RateLimiter
 
 log = logging.getLogger("poe_data_hub")
 
-PRICES_BLOB_PATH = "poe2/prices/latest.json"
 META_BLOB_PATH_LATEST = "poe2/meta/latest.json"
 STATUS_BLOB_PATH = "status.json"
 STATS_CACHE_BLOB_PATH = "internal/stats_cache.json"
+
+
+def _prices_blob_path(game: str) -> str:
+    return f"{game}/prices/latest.json"
+
+
+def _event_blob_path(game: str, slug: str) -> str:
+    return f"{game}/prices/events/{slug}.json"
+
+
+def _index_blob_path(game: str) -> str:
+    return f"{game}/prices/index.json"
 
 
 def _build_http_client(cfg: dict[str, Any]) -> HttpClient:
@@ -69,59 +86,140 @@ def _ping_healthcheck(http: HttpClient, url: Optional[str], job_name: str) -> No
         log.warning("%s job: healthcheck ping failed (%s) -- not fatal", job_name, e)
 
 
-def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
-    http = _build_http_client(cfg)
-
-    league_cfg = cfg.get("league", {})
-    detector = LeagueDetector(
-        http,
-        game="poe2",
-        league_override=league_cfg.get("league_override", ""),
-        cache_ttl_seconds=league_cfg.get("cache_ttl_seconds", 12 * 60 * 60),
-    )
-    league_result = detector.detect()
-    league = league_result.main
-    log.info("prices job: detected league=%s events=%s", league, league_result.events)
-
+def _fetch_and_publish_league(
+    http: HttpClient, publisher: PricesPublisher, game: str, league: str, blob_path: str
+) -> tuple[dict[str, Any], bool]:
+    """Fetch ninja(+scout for poe2) prices for a single league and publish
+    them to `blob_path` (either the main `latest.json` or an
+    `events/{slug}.json`) using the exact same schema-8.1 shape either way."""
     ninja_entries: list[dict[str, Any]] = []
+    ninja_per_category: Optional[dict[str, dict[str, Any]]] = None
     ninja_ok = True
     try:
-        ninja_entries, ninja_counts = NinjaPricesFetcher(http).fetch_all(league)
-        log.info("prices job: ninja fetched %d entries across %d categories", len(ninja_entries), len(ninja_counts))
+        ninja_entries, ninja_per_category = NinjaPricesFetcher(http, game=game).fetch_all(league)
+        failed_categories = [c for c, v in ninja_per_category.items() if not v["ok"]]
+        log.info(
+            "prices job(%s/%s): ninja fetched %d entries across %d categories (%d failed: %s)",
+            game, league, len(ninja_entries), len(ninja_per_category), len(failed_categories), failed_categories,
+        )
     except Exception as e:
         ninja_ok = False
-        log.error("prices job: ninja fetch failed entirely: %s", e, exc_info=True)
+        log.error("prices job(%s/%s): ninja fetch failed entirely: %s", game, league, e, exc_info=True)
 
-    scout_entries: list[dict[str, Any]] = []
-    scout_ok = True
-    try:
-        scout_entries, scout_counts = ScoutPricesFetcher(http).fetch_all(league)
-        log.info("prices job: scout fetched %d entries across %d categories", len(scout_entries), len(scout_counts))
-    except Exception as e:
-        scout_ok = False
-        log.error("prices job: scout fetch failed entirely: %s", e, exc_info=True)
+    # poe2scout.com is PoE2-only (spec 3.2) -- PoE1 never queries it, so its
+    # sources-status key is omitted for poe1 rather than faked (see
+    # build_prices_schema's uses_scout handling).
+    scout_entries: Optional[list[dict[str, Any]]] = None
+    scout_per_category: Optional[dict[str, dict[str, Any]]] = None
+    scout_ok: Optional[bool] = None
+    scout_bucket_of = None
+    if game == "poe2":
+        scout_entries = []
+        scout_ok = True
+        try:
+            scout_entries, scout_per_category = ScoutPricesFetcher(http).fetch_all(league)
+            log.info(
+                "prices job(%s/%s): scout fetched %d entries across %d categories",
+                game, league, len(scout_entries), len(scout_per_category),
+            )
+        except Exception as e:
+            scout_ok = False
+            log.error("prices job(%s/%s): scout fetch failed entirely: %s", game, league, e, exc_info=True)
+        scout_bucket_of = scout_prices.category_bucket
 
-    firebase_cfg = cfg["firebase"]
-    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
-
-    previous = publisher.fetch_previous(PRICES_BLOB_PATH)
+    previous = publisher.fetch_previous(blob_path)
     data = build_prices_schema(
         league=league,
         ninja_entries=ninja_entries,
         ninja_ok=ninja_ok,
-        ninja_bucket_of=ninja_prices.category_bucket,
+        ninja_bucket_of=lambda c: ninja_prices.category_bucket(c, game=game),
         scout_entries=scout_entries,
         scout_ok=scout_ok,
-        scout_bucket_of=scout_prices.category_bucket,
+        scout_bucket_of=scout_bucket_of,
         previous=previous,
+        ninja_per_category=ninja_per_category,
+        scout_per_category=scout_per_category,
+    )
+    publisher.publish(data, blob_path, cache_control="public, max-age=300")
+    log.info(
+        "prices job(%s/%s): published %d currency + %d item entries -> %s",
+        game, league, len(data["currency"]), len(data["items"]), blob_path,
     )
 
-    publisher.publish(data, PRICES_BLOB_PATH, cache_control="public, max-age=300")
-    log.info("prices job: published %d currency + %d item entries", len(data["currency"]), len(data["items"]))
+    ok = ninja_ok and (scout_ok if scout_ok is not None else True)
+    return data, ok
+
+
+def _run_prices_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str) -> dict[str, Any]:
+    league_cfg = cfg.get("league", {})
+    detector = LeagueDetector(
+        http,
+        game=game,
+        league_override=league_cfg.get(f"{game}_override", ""),
+        cache_ttl_seconds=league_cfg.get("cache_ttl_seconds", 12 * 60 * 60),
+    )
+    league_result = detector.detect()
+    log.info("prices job(%s): detected league=%s events=%s", game, league_result.main, league_result.events)
+
+    main_data, main_ok = _fetch_and_publish_league(http, publisher, game, league_result.main, _prices_blob_path(game))
+
+    events_index: list[dict[str, str]] = []
+    events_ok = True
+    for event_league in league_result.events:
+        try:
+            slug = sanitize_league_filename(event_league)
+            event_data, event_ok = _fetch_and_publish_league(
+                http, publisher, game, event_league, _event_blob_path(game, slug)
+            )
+            events_index.append(
+                {"league": event_league, "path": _event_blob_path(game, slug), "generated_at": event_data["generated_at"]}
+            )
+            events_ok = events_ok and event_ok
+        except Exception as e:
+            events_ok = False
+            log.error("prices job(%s): event league %s failed entirely: %s", game, event_league, e, exc_info=True)
+
+    index_data = build_index_schema(
+        main_league=league_result.main,
+        main_path=_prices_blob_path(game),
+        main_generated_at=main_data["generated_at"],
+        events=events_index,
+    )
+    publisher.publish(index_data, _index_blob_path(game), cache_control="public, max-age=300")
+    log.info("prices job(%s): published index with %d event league(s)", game, len(events_index))
+
+    return {
+        "ok": main_ok and events_ok,
+        "league": league_result.main,
+        "events": league_result.events,
+        "sources": main_data["sources"],
+        "generated_at": main_data["generated_at"],
+    }
+
+
+def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
+    http = _build_http_client(cfg)
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+
+    games = cfg.get("game_versions", ["poe2"])
+    per_game: dict[str, dict[str, Any]] = {}
+    overall_ok = True
+    for game in games:
+        try:
+            per_game[game] = _run_prices_for_game(http, publisher, cfg, game)
+            overall_ok = overall_ok and per_game[game]["ok"]
+        except Exception as e:
+            overall_ok = False
+            log.error("prices job(%s): failed entirely: %s", game, e, exc_info=True)
+
+    # One Layer-1 ping per overall job run, not per game/league -- it means
+    # "the prices job ran and published something", same semantics as before
+    # PoE1/events existed (see CLAUDE.md two-layer monitoring design).
     _ping_healthcheck(http, cfg.get("healthchecks", {}).get("prices_ping_url"), "prices")
 
-    _update_status(publisher, ok=(ninja_ok and scout_ok), data=data)
-    return data
+    _update_status(publisher, ok=overall_ok, per_game=per_game)
+    return per_game
 
 
 def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -132,7 +230,7 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
     detector = LeagueDetector(
         http,
         game="poe2",
-        league_override=league_cfg.get("league_override", ""),
+        league_override=league_cfg.get("poe2_override", ""),
         cache_ttl_seconds=league_cfg.get("cache_ttl_seconds", 12 * 60 * 60),
     )
     league_result = detector.detect()
@@ -266,14 +364,27 @@ def _peak_memory_mb() -> Optional[float]:
     return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
 
 
-def _update_status(publisher: PricesPublisher, ok: bool, data: dict[str, Any]) -> None:
+def _update_status(publisher: PricesPublisher, ok: bool, per_game: dict[str, dict[str, Any]]) -> None:
+    """Nested per-game shape (`status["prices"][game]`) since phase 7 -- a
+    game that failed entirely this run (not present in `per_game`) simply
+    keeps its last-known status entry untouched, which is the same
+    stale-while-error behavior the per-entry `"stale": true` price fields
+    already use. tools/heartbeat_check.py only reads `status["last_meta"]`
+    and prices/latest.json's own generated_at directly, never this key, so
+    this restructuring doesn't affect it."""
     status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
-    status["last_prices"] = data["generated_at"]
-    status["league"] = data["league"]
-    status["sources"] = data["sources"]
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status.setdefault("prices", {})
+    for game, result in per_game.items():
+        status["prices"][game] = {
+            "generated_at": result["generated_at"],
+            "league": result["league"],
+            "events": result["events"],
+            "sources": result["sources"],
+        }
     if not ok:
         status.setdefault("errors", []).append(
-            {"ts": data["generated_at"], "job": "prices", "detail": data["sources"]}
+            {"ts": now, "job": "prices", "detail": {g: r["sources"] for g, r in per_game.items()}}
         )
         status["errors"] = status["errors"][-10:]
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
@@ -336,8 +447,10 @@ def _update_meta_status(
 
 def run_cleanup_once(cfg: dict[str, Any]) -> None:
     """Daily cleanup (spec 9): char_items > 90d, meta/*.json on Firebase
-    > 30d (never "latest.json"), data/failed_responses/* > 30d. Each step is
-    independent and best-effort — one failing doesn't block the others."""
+    > 30d (never "latest.json"), data/failed_responses/* > 30d, and
+    (phase 7) event-league price files for leagues that are no longer
+    active. Each step is independent and best-effort — one failing doesn't
+    block the others."""
     retention_cfg = cfg.get("retention", {})
 
     db = LocalDb()
@@ -358,6 +471,28 @@ def run_cleanup_once(cfg: dict[str, Any]) -> None:
         Path("data/failed_responses"), older_than_days=retention_cfg.get("failed_responses_days", 30)
     )
     log.info("cleanup job: deleted %d old failed_response files", deleted_failed)
+
+    http = _build_http_client(cfg)
+    league_cfg = cfg.get("league", {})
+    for game in cfg.get("game_versions", ["poe2"]):
+        try:
+            detector = LeagueDetector(
+                http,
+                game=game,
+                league_override=league_cfg.get(f"{game}_override", ""),
+                cache_ttl_seconds=league_cfg.get("cache_ttl_seconds", 12 * 60 * 60),
+            )
+            active_events = detector.detect().events
+        except Exception as e:
+            log.warning(
+                "cleanup job(%s): could not determine active event leagues (%s) -- "
+                "skipping event-file cleanup this run rather than risk deleting a live one",
+                game, e,
+            )
+            continue
+        keep = frozenset(f"{sanitize_league_filename(ev)}.json" for ev in active_events)
+        deleted_events = publisher.delete_blobs_not_in(f"{game}/prices/events/", keep_names=keep)
+        log.info("cleanup job(%s): deleted %d stale event price file(s), kept %d active", game, deleted_events, len(keep))
 
 
 def _cleanup_old_local_files(directory: Path, older_than_days: int) -> int:

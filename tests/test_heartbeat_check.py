@@ -41,37 +41,111 @@ def test_check_meta_freshness_flags_when_stale():
     assert "30.0 hours old" in problem
 
 
+def test_check_per_category_health_ok_when_all_ok():
+    per_category = {"Currency": {"ok": True, "count": 5}, "Fragment": {"ok": True, "count": 2}}
+    assert heartbeat_check.check_per_category_health("ninja", per_category) is None
+
+
+def test_check_per_category_health_ok_when_empty():
+    assert heartbeat_check.check_per_category_health("ninja", {}) is None
+
+
+def test_check_per_category_health_flags_when_more_than_half_failing():
+    per_category = {
+        "Currency": {"ok": False, "count": 0},
+        "Fragment": {"ok": False, "count": 0},
+        "Rune": {"ok": False, "count": 0},
+        "Essence": {"ok": True, "count": 5},
+    }
+    problem = heartbeat_check.check_per_category_health("ninja", per_category)
+    assert problem is not None
+    assert "3/4" in problem
+
+
+def test_check_per_category_health_not_flagged_at_exactly_half():
+    per_category = {
+        "Currency": {"ok": False, "count": 0},
+        "Fragment": {"ok": False, "count": 0},
+        "Rune": {"ok": True, "count": 5},
+        "Essence": {"ok": True, "count": 5},
+    }
+    assert heartbeat_check.check_per_category_health("ninja", per_category) is None
+
+
+def _fresh_prices_resp(now, per_category_by_source=None):
+    resp = MagicMock()
+    payload = {"generated_at": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if per_category_by_source is not None:
+        payload["sample"] = {"per_category": per_category_by_source}
+    resp.json.return_value = payload
+    return resp
+
+
 def test_run_returns_0_when_both_fresh():
     now = datetime.now(timezone.utc)
-    prices_resp = MagicMock()
-    prices_resp.json.return_value = {"generated_at": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[prices_resp, status_resp]):
+    # order: poe2 prices, poe1 prices, status (PRICES_URLS dict order + status)
+    with patch("requests.get", side_effect=[_fresh_prices_resp(now), _fresh_prices_resp(now), status_resp]):
         assert heartbeat_check.run() == 0
 
 
-def test_run_returns_1_when_prices_stale():
+def test_run_returns_1_when_poe2_prices_stale():
     now = datetime.now(timezone.utc)
-    prices_resp = MagicMock()
-    prices_resp.json.return_value = {"generated_at": (now - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    stale_resp = MagicMock()
+    stale_resp.json.return_value = {"generated_at": (now - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")}
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[prices_resp, status_resp]):
+    with patch("requests.get", side_effect=[stale_resp, _fresh_prices_resp(now), status_resp]):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe1_prices_stale():
+    now = datetime.now(timezone.utc)
+    stale_resp = MagicMock()
+    stale_resp.json.return_value = {"generated_at": (now - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    with patch("requests.get", side_effect=[_fresh_prices_resp(now), stale_resp, status_resp]):
         assert heartbeat_check.run() == 1
 
 
 def test_run_returns_1_when_meta_stale():
     now = datetime.now(timezone.utc)
-    prices_resp = MagicMock()
-    prices_resp.json.return_value = {"generated_at": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=40)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[prices_resp, status_resp]):
+    with patch("requests.get", side_effect=[_fresh_prices_resp(now), _fresh_prices_resp(now), status_resp]):
         assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe2_ninja_categories_mostly_failing():
+    now = datetime.now(timezone.utc)
+    degraded = _fresh_prices_resp(now, per_category_by_source={
+        "ninja": {
+            "Currency": {"ok": False, "count": 0},
+            "Fragment": {"ok": False, "count": 0},
+            "Rune": {"ok": True, "count": 5},
+        },
+    })
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    with patch("requests.get", side_effect=[degraded, _fresh_prices_resp(now), status_resp]):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_0_when_categories_all_ok():
+    now = datetime.now(timezone.utc)
+    healthy = _fresh_prices_resp(now, per_category_by_source={"ninja": {"Currency": {"ok": True, "count": 5}}})
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    with patch("requests.get", side_effect=[healthy, _fresh_prices_resp(now), status_resp]):
+        assert heartbeat_check.run() == 0
 
 
 def test_run_returns_1_when_fetch_fails():
@@ -80,10 +154,11 @@ def test_run_returns_1_when_fetch_fails():
 
 
 def test_run_returns_1_when_response_missing_expected_key():
-    prices_resp = MagicMock()
-    prices_resp.json.return_value = {"not_generated_at": "oops"}
+    now = datetime.now(timezone.utc)
+    bad_resp = MagicMock()
+    bad_resp.json.return_value = {"not_generated_at": "oops"}
     status_resp = MagicMock()
-    status_resp.json.return_value = {"last_meta": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    status_resp.json.return_value = {"last_meta": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[prices_resp, status_resp]):
+    with patch("requests.get", side_effect=[bad_resp, _fresh_prices_resp(now), status_resp]):
         assert heartbeat_check.run() == 1

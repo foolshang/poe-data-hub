@@ -26,14 +26,34 @@ def build_prices_schema(
     ninja_entries: list[dict[str, Any]],
     ninja_ok: bool,
     ninja_bucket_of: Callable[[str], str],
-    scout_entries: list[dict[str, Any]],
-    scout_ok: bool,
-    scout_bucket_of: Callable[[str], str],
+    scout_entries: Optional[list[dict[str, Any]]] = None,
+    scout_ok: Optional[bool] = None,
+    scout_bucket_of: Optional[Callable[[str], str]] = None,
     previous: Optional[dict[str, Any]] = None,
+    ninja_per_category: Optional[dict[str, dict[str, Any]]] = None,
+    scout_per_category: Optional[dict[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
-    """Merge ninja+scout entries into the spec-8.1 shape, applying
-    stale-while-error per source."""
-    sources_status = {"ninja": "ok" if ninja_ok else "error", "scout": "ok" if scout_ok else "error"}
+    """Merge ninja(+scout) entries into the spec-8.1 shape, applying
+    stale-while-error per source. scout_* params are optional -- PoE1 has no
+    Scout equivalent (poe2scout.com is PoE2-only), so `sources` simply omits
+    the "scout" key entirely for games that never queried it, rather than
+    reporting a fake "ok"/"error" for a source that was never asked.
+
+    `{ninja,scout}_per_category` (additive field, no schema_version bump --
+    see CLAUDE.md "additive optional fields are fine without a bump") is
+    published as `sample.per_category.{ninja,scout}`: a whole-source "ok"
+    status can hide a partial degradation (e.g. 12/23 poe.ninja categories
+    silently failing while NinjaPricesFetcher.fetch_all's own per-category
+    skip logic swallows the exceptions and still returns entries for the
+    other 11) -- this surfaces that per-category detail so monitoring can
+    catch it. Omitted per source when that source's fetch never ran
+    (ninja_ok/scout_ok False before any per-category attempt) or wasn't
+    used at all (poe1 + scout)."""
+    uses_scout = scout_ok is not None
+    sources_status: dict[str, str] = {"ninja": "ok" if ninja_ok else "error"}
+    if uses_scout:
+        sources_status["scout"] = "ok" if scout_ok else "error"
+
     currency: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
 
@@ -43,11 +63,14 @@ def build_prices_schema(
 
     if ninja_ok:
         route(ninja_entries, ninja_bucket_of)
-    if scout_ok:
-        route(scout_entries, scout_bucket_of)
+    if uses_scout and scout_ok:
+        route(scout_entries or [], scout_bucket_of)  # type: ignore[arg-type]
 
     if previous:
-        for source, ok in (("ninja", ninja_ok), ("scout", scout_ok)):
+        sources_to_check = [("ninja", ninja_ok)]
+        if uses_scout:
+            sources_to_check.append(("scout", scout_ok))
+        for source, ok in sources_to_check:
             if ok:
                 continue
             for bucket_name, bucket_list in (("currency", currency), ("items", items)):
@@ -57,14 +80,53 @@ def build_prices_schema(
                         stale_entry["stale"] = True
                         bucket_list.append(stale_entry)
 
+    per_category: dict[str, dict[str, dict[str, Any]]] = {}
+    if ninja_per_category is not None:
+        per_category["ninja"] = ninja_per_category
+    if uses_scout and scout_per_category is not None:
+        per_category["scout"] = scout_per_category
+
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "league": league,
         "sources": sources_status,
+        "sample": {"per_category": per_category},
         "currency": currency,
         "items": items,
     }
+
+
+INDEX_SCHEMA_VERSION = 1
+
+
+def build_index_schema(
+    main_league: str,
+    main_path: str,
+    main_generated_at: str,
+    events: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Build `{game}/prices/index.json` (phase 7 addition): tells consumers
+    which leagues currently have a published prices file, without needing
+    to guess or hit the (possibly stale/absent) event files directly.
+    `events` is a list of {"league", "path", "generated_at"} dicts, one per
+    currently-active event league -- empty when there's no overlapping
+    event, which is the common case."""
+    return {
+        "schema_version": INDEX_SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "main": {"league": main_league, "path": main_path, "generated_at": main_generated_at},
+        "events": events,
+    }
+
+
+def sanitize_league_filename(league_name: str) -> str:
+    """"Return of the Ancients" -> "return-of-the-ancients" -- safe for use
+    as a Firebase Storage object name segment."""
+    import re
+
+    slug = re.sub(r"[^a-z0-9]+", "-", league_name.lower()).strip("-")
+    return slug or "league"
 
 
 def build_meta_schema(
@@ -177,6 +239,25 @@ class PricesPublisher:
                     deleted += 1
         except Exception as e:
             log.warning("publisher: delete_old_blobs(%s) failed partway through: %s", prefix, e)
+        return deleted
+
+    def delete_blobs_not_in(self, prefix: str, keep_names: frozenset[str]) -> int:
+        """Delete every blob under `prefix` whose filename is NOT in
+        `keep_names` (phase 7 cleanup: event-league price files for leagues
+        that have since closed -- unlike delete_old_blobs, this is exact
+        membership against the *currently* active league set, not an age
+        heuristic, so a closed short-lived event doesn't linger and a
+        long-running one is never deleted just for being old).
+        Best-effort: logs and returns the count actually deleted, never raises."""
+        deleted = 0
+        try:
+            bucket = self._client_lazy().bucket(self._bucket_name)
+            for blob in bucket.list_blobs(prefix=prefix):
+                if Path(blob.name).name not in keep_names:
+                    blob.delete()
+                    deleted += 1
+        except Exception as e:
+            log.warning("publisher: delete_blobs_not_in(%s) failed partway through: %s", prefix, e)
         return deleted
 
     def _save_local_copy(self, blob_path: str, payload: str) -> None:

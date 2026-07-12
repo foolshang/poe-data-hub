@@ -1,24 +1,31 @@
-"""Fetch PoE2 prices from poe.ninja (spec section 3.1).
+"""Fetch prices from poe.ninja for both PoE1 and PoE2 (spec 3.1, phase 7).
 
-Endpoints confirmed live 2026-07-08 (samples saved to data/samples/):
-  GET https://poe.ninja/poe2/api/economy/exchange/current/overview?league=..&type=..
+Endpoints confirmed live (samples saved to data/samples/):
+  GET https://poe.ninja/{game}/api/economy/exchange/current/overview?league=..&type=..
       -> currency + misc "GENERAL" categories (Currency, Fragments, Runes, ...)
-  GET https://poe.ninja/poe2/api/economy/stash/current/item/overview?league=..&type=..
+  GET https://poe.ninja/{game}/api/economy/stash/current/item/overview?league=..&type=..
       -> unique/equipment categories (UniqueWeapons, UniqueArmours, ...)
+  where {game} is "poe1" or "poe2".
 
-Both return the same JSON shape:
-  {"core": {"items": [...], "rates": {"exalted": ex_per_div, "chaos": chaos_per_div, ...},
-            "primary": "divine", "secondary": ...},
-   "lines": [{"id"/"itemId": ..., "name"/"baseType": ..., "primaryValue": <divine>, ...}],
-   "items": [{"id": ..., "name": ..., "detailsId": ..., "icon": ...}]}
+PoE1 and PoE2 share the same URL shape but their *stash* responses differ in
+a way that matters (confirmed live 2026-07-11, data/samples/ninja_poe1_stash_uniqueweapon.json
+vs ninja_poe2_stash_uniqueweapons.json):
+  - PoE2 stash lines carry only `primaryValue`, converted via `core.rates`
+    (primary unit "divine", `core` present) -- same pattern as both games'
+    exchange endpoint.
+  - PoE1 stash lines carry `chaosValue` / `exaltedValue` / `divineValue`
+    directly, no `core` object at all. No rate conversion needed there.
 
-primaryValue is always denominated in `core.primary` (divine, on every
-category probed so far). We convert it into every unit `core.rates` actually
-exposes (currently exalted and chaos) instead of picking just one, per the
-"never silently drop a price unit" rule.
+Per spec 8.1, PoE2 prices are denominated in "exalted" (falling back to
+whatever the primary unit is if no exalted rate exists) while PoE1 prices
+are always denominated in "chaos" -- PoE1's exchange endpoint's own primary
+unit is "chaos" already (unlike PoE2's "divine"), so this falls out
+naturally for that endpoint; the stash endpoint's direct `chaosValue` is
+used as-is for the same reason.
 
-Category list ported from
-D:\\Projects\\PoE_Price-Trade_Checker\\poe_price_trade\\profiles.py POE2_PROFILE.
+Every entry keeps every price unit the source actually provides (never
+silently dropped, per CLAUDE.md) as extra fields beyond the required
+value/value_currency/divine_value trio.
 """
 from __future__ import annotations
 
@@ -34,9 +41,6 @@ from src.utils.http_client import HttpClient
 
 log = logging.getLogger(__name__)
 
-_BASE_EXCHANGE = "https://poe.ninja/poe2/api/economy/exchange/current/overview"
-_BASE_STASH = "https://poe.ninja/poe2/api/economy/stash/current/item/overview"
-
 DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
 
 
@@ -47,7 +51,9 @@ class CategoryConfig:
     api_type: str
 
 
-CATEGORIES: list[CategoryConfig] = [
+# Category list ported from
+# D:\Projects\PoE_Price-Trade_Checker\poe_price_trade\profiles.py POE2_PROFILE.
+POE2_CATEGORIES: list[CategoryConfig] = [
     # GENERAL (exchange_overview) -> published under "currency"
     CategoryConfig("Currency", "exchange", "Currency"),
     CategoryConfig("Fragment", "exchange", "Fragments"),
@@ -75,65 +81,134 @@ CATEGORIES: list[CategoryConfig] = [
     CategoryConfig("PrecursorTablet", "stash", "PrecursorTablets"),
 ]
 
-_CATEGORY_BUCKET: dict[str, str] = {
-    c.name: ("currency" if c.endpoint == "exchange" else "items") for c in CATEGORIES
-}
+# Ported from D:\Projects\Bot-Poe-Discord\poe-discord-bot\price.py
+# POE1_CATEGORIES (already live-validated there 2026-07-05); re-confirmed
+# live here 2026-07-11 for this project's own samples.
+POE1_CATEGORIES: list[CategoryConfig] = [
+    CategoryConfig("Currency", "exchange", "Currency"),
+    CategoryConfig("Fragment", "exchange", "Fragment"),
+    CategoryConfig("DivinationCard", "exchange", "DivinationCard"),
+    CategoryConfig("UniqueWeapon", "stash", "UniqueWeapon"),
+    CategoryConfig("UniqueArmour", "stash", "UniqueArmour"),
+    CategoryConfig("UniqueAccessory", "stash", "UniqueAccessory"),
+]
+
+CATEGORIES_BY_GAME: dict[str, list[CategoryConfig]] = {"poe2": POE2_CATEGORIES, "poe1": POE1_CATEGORIES}
 
 
-def category_bucket(category_name: str) -> str:
+def category_bucket(category_name: str, game: str = "poe2") -> str:
     """Which top-level schema-8.1 array (`currency` or `items`) a category belongs in."""
-    return _CATEGORY_BUCKET.get(category_name, "items")
+    for c in CATEGORIES_BY_GAME.get(game, POE2_CATEGORIES):
+        if c.name == category_name:
+            return "currency" if c.endpoint == "exchange" else "items"
+    return "items"
 
 
-def _url_for(cat: CategoryConfig, league: str) -> str:
-    base = _BASE_EXCHANGE if cat.endpoint == "exchange" else _BASE_STASH
+def _url_for(game: str, cat: CategoryConfig, league: str) -> str:
+    base = (
+        f"https://poe.ninja/{game}/api/economy/exchange/current/overview"
+        if cat.endpoint == "exchange"
+        else f"https://poe.ninja/{game}/api/economy/stash/current/item/overview"
+    )
     return f"{base}?league={urllib.parse.quote(league)}&type={cat.api_type}"
 
 
 class NinjaPricesFetcher:
-    def __init__(self, http_client: HttpClient, failed_responses_dir: Path = DEFAULT_FAILED_RESPONSES_DIR):
+    def __init__(
+        self,
+        http_client: HttpClient,
+        game: str = "poe2",
+        failed_responses_dir: Path = DEFAULT_FAILED_RESPONSES_DIR,
+    ):
+        if game not in CATEGORIES_BY_GAME:
+            raise ValueError(f"ninja_prices: unknown game {game!r}")
         self._http = http_client
+        self._game = game
+        self._categories = CATEGORIES_BY_GAME[game]
         self._failed_dir = failed_responses_dir
         self._failed_dir.mkdir(parents=True, exist_ok=True)
 
     def fetch_category(self, league: str, cat: CategoryConfig) -> list[dict[str, Any]]:
-        url = _url_for(cat, league)
+        url = _url_for(self._game, cat, league)
         data = self._http.get_json(url)
         self._validate(data, url, cat.name)
-        return self._parse_overview(data, cat.name)
+        return self._parse_overview(data, cat)
 
-    def fetch_all(self, league: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    def fetch_all(self, league: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        """Returns (entries, per_category) where per_category is
+        {category_name: {"ok": bool, "count": int}} for every configured
+        category -- published verbatim as sample.per_category.ninja
+        (spec 8.1) so a whole-source "ok" status can't mask a partial
+        degradation (e.g. 12/23 categories silently failing while the
+        source as a whole still reports "ok"). "ok": False means this
+        category's fetch/validate raised; "ok": True with "count": 0 means
+        it fetched fine but the source legitimately returned zero lines."""
         entries: list[dict[str, Any]] = []
-        counts: dict[str, int] = {}
-        for cat in CATEGORIES:
+        per_category: dict[str, dict[str, Any]] = {}
+        for cat in self._categories:
             try:
                 batch = self.fetch_category(league, cat)
-                counts[cat.name] = len(batch)
+                per_category[cat.name] = {"ok": True, "count": len(batch)}
                 entries.extend(batch)
             except Exception as e:
-                counts[cat.name] = 0
-                log.warning("ninja_prices: skip category %s: %s", cat.name, e)
-        return entries, counts
+                per_category[cat.name] = {"ok": False, "count": 0}
+                log.warning("ninja_prices(%s): skip category %s: %s", self._game, cat.name, e)
+        return entries, per_category
 
     def _validate(self, data: Any, url: str, category: str) -> None:
         if not isinstance(data, dict) or not isinstance(data.get("lines"), list):
             self._dump_failed_response(data, url, category)
-            raise ValueError(f"ninja_prices: response validation failed for {category} ({url})")
+            raise ValueError(f"ninja_prices({self._game}): response validation failed for {category} ({url})")
         if len(data["lines"]) == 0:
             log.warning(
-                "ninja_prices: %s returned 0 lines with a valid response shape "
+                "ninja_prices(%s): %s returned 0 lines with a valid response shape "
                 "(possibly empty category or a source-side format change)",
-                category,
+                self._game, category,
             )
 
     def _dump_failed_response(self, data: Any, url: str, category: str) -> None:
-        path = self._failed_dir / f"poe.ninja_{category}_{int(time.time())}.json"
+        path = self._failed_dir / f"poe.ninja_{self._game}_{category}_{int(time.time())}.json"
         try:
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             log.warning("ninja_prices: could not write failed response dump", exc_info=True)
 
-    def _parse_overview(self, data: dict[str, Any], category: str) -> list[dict[str, Any]]:
+    def _parse_overview(self, data: dict[str, Any], cat: CategoryConfig) -> list[dict[str, Any]]:
+        if self._game == "poe1" and cat.endpoint == "stash":
+            return self._parse_poe1_stash_direct(data, cat.name)
+        return self._parse_rate_converted(data, cat.name)
+
+    def _parse_poe1_stash_direct(self, data: dict[str, Any], category: str) -> list[dict[str, Any]]:
+        """PoE1 stash_overview lines already carry chaosValue/exaltedValue/
+        divineValue directly -- no core.rates conversion table exists here."""
+        entries: list[dict[str, Any]] = []
+        for ln in data.get("lines", []) or []:
+            chaos_value = float(ln.get("chaosValue", 0) or 0)
+            if chaos_value <= 0:
+                continue
+            name = ln.get("name") or ""
+            if not name:
+                continue
+            entry: dict[str, Any] = {
+                "category": category,
+                "name": name,
+                "base": ln.get("baseType") or None,
+                "value": chaos_value,
+                "value_currency": "chaos",
+                "divine_value": float(ln["divineValue"]) if ln.get("divineValue") is not None else None,
+                "source": "ninja",
+                "listing_count": int(ln.get("listingCount") or ln.get("count") or 0),
+                "trade_id": ln.get("detailsId") or str(ln.get("id") or ""),
+                "icon_url": ln.get("icon"),
+            }
+            if ln.get("exaltedValue") is not None:
+                entry["exalted_value"] = float(ln["exaltedValue"])
+            entries.append(entry)
+        return entries
+
+    def _parse_rate_converted(self, data: dict[str, Any], category: str) -> list[dict[str, Any]]:
+        """PoE2 (both endpoint types) and PoE1's exchange_overview: lines
+        carry only `primaryValue`, converted via `core.rates`."""
         core = data.get("core", {}) or {}
         rates: dict[str, float] = core.get("rates", {}) or {}
         primary_unit = core.get("primary", "divine")
@@ -160,8 +235,8 @@ class NinjaPricesFetcher:
 
         return entries
 
-    @staticmethod
     def _build_entry(
+        self,
         ln: dict[str, Any],
         item: dict[str, Any],
         category: str,
@@ -173,7 +248,7 @@ class NinjaPricesFetcher:
         def convert(unit: str) -> Optional[float]:
             if primary_unit == unit:
                 return primary_value
-            if primary_unit == "divine" and unit in rates:
+            if unit in rates:
                 return primary_value * rates[unit]
             return None
 
@@ -181,18 +256,31 @@ class NinjaPricesFetcher:
         exalted_value = convert("exalted")
         chaos_value = convert("chaos")
 
+        if self._game == "poe1":
+            # spec 8.1: PoE1 prices are always denominated in chaos.
+            value = chaos_value if chaos_value is not None else primary_value
+            value_currency = "chaos"
+        else:
+            value = exalted_value if exalted_value is not None else primary_value
+            value_currency = "exalted" if exalted_value is not None else primary_unit
+
         entry: dict[str, Any] = {
             "category": category,
             "name": name,
             "base": ln.get("baseType") or None,
-            "value": exalted_value if exalted_value is not None else primary_value,
-            "value_currency": "exalted" if exalted_value is not None else primary_unit,
+            "value": value,
+            "value_currency": value_currency,
             "divine_value": divine_value,
             "source": "ninja",
             "listing_count": int(ln.get("listingCount") or ln.get("volumePrimaryValue") or 0),
             "trade_id": ln.get("detailsId") or item.get("detailsId") or ln.get("id"),
             "icon_url": ln.get("icon") or item.get("image"),
         }
-        if chaos_value is not None:
-            entry["chaos_value"] = chaos_value
+        # Extra units beyond the required trio, only when the source actually gave them.
+        if self._game == "poe1":
+            if exalted_value is not None:
+                entry["exalted_value"] = exalted_value
+        else:
+            if chaos_value is not None:
+                entry["chaos_value"] = chaos_value
         return entry
