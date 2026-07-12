@@ -129,6 +129,80 @@ def sanitize_league_filename(league_name: str) -> str:
     return slug or "league"
 
 
+NEWS_SCHEMA_VERSION = 1
+
+
+def build_news_schema(
+    entries: list[dict[str, Any]],
+    ok: bool,
+    previous: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Build `{game}/news/latest.json` (phase 8): the latest ~15 Steam news
+    entries for one game, GGG-link-resolved (src/fetchers/news.py). Stateless
+    on purpose -- which entries a consumer has already posted is *their*
+    state, not published here (CLAUDE.md).
+
+    Stale-while-error: if this run's fetch failed entirely (`ok=False`),
+    reuse the previous publish's `entries` verbatim rather than publish an
+    empty list -- same policy as prices (spec 10.1b: never crash/blank out
+    on a bad response, log + reuse stale data instead)."""
+    if not ok and previous:
+        entries = previous.get("entries", [])
+    return {
+        "schema_version": NEWS_SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "sources": {"steam": "ok" if ok else "error"},
+        "entries": entries,
+    }
+
+
+MTX_SCHEMA_VERSION = 1
+
+
+def build_mtx_schema(
+    deals: list[dict[str, Any]],
+    ok: bool,
+    previous: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Build `mtx/latest.json` (phase 8): PoE1's Deal of the Day specials
+    (src/fetchers/deals.py) -- not split per-game like prices/news, since
+    PoE2 has no equivalent scrapable source at all (see deals.py docstring).
+
+    Adds `first_seen_at` per deal by merging against `previous`'s deals
+    (matched by `item_name`, the only stable key GGG's page actually gives --
+    there's no numeric id like Steam's `gid`): carried over unchanged if the
+    deal was already present last publish, set to this run's `generated_at`
+    if it's new. This is deliberately a different concept from a consumer's
+    own "have I posted this" dedup state (e.g. the bot repo's
+    seen_deals.json) -- first_seen_at is just "when did the hub first see
+    this on the page", published as data, not a posting-state mechanism.
+
+    Stale-while-error: reuses the previous publish's `deals` verbatim
+    (first_seen_at included, unmodified) when `ok=False`."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not ok and previous:
+        return {
+            "schema_version": MTX_SCHEMA_VERSION,
+            "generated_at": now,
+            "sources": {"ggg_shop": "error"},
+            "deals": previous.get("deals", []),
+        }
+
+    previous_by_name = {d["item_name"]: d for d in (previous or {}).get("deals", [])}
+    merged = []
+    for d in deals:
+        prev = previous_by_name.get(d["item_name"])
+        first_seen_at = prev["first_seen_at"] if prev else now
+        merged.append({**d, "first_seen_at": first_seen_at})
+
+    return {
+        "schema_version": MTX_SCHEMA_VERSION,
+        "generated_at": now,
+        "sources": {"ggg_shop": "ok" if ok else "error"},
+        "deals": merged,
+    }
+
+
 def build_meta_schema(
     league: str,
     days_since_league_start: Optional[int],

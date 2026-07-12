@@ -3,6 +3,7 @@
     python -m src.main --run-prices-once
     python -m src.main --run-meta-once
     python -m src.main --run-cleanup-once
+    python -m src.main --run-news-once
     python -m src.main --serve      # persistent scheduler (systemd uses this)
 """
 from __future__ import annotations
@@ -21,7 +22,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from src.fetchers import ninja_prices, scout_prices
+from src.fetchers import deals, news, ninja_prices, scout_prices
 from src.fetchers.league_dates import LeagueDatesFetcher
 from src.fetchers.league_detector import LeagueDetector
 from src.fetchers.ninja_builds import NinjaBuildsFetcher
@@ -36,6 +37,8 @@ from src.storage.publisher import (
     PricesPublisher,
     build_index_schema,
     build_meta_schema,
+    build_mtx_schema,
+    build_news_schema,
     build_prices_schema,
     sanitize_league_filename,
 )
@@ -48,6 +51,7 @@ log = logging.getLogger("poe_data_hub")
 META_BLOB_PATH_LATEST = "poe2/meta/latest.json"
 STATUS_BLOB_PATH = "status.json"
 STATS_CACHE_BLOB_PATH = "internal/stats_cache.json"
+MTX_BLOB_PATH = "mtx/latest.json"
 
 
 def _prices_blob_path(game: str) -> str:
@@ -60,6 +64,10 @@ def _event_blob_path(game: str, slug: str) -> str:
 
 def _index_blob_path(game: str) -> str:
     return f"{game}/prices/index.json"
+
+
+def _news_blob_path(game: str) -> str:
+    return f"{game}/news/latest.json"
 
 
 def _build_http_client(cfg: dict[str, Any]) -> HttpClient:
@@ -220,6 +228,59 @@ def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
 
     _update_status(publisher, ok=overall_ok, per_game=per_game)
     return per_game
+
+
+def run_news_once(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Phase 8: Steam news (+ GGG link resolve) per game, and PoE1's Deal of
+    the Day, in one job (approved cadence: every 5 minutes, much more
+    frequent than prices/meta since news is time-sensitive). Which entries a
+    consumer has already posted is *their* state (CLAUDE.md) -- this job
+    always publishes a fresh stateless snapshot every run."""
+    http = _build_http_client(cfg)
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+
+    overall_ok = True
+    per_game: dict[str, dict[str, Any]] = {}
+    for game in cfg.get("game_versions", ["poe2"]):
+        if game not in news.STEAM_APPIDS:
+            continue
+        blob_path = _news_blob_path(game)
+        previous = publisher.fetch_previous(blob_path)
+        entries: list[dict[str, Any]] = []
+        ok = True
+        try:
+            entries = news.fetch_news(http, game)
+            log.info("news job(%s): fetched %d entries", game, len(entries))
+        except Exception as e:
+            ok = False
+            log.error("news job(%s): fetch failed entirely: %s", game, e, exc_info=True)
+
+        data = build_news_schema(entries, ok=ok, previous=previous)
+        publisher.publish(data, blob_path, cache_control="public, max-age=120")
+        log.info("news job(%s): published %d entries -> %s", game, len(data["entries"]), blob_path)
+        per_game[game] = {"ok": ok, "generated_at": data["generated_at"], "count": len(data["entries"])}
+        overall_ok = overall_ok and ok
+
+    mtx_previous = publisher.fetch_previous(MTX_BLOB_PATH)
+    fetched_deals: list[dict[str, Any]] = []
+    deals_ok = True
+    try:
+        fetched_deals = deals.fetch_deals(http)
+        log.info("news job(mtx): fetched %d deals", len(fetched_deals))
+    except Exception as e:
+        deals_ok = False
+        log.error("news job(mtx): fetch failed entirely: %s", e, exc_info=True)
+
+    mtx_data = build_mtx_schema(fetched_deals, ok=deals_ok, previous=mtx_previous)
+    publisher.publish(mtx_data, MTX_BLOB_PATH, cache_control="public, max-age=120")
+    log.info("news job(mtx): published %d deals -> %s", len(mtx_data["deals"]), MTX_BLOB_PATH)
+    overall_ok = overall_ok and deals_ok
+
+    # One ping per overall job run, same Layer-1 semantics as prices/meta.
+    _ping_healthcheck(http, cfg.get("healthchecks", {}).get("news_ping_url"), "news")
+
+    return {"games": per_game, "mtx": {"ok": deals_ok, "generated_at": mtx_data["generated_at"], "count": len(mtx_data["deals"])}, "ok": overall_ok}
 
 
 def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -566,9 +627,15 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
         args=[run_cleanup_once, cfg, "cleanup"], id="cleanup", max_instances=1, misfire_grace_time=3600,
     )
 
+    news_interval = schedule_cfg.get("news_interval_minutes", 5)
+    scheduler.add_job(
+        _safe_run, IntervalTrigger(minutes=news_interval), args=[run_news_once, cfg, "news"],
+        id="news", max_instances=1, misfire_grace_time=120,
+    )
+
     log.info(
-        "scheduler: starting (prices every %dmin, meta %s, cleanup daily %02d:00 ICT)",
-        prices_interval, meta_trigger, cleanup_hour,
+        "scheduler: starting (prices every %dmin, meta %s, cleanup daily %02d:00 ICT, news every %dmin)",
+        prices_interval, meta_trigger, cleanup_hour, news_interval,
     )
     scheduler.start()
 
@@ -578,7 +645,8 @@ def main() -> None:
     parser.add_argument("--run-prices-once", action="store_true")
     parser.add_argument("--run-meta-once", action="store_true")
     parser.add_argument("--run-cleanup-once", action="store_true")
-    parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup)")
+    parser.add_argument("--run-news-once", action="store_true")
+    parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup+news)")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -590,6 +658,8 @@ def main() -> None:
         run_meta_once(cfg)
     elif args.run_cleanup_once:
         run_cleanup_once(cfg)
+    elif args.run_news_once:
+        run_news_once(cfg)
     elif args.serve:
         run_scheduler(cfg)
     else:

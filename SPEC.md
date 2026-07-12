@@ -13,7 +13,10 @@ publisher's output shape.
 2. ดึงข้อมูล mod ของ item ที่ผู้เล่นใช้จริง จากหน้า builds ของ poe.ninja → นับความถี่
    mod แยกตาม slot / archetype พร้อมช่วง roll (min-max) ที่เจอจริง → publish เป็น
    `meta/latest.json`
-3. เป็นตัวเดียวที่ยิง API ภายนอก — consumer ดึงจาก Firebase เท่านั้น
+3. ดึงข่าว (Steam News API + GGG forum link resolve) และ Deal of the Day
+   (pathofexile.com) → publish เป็น `{game}/news/latest.json` / `mtx/latest.json`
+   (phase 8) — state ว่า consumer โพสต์อะไรไปแล้วยังอยู่ฝั่ง consumer เสมอ
+4. เป็นตัวเดียวที่ยิง API ภายนอก — consumer ดึงจาก Firebase เท่านั้น
 
 ห้ามยิง character API ของ GGG (`character-window/get-items`). GGG แตะแค่
 `trade2/data/stats` ครั้งเดียวแล้ว cache. `pathofexile.com/api/leagues` ถูก
@@ -229,7 +232,96 @@ Known limitations, all logged rather than silently papered over:
   under the DoD ceiling isn't guaranteed run-to-run without them — this is
   why `status.json` logs an error when `unmapped_mod_pct >= 5`).
 
-### 8.3 ตำแหน่งไฟล์บน Firebase Storage
+### 8.4 `{game}/news/latest.json` (`{game}` = `poe1` | `poe2`, phase 8)
+
+Steam news for one game, GGG-link-resolved (`src/fetchers/news.py`, ported
+from `Bot-Poe-Discord/poe-discord-bot/feeds.py`). Stateless: the hub always
+publishes the latest ~15 entries every run (matches Steam's own `count=15`),
+regardless of what any consumer has already posted -- which entries have
+been *posted* is consumer-side state (e.g. the bot repo's `seen.json`),
+never published here (binding condition 4).
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-12T15:00:00Z",
+  "sources": {"steam": "ok"},
+  "entries": [
+    {
+      "id": "1836506165584601",
+      "title": "Path of Exile 2 Build Showcase: Slowmaxing Chronomancer",
+      "content": "...(full BBCode/HTML-cleaned plain text, not truncated)",
+      "category": "news",
+      "link": "https://www.pathofexile.com/forum/view-thread/3982050",
+      "link_is_ggg": true,
+      "published": "2026-07-12T10:30:00Z"
+    }
+  ]
+}
+```
+
+- `category` — `"news"` | `"patch"` | `"mtx"`, same heuristic as the bot
+  repo's original (`categorize()`): version-number-prefixed or contains
+  "patch" -> patch; contains a sale keyword -> mtx; else news.
+- `link` — **always `www.pathofexile.com`, never rewritten to `th.`**
+  (approved decision: that's a display concern for whoever renders the
+  link, not the hub's job).
+- `link_is_ggg` — `true` when title-matching against GGG's own forum
+  listing found a confident match and `link` was upgraded from the raw
+  Steam URL to the real forum thread; `false` means `link` is still the
+  original Steam link (either no confident match, or the GGG listing
+  scrape itself failed -- both degrade gracefully, never drop the entry).
+- If the Steam fetch fails entirely: `sources.steam` is `"error"` and the
+  previous publish's `entries` are reused verbatim (stale-while-error, spec
+  10.1b) instead of publishing an empty list.
+- `content` is published in full (not truncated) -- any length limit for
+  display (e.g. Discord's embed description cap) is a consumer concern.
+
+### 8.5 `mtx/latest.json` (phase 8)
+
+PoE1's Deal of the Day shop specials (`src/fetchers/deals.py`, ported from
+`Bot-Poe-Discord/poe-discord-bot/deals.py`). **Not split per-game** like
+prices/news -- PoE2 (pathofexile2.com) was surveyed and has no scrapable
+Deal of the Day at all (client-rendered SPA, no server-side data or JSON
+API), so there's no poe2 side to split.
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-12T15:00:00Z",
+  "sources": {"ggg_shop": "ok"},
+  "deals": [
+    {
+      "item_name": "Premium Quad Stash Tab",
+      "link": "https://www.pathofexile.com/shop/item/PremiumQuadTab",
+      "discount_percent": 20,
+      "points_price": 120,
+      "ends_in": "Ends in 1 day",
+      "first_seen_at": "2026-07-11T09:05:00Z"
+    }
+  ]
+}
+```
+
+- `item_name` is the only stable key GGG's page gives (no numeric id like
+  Steam's `gid`) -- used as the merge key for `first_seen_at` and would be
+  the natural dedup key for any consumer, same as the bot repo's
+  `seen_deals.json` already does today.
+- `ends_in` is raw scraped display text (e.g. `"Ends in 5 hours"`), **not**
+  a machine-parseable timestamp -- known limitation carried over unchanged
+  from the bot repo's original scrape, GGG's page doesn't expose a real one.
+- `first_seen_at` (added phase 8, per project owner's explicit request) --
+  when the hub *first* saw this exact `item_name` on the page, carried
+  forward unchanged across runs while the deal keeps appearing, set to this
+  run's `generated_at` the run it first appears. Computed by
+  `build_mtx_schema()` merging against the previous publish -- deliberately
+  a different concept from a consumer's own "have I posted this" dedup
+  state; this is published data, not a posting-state mechanism.
+- If the scrape fails entirely: `sources.ggg_shop` is `"error"` and the
+  previous publish's `deals` (including their original `first_seen_at`) are
+  reused verbatim.
+
+### 8.6 ตำแหน่งไฟล์บน Firebase Storage
 
 ```
 poe-data-hub/
@@ -238,14 +330,36 @@ poe-data-hub/
 ├── poe2/prices/events/{sanitized-league}.json   (0..n, only while an event is active)
 ├── poe2/meta/latest.json
 ├── poe2/meta/2026-07-08.json
+├── poe2/news/latest.json
 ├── poe1/prices/latest.json
 ├── poe1/prices/index.json
 ├── poe1/prices/events/{sanitized-league}.json   (0..n)
+├── poe1/news/latest.json
+├── mtx/latest.json
 └── status.json
 ```
 
 `Cache-Control`: `max-age=300` สำหรับ prices/index/events, `max-age=3600`
-สำหรับ meta.
+สำหรับ meta, `max-age=120` สำหรับ news/mtx.
+
+#### Job cadence (phase 8)
+
+News + mtx run as **one job** (`run_news_once`, `schedule.news_interval_minutes`,
+default **5 minutes** -- approved cadence) since both are cheap, time-sensitive,
+and share no fetch cost worth separating: per game, one Steam News API call
++ up to 2 GGG forum-listing scrapes (`src/fetchers/news.py`); plus one
+`pathofexile.com` homepage scrape for deals (`src/fetchers/deals.py`).
+Total ~7-9 requests per run across 2 hosts already covered by existing
+`rate_limits` entries (`api.steampowered.com`, `www.pathofexile.com`) --
+negligible next to the prices job's own budget (see the rate-limit
+subsection above), no separate analysis needed.
+
+One Layer-1 healthchecks.io ping per job run (`healthchecks.news_ping_url`),
+same semantics as prices/meta. Layer 2 (`tools/heartbeat_check.py`) checks
+`{game}/news/latest.json`'s `generated_at` for both games (15-minute
+threshold, ~3x the 5-minute interval) -- does not check `mtx/latest.json`
+separately, since both files publish in the same job run and news freshness
+is already a reliable proxy for "did the job run".
 
 #### Rate-limit impact of phase 7 (PoE1 + event leagues)
 
@@ -286,6 +400,11 @@ marginal requests per cycle.
    challenge league จริง ("Mirage") พร้อมกัน และ API ไม่มี field บอกว่าอันไหน
    เป็นตัวไหน — auto-guess (candidate แรกตามลำดับตัวอักษร) จะเลือกผิดถ้าไม่ pin
    ไว้ (ดู `config/config.yaml` comment และ `src/fetchers/league_detector.py`).
+4. State ว่า consumer โพสต์/แสดงผลอะไรไปแล้วบ้าง (เช่น bot repo's `seen.json`,
+   `seen_deals.json`) เป็นของฝั่ง consumer เสมอ — hub ไม่เก็บ ไม่ publish
+   state แบบนี้เด็ดขาด (เห็นได้จาก phase 8: `news/latest.json` เป็น
+   stateless snapshot ทุก run, `mtx/latest.json`'s `first_seen_at` คือ
+   "hub เห็นครั้งแรกเมื่อไหร่" ไม่ใช่ "ใครโพสต์ไปแล้วหรือยัง" คนละแนวคิดกัน).
 
 ## Status
 
@@ -348,3 +467,23 @@ marginal requests per cycle.
       failing this run. `tools/heartbeat_check.py` now also fails when more
       than half of any single source's categories are `"ok": false`
       (`check_per_category_health`). 132/132 tests passing.
+- [x] Phase 8: news + mtx, moved off the bot repo (`src/fetchers/news.py`,
+      `src/fetchers/deals.py`, ported from `Bot-Poe-Discord/poe-discord-bot`'s
+      `feeds.py`/`deals.py`) -- `{game}/news/latest.json` (8.4),
+      `mtx/latest.json` (8.5, PoE1-only, `first_seen_at` per deal).
+      `run_news_once` runs as one job every 5 minutes
+      (`schedule.news_interval_minutes`), its own healthchecks.io ping
+      (`healthchecks.news_ping_url`). `HttpClient.get_text()` added for HTML
+      scraping (GGG forum listings, pathofexile.com deals sidebar) alongside
+      the existing `get_json`/`get_bytes`. `link` is always
+      `www.pathofexile.com`, never rewritten to `th.` (approved: that's a
+      display concern for the consumer). GGG-link title-resolution logic
+      (`_build_ggg_link_index`/`_resolve_ggg_link`) moved to the hub
+      unchanged. Posting-dedup state (`seen.json`/`seen_deals.json`) stays
+      entirely in the bot repo (binding condition 4) -- both new files are
+      stateless snapshots republished fresh every run.
+      `tools/heartbeat_check.py` now also checks `{game}/news/latest.json`
+      freshness for both games. Live-verified end-to-end from the dev
+      machine before deploy: 100% GGG-link resolution rate on both games'
+      real current news, 3/3 real Deal of the Day entries scraped correctly.
+      163/163 tests passing.

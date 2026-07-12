@@ -50,6 +50,7 @@ schedule:
   # service during the first few days of a new league, per spec section 9).
   meta_runs_per_day_league_start: 1
   cleanup_hour_thailand: 4
+  news_interval_minutes: 5
 
 meta:
   sample_per_slot: 100 # NOTE: poe.ninja's builds-search endpoint has no known
@@ -72,3 +73,4 @@ healthchecks:
   # design and recommended healthchecks.io Period/Grace settings.
   prices_ping_url: "https://hc-ping.com/681a6116-a8f0-42d4-a7e6-3b2685099ccb"
   meta_ping_url: "https://hc-ping.com/98f50ed8-cff3-4392-9f3a-22af3c996a44"
+  news_ping_url: "https://hc-ping.com/d4223856-ee45-43a8-befc-ed2c3b2aa704"

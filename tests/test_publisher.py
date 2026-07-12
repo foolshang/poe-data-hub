@@ -8,7 +8,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.storage.publisher import PricesPublisher, build_index_schema, build_prices_schema, sanitize_league_filename
+from src.storage.publisher import (
+    PricesPublisher,
+    build_index_schema,
+    build_mtx_schema,
+    build_news_schema,
+    build_prices_schema,
+    sanitize_league_filename,
+)
 
 
 @pytest.fixture
@@ -198,3 +205,57 @@ def test_build_index_schema_no_events():
         main_league="Mirage", main_path="poe1/prices/latest.json", main_generated_at="2026-07-11T00:00:00Z", events=[],
     )
     assert data["events"] == []
+
+
+def test_build_news_schema_ok():
+    entries = [{"id": "1", "title": "Hello"}]
+    data = build_news_schema(entries, ok=True)
+    assert data["sources"] == {"steam": "ok"}
+    assert data["entries"] == entries
+    assert data["schema_version"] == 1
+
+
+def test_build_news_schema_error_reuses_previous_entries():
+    previous = {"entries": [{"id": "1", "title": "Old"}]}
+    data = build_news_schema([], ok=False, previous=previous)
+    assert data["sources"] == {"steam": "error"}
+    assert data["entries"] == previous["entries"]
+
+
+def test_build_news_schema_error_no_previous_publishes_empty():
+    data = build_news_schema([], ok=False, previous=None)
+    assert data["sources"] == {"steam": "error"}
+    assert data["entries"] == []
+
+
+def test_build_mtx_schema_new_deal_gets_first_seen_at_now():
+    deals = [{"item_name": "Premium Quad Stash Tab", "link": "x"}]
+    data = build_mtx_schema(deals, ok=True, previous=None)
+    assert data["sources"] == {"ggg_shop": "ok"}
+    assert data["deals"][0]["first_seen_at"] == data["generated_at"]
+
+
+def test_build_mtx_schema_existing_deal_keeps_original_first_seen_at():
+    previous = {
+        "generated_at": "2026-07-10T00:00:00Z",
+        "deals": [{"item_name": "Premium Quad Stash Tab", "link": "x", "first_seen_at": "2026-07-09T00:00:00Z"}],
+    }
+    deals = [{"item_name": "Premium Quad Stash Tab", "link": "x"}]
+    data = build_mtx_schema(deals, ok=True, previous=previous)
+    assert data["deals"][0]["first_seen_at"] == "2026-07-09T00:00:00Z"
+
+
+def test_build_mtx_schema_mixed_new_and_existing_deals():
+    previous = {"deals": [{"item_name": "A", "first_seen_at": "2026-07-01T00:00:00Z"}]}
+    deals = [{"item_name": "A"}, {"item_name": "B"}]
+    data = build_mtx_schema(deals, ok=True, previous=previous)
+    by_name = {d["item_name"]: d for d in data["deals"]}
+    assert by_name["A"]["first_seen_at"] == "2026-07-01T00:00:00Z"
+    assert by_name["B"]["first_seen_at"] == data["generated_at"]
+
+
+def test_build_mtx_schema_error_reuses_previous_deals_verbatim():
+    previous = {"deals": [{"item_name": "A", "first_seen_at": "2026-07-01T00:00:00Z"}]}
+    data = build_mtx_schema([], ok=False, previous=previous)
+    assert data["sources"] == {"ggg_shop": "error"}
+    assert data["deals"] == previous["deals"]

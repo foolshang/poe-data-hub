@@ -53,6 +53,12 @@ class HttpClient:
         undocumented protobuf-ish builds-search API — see src/utils/pbwire.py)."""
         return self._get(url, headers=headers).content
 
+    def get_text(self, url: str, *, headers: Optional[dict[str, str]] = None) -> str:
+        """Like get_json but for HTML pages to scrape (e.g. GGG's forum
+        listings and pathofexile.com's Deal of the Day sidebar — see
+        src/fetchers/news.py, src/fetchers/deals.py)."""
+        return self._get(url, headers=headers).text
+
     def _get(self, url: str, *, headers: Optional[dict[str, str]] = None) -> "requests.Response":
         host = urllib.parse.urlparse(url).netloc
         req_headers = {**self._headers, **(headers or {})}

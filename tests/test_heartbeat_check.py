@@ -27,6 +27,26 @@ def test_check_prices_freshness_boundary_not_flagged():
     assert heartbeat_check.check_prices_freshness(generated_at, now=now) is None
 
 
+def test_check_news_freshness_ok_when_recent():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert heartbeat_check.check_news_freshness(generated_at, now=now) is None
+
+
+def test_check_news_freshness_flags_when_stale():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    problem = heartbeat_check.check_news_freshness(generated_at, now=now)
+    assert problem is not None
+    assert "20 minutes old" in problem
+
+
+def test_check_news_freshness_boundary_not_flagged():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(minutes=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert heartbeat_check.check_news_freshness(generated_at, now=now) is None
+
+
 def test_check_meta_freshness_ok_when_recent():
     now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
     last_meta = (now - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -81,13 +101,24 @@ def _fresh_prices_resp(now, per_category_by_source=None):
     return resp
 
 
+def _fresh_news_resp(now):
+    resp = MagicMock()
+    resp.json.return_value = {"generated_at": (now - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    return resp
+
+
+# call order inside run(): poe2 prices, poe1 prices, poe2 news, poe1 news, status
+# (PRICES_URLS dict order, then NEWS_URLS dict order, then status)
+def _fresh_sequence(now, count=2):
+    return [_fresh_prices_resp(now) for _ in range(count)] + [_fresh_news_resp(now), _fresh_news_resp(now)]
+
+
 def test_run_returns_0_when_both_fresh():
     now = datetime.now(timezone.utc)
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    # order: poe2 prices, poe1 prices, status (PRICES_URLS dict order + status)
-    with patch("requests.get", side_effect=[_fresh_prices_resp(now), _fresh_prices_resp(now), status_resp]):
+    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
         assert heartbeat_check.run() == 0
 
 
@@ -98,7 +129,8 @@ def test_run_returns_1_when_poe2_prices_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[stale_resp, _fresh_prices_resp(now), status_resp]):
+    sequence = [stale_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
 
@@ -109,7 +141,32 @@ def test_run_returns_1_when_poe1_prices_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[_fresh_prices_resp(now), stale_resp, status_resp]):
+    sequence = [_fresh_prices_resp(now), stale_resp, _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe2_news_stale():
+    now = datetime.now(timezone.utc)
+    stale_news = MagicMock()
+    stale_news.json.return_value = {"generated_at": (now - timedelta(minutes=25)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), stale_news, _fresh_news_resp(now), status_resp]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe1_news_stale():
+    now = datetime.now(timezone.utc)
+    stale_news = MagicMock()
+    stale_news.json.return_value = {"generated_at": (now - timedelta(minutes=25)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), stale_news, status_resp]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
 
@@ -118,7 +175,7 @@ def test_run_returns_1_when_meta_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=40)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[_fresh_prices_resp(now), _fresh_prices_resp(now), status_resp]):
+    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
         assert heartbeat_check.run() == 1
 
 
@@ -134,7 +191,8 @@ def test_run_returns_1_when_poe2_ninja_categories_mostly_failing():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[degraded, _fresh_prices_resp(now), status_resp]):
+    sequence = [degraded, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
 
@@ -144,7 +202,8 @@ def test_run_returns_0_when_categories_all_ok():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[healthy, _fresh_prices_resp(now), status_resp]):
+    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
 
@@ -160,5 +219,6 @@ def test_run_returns_1_when_response_missing_expected_key():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    with patch("requests.get", side_effect=[bad_resp, _fresh_prices_resp(now), status_resp]):
+    sequence = [bad_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1

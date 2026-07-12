@@ -149,9 +149,15 @@ def test_update_status_keeps_other_games_untouched_on_partial_failure(tmp_path):
 
 
 def _fake_prices_publisher_factory(tmp_path, created: list):
+    """One shared _FakeStorageClient across every PricesPublisher the
+    factory produces -- matches production, where a fresh PricesPublisher
+    object still talks to the same real GCS bucket regardless of how many
+    times main.py constructs one (e.g. once per run_news_once call)."""
+    shared_client = _FakeStorageClient()
+
     def factory(*, bucket_name, project_id=None):
         p = PricesPublisher(bucket_name=bucket_name, local_cache_dir=tmp_path)
-        p._client = _FakeStorageClient()
+        p._client = shared_client
         created.append(p)
         return p
     return factory
@@ -217,6 +223,88 @@ def test_run_prices_once_publishes_events_and_index_per_game(tmp_path):
     status = publisher.fetch_previous("status.json")
     assert status["prices"]["poe2"]["league"] == "Runes of Aldur"
     assert status["prices"]["poe1"]["league"] == "Mirage"
+
+
+def test_run_news_once_publishes_per_game_news_and_shared_mtx(tmp_path):
+    from src.main import run_news_once
+
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {},
+    }
+
+    def fake_fetch_news(http, game):
+        return [{"id": f"{game}-1", "title": f"{game} news", "category": "news", "link": "https://www.pathofexile.com/x", "link_is_ggg": True, "content": "", "published": "2026-07-12T00:00:00Z"}]
+
+    def fake_fetch_deals(http):
+        return [{"item_name": "Premium Quad Stash Tab", "link": "x", "discount_percent": 20, "points_price": 120, "ends_in": "Ends in 1 day"}]
+
+    created_publishers: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main.news.fetch_news", side_effect=fake_fetch_news), \
+         patch("src.main.deals.fetch_deals", side_effect=fake_fetch_deals):
+        result1 = run_news_once(cfg)
+        result2 = run_news_once(cfg)  # second run: mtx first_seen_at must carry over
+
+    assert result1["ok"] is True
+    assert result2["ok"] is True
+
+    publisher = created_publishers[-1]
+    poe2_news = publisher.fetch_previous("poe2/news/latest.json")
+    assert poe2_news["entries"][0]["id"] == "poe2-1"
+    assert poe2_news["sources"] == {"steam": "ok"}
+    assert not poe2_news["entries"][0]["link"].startswith("https://th.pathofexile.com")
+
+    poe1_news = publisher.fetch_previous("poe1/news/latest.json")
+    assert poe1_news["entries"][0]["id"] == "poe1-1"
+
+    # first_seen_at's exact carry-over-vs-reset behavior is unit-tested precisely
+    # in test_publisher.py (distinct previous/now timestamps there); this just
+    # confirms main.py actually wires build_mtx_schema's previous= through and
+    # publishes to the right path.
+    mtx = publisher.fetch_previous("mtx/latest.json")
+    assert len(mtx["deals"]) == 1
+    assert mtx["deals"][0]["item_name"] == "Premium Quad Stash Tab"
+    assert "first_seen_at" in mtx["deals"][0]
+
+
+def test_run_news_once_fetch_failure_reuses_previous_news(tmp_path):
+    from src.main import run_news_once
+
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {},
+    }
+
+    def fake_fetch_news_ok(http, game):
+        return [{"id": "1", "title": "first run", "category": "news", "link": "x", "link_is_ggg": False, "content": "", "published": "2026-07-12T00:00:00Z"}]
+
+    def fake_fetch_news_fail(http, game):
+        raise RuntimeError("steam down")
+
+    created_publishers: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main.deals.fetch_deals", return_value=[]):
+        with patch("src.main.news.fetch_news", side_effect=fake_fetch_news_ok):
+            run_news_once(cfg)
+        with patch("src.main.news.fetch_news", side_effect=fake_fetch_news_fail):
+            result = run_news_once(cfg)
+
+    assert result["ok"] is False
+    # each run_news_once call constructs its own PricesPublisher -- read back
+    # from the second call's instance, not the first, to see what it actually
+    # published (they share the same on-disk cache dir/Firebase bucket in
+    # production; the fake in-memory client here is per-instance only).
+    publisher = created_publishers[-1]
+    poe2_news = publisher.fetch_previous("poe2/news/latest.json")
+    assert poe2_news["sources"] == {"steam": "error"}
+    assert poe2_news["entries"][0]["id"] == "1"  # stale-while-error reused the first run's entry
 
 
 class _FakeStorageClient:

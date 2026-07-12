@@ -17,6 +17,12 @@ of the time (no event league active), so their *absence* is not a problem;
 now (see SPEC.md 8.1b). A consumer trusting index.json already gets a
 correct answer without this script needing to probe event files at all.
 
+Also checks `{game}/news/latest.json` freshness for both games (phase 8;
+approved cadence: news job runs every 5 minutes -- see SPEC.md). Does NOT
+check `mtx/latest.json` (not requested/needed): the news job publishes both
+files in the same run, so news freshness for either game is already a
+reliable proxy for "did the news job run" as a whole.
+
 This is deliberately a second, independent system from the
 healthchecks.io dead-man-switch pings the hub sends itself (Layer 1, see
 src/main.py's _ping_healthcheck and CLAUDE.md): Layer 1 watches "is the
@@ -44,10 +50,17 @@ PRICES_URLS = {
     "poe2": "https://storage.googleapis.com/poe-data-hub/poe2/prices/latest.json",
     "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/prices/latest.json",
 }
+NEWS_URLS = {
+    "poe2": "https://storage.googleapis.com/poe-data-hub/poe2/news/latest.json",
+    "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/news/latest.json",
+}
 STATUS_URL = "https://storage.googleapis.com/poe-data-hub/status.json"
 
 PRICES_MAX_AGE_MINUTES = 45
 META_MAX_AGE_HOURS = 26
+# news job runs every 5 minutes (schedule.news_interval_minutes) -- same
+# ~2-3x buffer-over-interval ratio as prices (45min over a 20min interval).
+NEWS_MAX_AGE_MINUTES = 15
 
 
 def _parse_iso(ts: str) -> datetime:
@@ -60,6 +73,15 @@ def check_prices_freshness(generated_at: str, now: Optional[datetime] = None) ->
     age_minutes = (now - _parse_iso(generated_at)).total_seconds() / 60
     if age_minutes > PRICES_MAX_AGE_MINUTES:
         return f"prices/latest.json generated_at is {age_minutes:.0f} minutes old (> {PRICES_MAX_AGE_MINUTES})"
+    return None
+
+
+def check_news_freshness(generated_at: str, now: Optional[datetime] = None) -> Optional[str]:
+    """Returns a problem description if stale, None if fresh."""
+    now = now or datetime.now(timezone.utc)
+    age_minutes = (now - _parse_iso(generated_at)).total_seconds() / 60
+    if age_minutes > NEWS_MAX_AGE_MINUTES:
+        return f"news/latest.json generated_at is {age_minutes:.0f} minutes old (> {NEWS_MAX_AGE_MINUTES})"
     return None
 
 
@@ -103,6 +125,15 @@ def run() -> int:
         except Exception as e:
             problems.append(f"could not fetch/parse {url}: {e}")
 
+    for game, url in NEWS_URLS.items():
+        try:
+            news = requests.get(url, timeout=15).json()
+            problem = check_news_freshness(news["generated_at"])
+            if problem:
+                problems.append(f"{game}: {problem}")
+        except Exception as e:
+            problems.append(f"could not fetch/parse {url}: {e}")
+
     try:
         status = requests.get(STATUS_URL, timeout=15).json()
         problem = check_meta_freshness(status["last_meta"])
@@ -116,7 +147,7 @@ def run() -> int:
             print(f"::error::{p}")
         return 1
 
-    print("OK: prices (all games) and meta are fresh")
+    print("OK: prices, news (all games), and meta are fresh")
     return 0
 
 
