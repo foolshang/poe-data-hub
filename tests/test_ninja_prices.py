@@ -1,7 +1,9 @@
 """Unit tests for src/fetchers/ninja_prices.py against real captured samples
 (PoE2: data/samples/ninja_poe2_exchange_currency.json /
 ninja_poe2_stash_uniqueweapons.json; PoE1: ninja_poe1_exchange_currency.json /
-ninja_poe1_stash_uniqueweapon.json, captured live 2026-07-11)."""
+ninja_poe1_stash_uniqueweapon.json, captured live 2026-07-11; PoE1's phase-9
+taxonomy expansion: ninja_poe1_exchange_oil.json / ninja_poe1_stash_uniqueflask.json,
+captured live 2026-07-12)."""
 from __future__ import annotations
 
 import json
@@ -121,3 +123,46 @@ def test_fetch_all_per_category_reports_ok_and_count():
 def test_unknown_game_raises_at_construction():
     with pytest.raises(ValueError, match="unknown game"):
         NinjaPricesFetcher(_FakeHttpClient({}), game="poe3")
+
+
+def test_poe1_categories_match_checker_taxonomy_22_total():
+    # D:\Projects\PoE_Price-Trade_Checker's profiles.py POE1_PROFILE has
+    # exactly these 22 categories (phase 9) -- same taxonomy this project's
+    # other consumer (the Checker) already relies on.
+    expected = {
+        "Currency", "Fragment", "Oil", "Incubator", "Scarab", "Fossil", "Resonator",
+        "Essence", "DivinationCard", "DeliriumOrb", "Artifact", "Beast",
+        "UniqueWeapon", "UniqueArmour", "UniqueAccessory", "UniqueFlask", "UniqueJewel",
+        "SkillGem", "ClusterJewel", "Map", "UniqueMap", "BaseType",
+    }
+    assert {c.name for c in POE1_CATEGORIES} == expected
+    assert len(POE1_CATEGORIES) == 22
+
+
+def test_poe1_new_currency_category_oil_uses_exchange_endpoint():
+    payload = json.loads((SAMPLES / "ninja_poe1_exchange_oil.json").read_text(encoding="utf-8"))
+    http = _FakeHttpClient({"exchange/current/overview": payload})
+    fetcher = NinjaPricesFetcher(http, game="poe1")
+
+    oil_cat = next(c for c in POE1_CATEGORIES if c.name == "Oil")
+    entries = fetcher.fetch_category("Mirage", oil_cat)
+    assert len(entries) > 0
+    for e in entries:
+        assert e["category"] == "Oil"
+        assert e["value_currency"] == "chaos"
+        assert category_bucket("Oil", game="poe1") == "currency"
+
+
+def test_poe1_new_item_category_uniqueflask_uses_stash_endpoint():
+    payload = json.loads((SAMPLES / "ninja_poe1_stash_uniqueflask.json").read_text(encoding="utf-8"))
+    http = _FakeHttpClient({"stash/current/item/overview": payload})
+    fetcher = NinjaPricesFetcher(http, game="poe1")
+
+    flask_cat = next(c for c in POE1_CATEGORIES if c.name == "UniqueFlask")
+    entries = fetcher.fetch_category("Mirage", flask_cat)
+    assert len(entries) > 0
+    first = entries[0]
+    assert first["category"] == "UniqueFlask"
+    assert first["value_currency"] == "chaos"
+    assert first["divine_value"] is not None
+    assert category_bucket("UniqueFlask", game="poe1") == "items"

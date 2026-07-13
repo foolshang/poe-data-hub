@@ -81,16 +81,39 @@ POE2_CATEGORIES: list[CategoryConfig] = [
     CategoryConfig("PrecursorTablet", "stash", "PrecursorTablets"),
 ]
 
-# Ported from D:\Projects\Bot-Poe-Discord\poe-discord-bot\price.py
-# POE1_CATEGORIES (already live-validated there 2026-07-05); re-confirmed
-# live here 2026-07-11 for this project's own samples.
+# PoE1 category list matches D:\Projects\PoE_Price-Trade_Checker's
+# profiles.py POE1_PROFILE exactly (22/22, phase 9) -- that repo's
+# `endpoint_type` "currencyoverview"/"itemoverview" map onto this project's
+# "exchange"/"stash" (poe.ninja moved off those legacy URLs, but the
+# `?type=` values themselves are unchanged -- every one of the 16 new
+# categories below was live-verified 2026-07-12 against the current
+# /economy/exchange and /economy/stash endpoints before being added; two
+# (Incubator, Beast) returned a valid-but-empty 0-line response for the
+# current league, which is a legitimate "nothing listed" outcome, not an
+# error -- see _validate()'s 0-lines warning path).
 POE1_CATEGORIES: list[CategoryConfig] = [
     CategoryConfig("Currency", "exchange", "Currency"),
     CategoryConfig("Fragment", "exchange", "Fragment"),
+    CategoryConfig("Oil", "exchange", "Oil"),
+    CategoryConfig("Incubator", "exchange", "Incubator"),
+    CategoryConfig("Scarab", "exchange", "Scarab"),
+    CategoryConfig("Fossil", "exchange", "Fossil"),
+    CategoryConfig("Resonator", "exchange", "Resonator"),
+    CategoryConfig("Essence", "exchange", "Essence"),
     CategoryConfig("DivinationCard", "exchange", "DivinationCard"),
+    CategoryConfig("DeliriumOrb", "exchange", "DeliriumOrb"),
+    CategoryConfig("Artifact", "exchange", "Artifact"),
+    CategoryConfig("Beast", "exchange", "Beast"),
     CategoryConfig("UniqueWeapon", "stash", "UniqueWeapon"),
     CategoryConfig("UniqueArmour", "stash", "UniqueArmour"),
     CategoryConfig("UniqueAccessory", "stash", "UniqueAccessory"),
+    CategoryConfig("UniqueFlask", "stash", "UniqueFlask"),
+    CategoryConfig("UniqueJewel", "stash", "UniqueJewel"),
+    CategoryConfig("SkillGem", "stash", "SkillGem"),
+    CategoryConfig("ClusterJewel", "stash", "ClusterJewel"),
+    CategoryConfig("Map", "stash", "Map"),
+    CategoryConfig("UniqueMap", "stash", "UniqueMap"),
+    CategoryConfig("BaseType", "stash", "BaseType"),
 ]
 
 CATEGORIES_BY_GAME: dict[str, list[CategoryConfig]] = {"poe2": POE2_CATEGORIES, "poe1": POE1_CATEGORIES}

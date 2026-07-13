@@ -66,6 +66,14 @@ def _index_blob_path(game: str) -> str:
     return f"{game}/prices/index.json"
 
 
+def _hardcore_blob_path(game: str) -> str:
+    return f"{game}/prices/hardcore/latest.json"
+
+
+def _hardcore_prefix(game: str) -> str:
+    return f"{game}/prices/hardcore/"
+
+
 def _news_blob_path(game: str) -> str:
     return f"{game}/news/latest.json"
 
@@ -187,19 +195,48 @@ def _run_prices_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict
             events_ok = False
             log.error("prices job(%s): event league %s failed entirely: %s", game, event_league, e, exc_info=True)
 
+    hardcore_index: Optional[dict[str, str]] = None
+    hardcore_ok = True
+    if league_result.hardcore:
+        try:
+            hardcore_data, hardcore_ok = _fetch_and_publish_league(
+                http, publisher, game, league_result.hardcore, _hardcore_blob_path(game)
+            )
+            hardcore_index = {
+                "league": league_result.hardcore,
+                "path": _hardcore_blob_path(game),
+                "generated_at": hardcore_data["generated_at"],
+            }
+        except Exception as e:
+            hardcore_ok = False
+            log.error("prices job(%s): hardcore league %s failed entirely: %s", game, league_result.hardcore, e, exc_info=True)
+    else:
+        # No lingering stale file: index.hardcore == null must mean the file
+        # genuinely doesn't exist, not "we didn't bother updating it today".
+        deleted = publisher.delete_blobs_not_in(_hardcore_prefix(game), keep_names=frozenset())
+        log.info(
+            "prices job(%s): no hardcore variant of %s found this cycle -- index.hardcore will be null%s",
+            game, league_result.main, f" (removed {deleted} stale file(s))" if deleted else "",
+        )
+
     index_data = build_index_schema(
         main_league=league_result.main,
         main_path=_prices_blob_path(game),
         main_generated_at=main_data["generated_at"],
         events=events_index,
+        hardcore=hardcore_index,
     )
     publisher.publish(index_data, _index_blob_path(game), cache_control="public, max-age=300")
-    log.info("prices job(%s): published index with %d event league(s)", game, len(events_index))
+    log.info(
+        "prices job(%s): published index with %d event league(s), hardcore=%s",
+        game, len(events_index), league_result.hardcore or "none",
+    )
 
     return {
-        "ok": main_ok and events_ok,
+        "ok": main_ok and events_ok and hardcore_ok,
         "league": league_result.main,
         "events": league_result.events,
+        "hardcore": league_result.hardcore,
         "sources": main_data["sources"],
         "generated_at": main_data["generated_at"],
     }
@@ -441,6 +478,7 @@ def _update_status(publisher: PricesPublisher, ok: bool, per_game: dict[str, dic
             "generated_at": result["generated_at"],
             "league": result["league"],
             "events": result["events"],
+            "hardcore": result.get("hardcore"),
             "sources": result["sources"],
         }
     if not ok:

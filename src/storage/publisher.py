@@ -105,18 +105,24 @@ def build_index_schema(
     main_path: str,
     main_generated_at: str,
     events: list[dict[str, str]],
+    hardcore: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
-    """Build `{game}/prices/index.json` (phase 7 addition): tells consumers
-    which leagues currently have a published prices file, without needing
-    to guess or hit the (possibly stale/absent) event files directly.
-    `events` is a list of {"league", "path", "generated_at"} dicts, one per
-    currently-active event league -- empty when there's no overlapping
-    event, which is the common case."""
+    """Build `{game}/prices/index.json` (phase 7 addition, `hardcore` key
+    added phase 9): tells consumers which leagues currently have a published
+    prices file, without needing to guess or hit the (possibly stale/absent)
+    event/hardcore files directly. `events` is a list of {"league", "path",
+    "generated_at"} dicts, one per currently-active event league -- empty
+    when there's no overlapping event, which is the common case. `hardcore`
+    is that same shape (single dict, not a list -- only the main challenge
+    league's HC counterpart, never an HC variant of an event league) or
+    `None` when no HC variant was found this cycle (e.g. a league-transition
+    window) -- never an error, per binding condition 5."""
     return {
         "schema_version": INDEX_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "main": {"league": main_league, "path": main_path, "generated_at": main_generated_at},
         "events": events,
+        "hardcore": hardcore,
     }
 
 

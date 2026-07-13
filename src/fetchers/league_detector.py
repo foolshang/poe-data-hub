@@ -28,6 +28,13 @@ LEAGUE_LIST_URL_TEMPLATE = "https://poe.ninja/{game}/api/economy/leagues"
 # would miss it.
 EXCLUDE_LEAGUE_TOKENS = {"hardcore", "hc", "standard", "ssf", "ruthless"}
 
+# PoE1 and PoE2 use different HC naming conventions ("Hardcore Mirage" vs
+# "HC Runes of Aldur") -- neither is hardcoded here. find_hardcore_variant()
+# derives the HC name by token-matching against whatever the main league is
+# called this cycle (phase 9), the same way main/event splitting already
+# does token matching rather than hardcoding league names.
+HARDCORE_TOKENS = {"hardcore", "hc"}
+
 DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
 
 
@@ -35,6 +42,40 @@ DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
 class LeagueResult:
     main: str
     events: list[str] = field(default_factory=list)
+    hardcore: Optional[str] = None
+
+
+def find_hardcore_variant(main_league: str, all_league_names: list[str]) -> Optional[str]:
+    """Find `main_league`'s Hardcore counterpart in the *unfiltered* league
+    list (i.e. before EXCLUDE_LEAGUE_TOKENS strips HC/Standard/SSF/Ruthless
+    out): a league name is the HC variant of `main_league` iff removing a
+    hardcore token from its tokens leaves exactly `main_league`'s tokens.
+    This correctly matches "HC Runes of Aldur" -> "Runes of Aldur" and
+    "Hardcore Mirage" -> "Mirage", while correctly rejecting the permanent
+    "Hardcore" league itself (no remaining tokens after stripping) and an HC
+    variant of a *different* league, e.g. "Hardcore Ancestors" when
+    main_league is "Mirage" (remaining tokens don't match). Returns None
+    (never raises) if there's no match, or if more than one candidate
+    matches ambiguously -- callers must treat both the same way: "no
+    hardcore file this cycle", not an error."""
+    main_tokens = set(main_league.lower().split())
+    matches = []
+    for name in all_league_names:
+        tokens = set(name.lower().split())
+        hc_tokens = tokens & HARDCORE_TOKENS
+        if not hc_tokens:
+            continue
+        if tokens - hc_tokens == main_tokens:
+            matches.append(name)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        log.warning(
+            "league: %d ambiguous hardcore-variant candidates for main league %r: %r — publishing no hardcore file this cycle",
+            len(matches), main_league, matches,
+        )
+    return None
 
 
 class LeagueDetector:
@@ -60,8 +101,9 @@ class LeagueDetector:
             return self._cache[1]
 
         try:
-            candidates = self._fetch_candidates()
-            result = self._split_main_and_events(candidates)
+            raw_names = self._fetch_raw_names()
+            candidates = self._filter_candidates(raw_names)
+            result = self._split_main_and_events(candidates, raw_names)
         except Exception as e:
             if self._cache:
                 log.warning(
@@ -74,29 +116,28 @@ class LeagueDetector:
                     "league(%s): fetch failed (%s) and no cache yet — falling back to league_override %r",
                     self._game, e, self._override,
                 )
-                return LeagueResult(main=self._override, events=[])
+                return LeagueResult(main=self._override, events=[], hardcore=None)
             raise
 
         self._cache = (now, result)
         return result
 
-    def _fetch_candidates(self) -> list[str]:
+    def _fetch_raw_names(self) -> list[str]:
         url = LEAGUE_LIST_URL_TEMPLATE.format(game=self._game)
         data = self._http.get_json(url)
         self._validate(data, url)
 
-        candidates: list[str] = []
+        names: list[str] = []
         for entry in data:
             name = entry.get("id") or entry.get("name") or ""
-            if not name:
-                continue
-            tokens = set(name.lower().split())
-            if tokens & EXCLUDE_LEAGUE_TOKENS:
-                continue
-            candidates.append(name)
+            if name:
+                names.append(name)
+        return names
 
+    def _filter_candidates(self, raw_names: list[str]) -> list[str]:
+        candidates = [name for name in raw_names if not (set(name.lower().split()) & EXCLUDE_LEAGUE_TOKENS)]
         if not candidates:
-            raise ValueError(f"no eligible non-permanent league found in {data!r}")
+            raise ValueError(f"no eligible non-permanent league found in {raw_names!r}")
         return candidates
 
     def _validate(self, data: Any, url: str) -> None:
@@ -112,7 +153,7 @@ class LeagueDetector:
         except OSError:
             log.warning("could not write failed response dump", exc_info=True)
 
-    def _split_main_and_events(self, candidates: list[str]) -> LeagueResult:
+    def _split_main_and_events(self, candidates: list[str], raw_names: list[str]) -> LeagueResult:
         if self._override and self._override in candidates:
             main = self._override
         else:
@@ -123,4 +164,5 @@ class LeagueDetector:
                     self._game, self._override, candidates,
                 )
             main = candidates[0]
-        return LeagueResult(main=main, events=[c for c in candidates if c != main])
+        hardcore = find_hardcore_variant(main, raw_names)
+        return LeagueResult(main=main, events=[c for c in candidates if c != main], hardcore=hardcore)

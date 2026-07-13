@@ -172,6 +172,19 @@ def test_build_index_schema_with_events():
     assert data["main"]["league"] == "Runes of Aldur"
     assert len(data["events"]) == 1
     assert data["events"][0]["league"] == "Some Event"
+    assert data["hardcore"] is None  # default: no hardcore variant found
+
+
+def test_build_index_schema_with_hardcore():
+    data = build_index_schema(
+        main_league="Runes of Aldur",
+        main_path="poe2/prices/latest.json",
+        main_generated_at="2026-07-11T00:00:00Z",
+        events=[],
+        hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": "2026-07-11T00:00:00Z"},
+    )
+    assert data["hardcore"]["league"] == "HC Runes of Aldur"
+    assert data["hardcore"]["path"] == "poe2/prices/hardcore/latest.json"
 
 
 def test_delete_blobs_not_in_deletes_only_unlisted(publisher: PricesPublisher):

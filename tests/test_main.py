@@ -184,9 +184,9 @@ def test_run_prices_once_publishes_events_and_index_per_game(tmp_path):
     def detector_factory(http, game, league_override, cache_ttl_seconds):
         d = MagicMock()
         d.detect.return_value = (
-            LeagueResult(main="Runes of Aldur", events=["Some Event"])
+            LeagueResult(main="Runes of Aldur", events=["Some Event"], hardcore="HC Runes of Aldur")
             if game == "poe2"
-            else LeagueResult(main="Mirage", events=[])
+            else LeagueResult(main="Mirage", events=[], hardcore=None)
         )
         return d
 
@@ -198,8 +198,8 @@ def test_run_prices_once_publishes_events_and_index_per_game(tmp_path):
         run_prices_once(cfg)
 
     # ScoutPricesFetcher (poe2scout.com, PoE2-only) must be constructed only
-    # for poe2's main + event league, never for poe1.
-    assert ScoutCls.call_count == 2
+    # for poe2's main + event + hardcore leagues, never for poe1.
+    assert ScoutCls.call_count == 3
 
     assert len(created_publishers) == 1
     publisher = created_publishers[0]
@@ -219,10 +219,64 @@ def test_run_prices_once_publishes_events_and_index_per_game(tmp_path):
 
     poe1_index = publisher.fetch_previous("poe1/prices/index.json")
     assert poe1_index["events"] == []
+    assert poe1_index["hardcore"] is None  # no HC variant found for poe1 this run
+
+    poe2_hardcore = publisher.fetch_previous("poe2/prices/hardcore/latest.json")
+    assert poe2_hardcore["league"] == "HC Runes of Aldur"
+    assert poe2_index["hardcore"]["league"] == "HC Runes of Aldur"
+    assert poe2_index["hardcore"]["path"] == "poe2/prices/hardcore/latest.json"
 
     status = publisher.fetch_previous("status.json")
     assert status["prices"]["poe2"]["league"] == "Runes of Aldur"
+    assert status["prices"]["poe2"]["hardcore"] == "HC Runes of Aldur"
+    assert status["prices"]["poe1"]["hardcore"] is None
     assert status["prices"]["poe1"]["league"] == "Mirage"
+
+
+def test_run_prices_once_removes_stale_hardcore_file_when_variant_disappears(tmp_path):
+    """index.hardcore == null must mean the file genuinely doesn't exist,
+    not just "we didn't update it this run" -- simulates a league-transition
+    window where the HC variant briefly can't be found."""
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2"],
+        "league": {"cache_ttl_seconds": 43200},
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {},
+    }
+
+    fake_ninja_instance = MagicMock()
+    fake_ninja_instance.fetch_all.return_value = (
+        [{"category": "Currency", "name": "Chaos Orb", "value": 1, "value_currency": "exalted", "divine_value": 0.01, "source": "ninja"}],
+        {"Currency": {"ok": True, "count": 1}},
+    )
+    fake_scout_instance = MagicMock()
+    fake_scout_instance.fetch_all.return_value = ([], {})
+
+    hardcore_present = [True]  # mutable flag flipped between the two runs
+
+    def detector_factory(http, game, league_override, cache_ttl_seconds):
+        d = MagicMock()
+        d.detect.return_value = LeagueResult(
+            main="Runes of Aldur", events=[],
+            hardcore="HC Runes of Aldur" if hardcore_present[0] else None,
+        )
+        return d
+
+    created_publishers: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main.NinjaPricesFetcher", return_value=fake_ninja_instance), \
+         patch("src.main.ScoutPricesFetcher", return_value=fake_scout_instance), \
+         patch("src.main.LeagueDetector", side_effect=detector_factory):
+        run_prices_once(cfg)  # run 1: hardcore present -> file published
+        hardcore_present[0] = False
+        run_prices_once(cfg)  # run 2: hardcore gone -> file must be removed
+
+    publisher = created_publishers[-1]
+    assert "poe2/prices/hardcore/latest.json" not in publisher._client._blobs
+    poe2_index = publisher.fetch_previous("poe2/prices/index.json")
+    assert poe2_index["hardcore"] is None
 
 
 def test_run_news_once_publishes_per_game_news_and_shared_mtx(tmp_path):
@@ -324,6 +378,18 @@ class _FakeBucket:
 
     def blob(self, path):
         return _FakeBlob(self._blobs, path)
+
+    def list_blobs(self, prefix=""):
+        return [_FakeListedBlob(self._blobs, name) for name in list(self._blobs.keys()) if name.startswith(prefix)]
+
+
+class _FakeListedBlob:
+    def __init__(self, blobs, name):
+        self._blobs = blobs
+        self.name = name
+
+    def delete(self):
+        self._blobs.pop(self.name, None)
 
 
 class _FakeBlob:

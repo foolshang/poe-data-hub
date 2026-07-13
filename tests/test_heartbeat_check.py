@@ -47,6 +47,20 @@ def test_check_news_freshness_boundary_not_flagged():
     assert heartbeat_check.check_news_freshness(generated_at, now=now) is None
 
 
+def test_check_hardcore_freshness_ok_when_recent():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert heartbeat_check.check_hardcore_freshness(generated_at, now=now) is None
+
+
+def test_check_hardcore_freshness_flags_when_stale():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    problem = heartbeat_check.check_hardcore_freshness(generated_at, now=now)
+    assert problem is not None
+    assert "hardcore/latest.json" in problem
+
+
 def test_check_meta_freshness_ok_when_recent():
     now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
     last_meta = (now - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -107,10 +121,21 @@ def _fresh_news_resp(now):
     return resp
 
 
-# call order inside run(): poe2 prices, poe1 prices, poe2 news, poe1 news, status
-# (PRICES_URLS dict order, then NEWS_URLS dict order, then status)
+def _index_resp(hardcore=None):
+    resp = MagicMock()
+    resp.json.return_value = {"hardcore": hardcore}
+    return resp
+
+
+# call order inside run(): poe2 prices, poe1 prices, poe2 news, poe1 news,
+# poe2 index, poe1 index, status (PRICES_URLS, NEWS_URLS, INDEX_URLS dict
+# order, then status)
 def _fresh_sequence(now, count=2):
-    return [_fresh_prices_resp(now) for _ in range(count)] + [_fresh_news_resp(now), _fresh_news_resp(now)]
+    return (
+        [_fresh_prices_resp(now) for _ in range(count)]
+        + [_fresh_news_resp(now), _fresh_news_resp(now)]
+        + [_index_resp(), _index_resp()]
+    )
 
 
 def test_run_returns_0_when_both_fresh():
@@ -129,7 +154,7 @@ def test_run_returns_1_when_poe2_prices_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [stale_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    sequence = [stale_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
@@ -141,7 +166,7 @@ def test_run_returns_1_when_poe1_prices_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [_fresh_prices_resp(now), stale_resp, _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    sequence = [_fresh_prices_resp(now), stale_resp, _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
@@ -153,7 +178,7 @@ def test_run_returns_1_when_poe2_news_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), stale_news, _fresh_news_resp(now), status_resp]
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), stale_news, _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
@@ -165,7 +190,7 @@ def test_run_returns_1_when_poe1_news_stale():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), stale_news, status_resp]
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), stale_news, _index_resp(), _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
@@ -191,7 +216,7 @@ def test_run_returns_1_when_poe2_ninja_categories_mostly_failing():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [degraded, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    sequence = [degraded, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1
 
@@ -202,7 +227,38 @@ def test_run_returns_0_when_categories_all_ok():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 0
+
+
+def test_run_returns_1_when_hardcore_stale():
+    now = datetime.now(timezone.utc)
+    stale_hardcore = _index_resp(hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), stale_hardcore, _index_resp(), status_resp]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_0_when_hardcore_null():
+    now = datetime.now(timezone.utc)
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
+        assert heartbeat_check.run() == 0
+
+
+def test_run_returns_0_when_hardcore_fresh():
+    now = datetime.now(timezone.utc)
+    fresh_hardcore = _index_resp(hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    status_resp = MagicMock()
+    status_resp.json.return_value = {"last_meta": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), fresh_hardcore, _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -219,6 +275,6 @@ def test_run_returns_1_when_response_missing_expected_key():
     status_resp = MagicMock()
     status_resp.json.return_value = {"last_meta": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-    sequence = [bad_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), status_resp]
+    sequence = [bad_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1

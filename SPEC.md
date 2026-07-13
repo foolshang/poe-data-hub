@@ -38,6 +38,14 @@ PoE2-only) — `sources` simply omits the `"scout"` key entirely for PoE1
 rather than reporting a fake `"ok"`/`"error"` for a source that was never
 queried.
 
+Category taxonomy: PoE2 has 23 categories, PoE1 has 22 (phase 9 -- expanded
+from an initial 6-category subset to match
+`D:\Projects\PoE_Price-Trade_Checker`'s `profiles.py` `POE1_PROFILE` exactly,
+since that project is another consumer relying on the same category names).
+Every one of the 16 categories added in phase 9 was live-verified against
+poe.ninja's *current* (non-legacy) exchange/stash endpoints before being
+added — see `src/fetchers/ninja_prices.py`'s `POE1_CATEGORIES` docstring.
+
 ```json
 {
   "schema_version": 2,
@@ -158,10 +166,10 @@ under `{game}/prices/events/` at all — a consumer must not assume any
 particular event file exists and should always go through `index.json`
 (8.1b) to discover what's currently published, never guess or probe.
 
-### 8.1b `{game}/prices/index.json` (phase 7)
+### 8.1b `{game}/prices/index.json` (phase 7, `hardcore` key added phase 9)
 
 Tells a consumer exactly which league files are currently published for a
-game, so it never has to guess/probe for event files:
+game, so it never has to guess/probe for event/hardcore files:
 
 ```json
 {
@@ -178,20 +186,54 @@ game, so it never has to guess/probe for event files:
       "path": "poe2/prices/events/return-of-the-ancients.json",
       "generated_at": "2026-07-11T12:00:00Z"
     }
-  ]
+  ],
+  "hardcore": {
+    "league": "HC Runes of Aldur",
+    "path": "poe2/prices/hardcore/latest.json",
+    "generated_at": "2026-07-11T12:00:00Z"
+  }
 }
 ```
 
-`events: []` when no event league is active for that game. Each entry's own
-`generated_at` can differ slightly from `main.generated_at` and from the
-other entries — every league is fetched and published as an independent
-step within the same prices job run, not atomically together.
+`events: []` when no event league is active for that game. `hardcore: null`
+(not an empty object, and never omitted) when no HC variant was found this
+cycle -- see 8.1c. Each entry's own `generated_at` can differ slightly from
+`main.generated_at` and from the other entries — every league is fetched
+and published as an independent step within the same prices job run, not
+atomically together.
 
 Event files for leagues that are no longer in poe.ninja's active-league list
 are deleted by the daily cleanup job (spec 9) — membership-based (checked
 against the *current* league list each cleanup run), not an age heuristic,
 so a short-lived closed event doesn't linger and a long-running one is never
 deleted just for being old.
+
+### 8.1c `{game}/prices/hardcore/latest.json` (phase 9)
+
+The Hardcore counterpart of the *main* challenge league only (never an HC
+variant of an event league -- explicitly out of scope, see binding
+condition 6), published with the **exact same 8.1 schema** as `latest.json`.
+
+The HC league's name is **derived, never hardcoded**:
+`src/fetchers/league_detector.py`'s `find_hardcore_variant(main_league,
+all_league_names)` token-matches against poe.ninja's *unfiltered* league
+list (i.e. before `EXCLUDE_LEAGUE_TOKENS` strips HC/Standard/SSF/Ruthless
+out) -- a name is the HC variant of `main_league` iff removing a hardcore
+token (`"hardcore"` or `"hc"`) from its tokens leaves exactly
+`main_league`'s tokens. This correctly handles both games' different naming
+conventions without hardcoding either: PoE2 prefixes `"HC "` (`"HC Runes of
+Aldur"`), PoE1 prefixes `"Hardcore "` (`"Hardcore Mirage"`) -- confirmed live
+2026-07-12, both currently resolve correctly. It also correctly rejects the
+permanent `"Hardcore"` league itself (no tokens remain after stripping) and
+an HC variant of a *different* league (e.g. `"Hardcore Ancestors"` when
+main is `"Mirage"` -- remaining tokens don't match).
+
+If no HC variant can be found this cycle (e.g. a brief league-transition
+window), `find_hardcore_variant` returns `None` -- this is never an error:
+no file is published, and if a stale one exists from a previous cycle it is
+actively deleted (`PricesPublisher.delete_blobs_not_in`, same mechanism
+event-league cleanup uses) so that `index.json`'s `hardcore: null` always
+means "the file genuinely doesn't exist", never "we just didn't update it".
 
 ### 8.2 `poe2/meta/latest.json`
 
@@ -328,12 +370,14 @@ poe-data-hub/
 ├── poe2/prices/latest.json
 ├── poe2/prices/index.json
 ├── poe2/prices/events/{sanitized-league}.json   (0..n, only while an event is active)
+├── poe2/prices/hardcore/latest.json             (only while an HC variant is found)
 ├── poe2/meta/latest.json
 ├── poe2/meta/2026-07-08.json
 ├── poe2/news/latest.json
 ├── poe1/prices/latest.json
 ├── poe1/prices/index.json
 ├── poe1/prices/events/{sanitized-league}.json   (0..n)
+├── poe1/prices/hardcore/latest.json             (only while an HC variant is found)
 ├── poe1/news/latest.json
 ├── mtx/latest.json
 └── status.json
@@ -361,30 +405,39 @@ threshold, ~3x the 5-minute interval) -- does not check `mtx/latest.json`
 separately, since both files publish in the same job run and news freshness
 is already a reliable proxy for "did the job run".
 
-#### Rate-limit impact of phase 7 (PoE1 + event leagues)
+#### Rate-limit impact of phases 7 and 9 (PoE1 + event leagues + hardcore)
 
 `poe.ninja` is one shared rate-limit bucket (`config.yaml`
 `rate_limits."poe.ninja": 2` — 1 request per 2s, enforced by
-`src/utils/rate_limiter.py`), and every league fetched (main + each event, for
-both games) costs one `NinjaPricesFetcher.fetch_all()` pass — 23 requests for
-PoE2's category list, 6 for PoE1's (`src/fetchers/ninja_prices.py`). Scout
-(`poe2scout.com`) is a separate host/bucket and PoE2-only — 2 requests per
-PoE2 league fetched.
+`src/utils/rate_limiter.py`), and every league fetched (main + each event +
+hardcore, for both games) costs one `NinjaPricesFetcher.fetch_all()` pass —
+23 requests for PoE2's category list, **22** for PoE1's (phase 9, up from an
+initial 6 -- `src/fetchers/ninja_prices.py`). Scout (`poe2scout.com`) is a
+separate host/bucket and PoE2-only — 2 requests per PoE2 league fetched
+(main, each event, and hardcore all count).
 
-- **Baseline (no events active, 1 league per game — today's real state):**
-  23 + 6 = 29 poe.ninja requests + 2 scout requests = 31 requests, ≈62s
-  sequential wall time. ~5% of the 1200s (20-minute) cycle interval.
-- **Worst-realistic (2 simultaneous event leagues per game, on top of each
-  game's main league — 3 leagues/game, more overlap than has ever been
-  observed live in either game):** poe2 = 3×(23+2) = 75, poe1 = 3×6 = 18 →
-  93 requests, ≈186s (~3.1 min) sequential wall time. Still only ~15.5% of
-  the 20-minute cycle.
+- **Baseline (today's actual live state, confirmed 2026-07-12): poe2 has no
+  event but does have a hardcore variant; poe1 has one event ("Ancestors")
+  and a hardcore variant ("Hardcore Mirage") — 5 leagues fetched this
+  cycle total (poe2 main, poe2 hardcore, poe1 main, poe1 event, poe1
+  hardcore):**
+  poe.ninja: 23 + 23 + 22 + 22 + 22 = 112, scout: 2 + 2 = 4 → **116
+  requests**, ≈232s (~3.9 min) sequential wall time. ~19% of the 1200s
+  (20-minute) cycle interval.
+- **Worst-realistic (2 simultaneous event leagues per game on top of each
+  game's main + hardcore — 4 leagues/game, more overlap than has ever been
+  observed live in either game):**
+  poe2 = 4×(23+2) = 100, poe1 = 4×22 = 88 → **188 requests**, ≈376s (~6.3
+  min) sequential wall time. Still only ~31% of the 20-minute cycle.
 
 Conclusion: the 20-minute prices cycle interval remains comfortably
-sufficient after phase 7 — even the deliberately-padded worst-case estimate
-leaves >80% of the cycle unused. `LeagueDetector`'s own league-list request
-is cached 12h (`league.cache_ttl_seconds`) and amortizes to effectively zero
-marginal requests per cycle.
+sufficient after phase 9 — even the deliberately-padded worst-case estimate
+leaves >65% of the cycle unused, and today's actual live state (not just a
+hypothetical) already exercises 5 simultaneous league fetches at ~19%
+utilization. `LeagueDetector`'s own league-list request is cached 12h
+(`league.cache_ttl_seconds`) and amortizes to effectively zero marginal
+requests per cycle (the hardcore lookup reuses the same cached fetch, no
+extra request).
 
 ## Binding conditions (from project owner, still in force)
 
@@ -405,6 +458,14 @@ marginal requests per cycle.
    state แบบนี้เด็ดขาด (เห็นได้จาก phase 8: `news/latest.json` เป็น
    stateless snapshot ทุก run, `mtx/latest.json`'s `first_seen_at` คือ
    "hub เห็นครั้งแรกเมื่อไหร่" ไม่ใช่ "ใครโพสต์ไปแล้วหรือยัง" คนละแนวคิดกัน).
+5. Standard / Hardcore Standard (permanent, non-challenge leagues) จะไม่ถูก
+   ดึงราคาเลย ทั้ง main/event/hardcore — **ตัดสินใจไว้ตั้งใจ** (phase 9),
+   เหตุผล: ไม่มีผู้ใช้จริง (ตัวบอทเองก็ไม่เคยดึงราคา Standard) ไม่ใช่ข้อจำกัด
+   ทางเทคนิค — `EXCLUDE_LEAGUE_TOKENS` ใน `league_detector.py` กรองออกตั้งแต่
+   ชั้น candidate list, ถ้าอนาคตมีความต้องการจริงค่อยพิจารณาใหม่.
+6. Hardcore variant ดึงเฉพาะของ **main league เท่านั้น** (phase 9) — ไม่ทำ
+   HC ของ event league (เช่นไม่มี "Hardcore Return of the Ancients")
+   ขอบเขตที่ตั้งใจตัดไว้ ไม่ใช่ gap ที่ลืมทำ.
 
 ## Status
 
@@ -487,3 +548,27 @@ marginal requests per cycle.
       machine before deploy: 100% GGG-link resolution rate on both games'
       real current news, 3/3 real Deal of the Day entries scraped correctly.
       163/163 tests passing.
+- [x] Phase 9: two gaps found from surveying the Checker repo, closed before
+      its own migration to the hub --
+      1. PoE1 category taxonomy expanded 6 → 22 to match
+         `PoE_Price-Trade_Checker`'s `profiles.py` `POE1_PROFILE` exactly
+         (8.1) -- every new category (Oil, Incubator, Scarab, Fossil,
+         Resonator, Essence, DeliriumOrb, Artifact, Beast, UniqueFlask,
+         UniqueJewel, SkillGem, ClusterJewel, Map, UniqueMap, BaseType)
+         live-verified against poe.ninja's current exchange/stash endpoints
+         before adding (Checker's own profile still references the old,
+         now-404ing `currencyoverview`/`itemoverview` URLs -- only the
+         `?type=` values were reusable, not the endpoint prefix).
+      2. Hardcore variant of the main challenge league, both games
+         (8.1c) -- `{game}/prices/hardcore/latest.json`, derived via new
+         `find_hardcore_variant()` token-matching (never hardcoded),
+         `{game}/prices/index.json` gained a `hardcore` key (8.1b, null
+         when no HC variant found -- file is actively deleted in that case,
+         never left stale). HC of event leagues and Standard/HC Standard
+         both explicitly out of scope (binding conditions 5, 6).
+      Rate-limit recomputed with today's actual live state (5 simultaneous
+      league fetches: both games' main + hardcore, plus poe1's one active
+      event) -- 116 requests, ~19% of the 20-minute cycle; worst-realistic
+      padded estimate still only ~31%. `tools/heartbeat_check.py` now also
+      checks hardcore freshness via `index.json`'s `hardcore` key (never
+      flags a null value). 183/183 tests passing.
