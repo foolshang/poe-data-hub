@@ -354,6 +354,7 @@ never published here (binding condition 4).
       "category": "news",
       "link": "https://www.pathofexile.com/forum/view-thread/3982050",
       "link_is_ggg": true,
+      "link_th": "https://th.pathofexile.com/forum/view-thread/3983134",
       "published": "2026-07-12T10:30:00Z"
     }
   ]
@@ -371,11 +372,61 @@ never published here (binding condition 4).
   Steam URL to the real forum thread; `false` means `link` is still the
   original Steam link (either no confident match, or the GGG listing
   scrape itself failed -- both degrade gracefully, never drop the entry).
+- `link_th` (**optional, additive, phase 11** -- key is entirely absent
+  when there's no confident match, never `null`) — a genuinely
+  Thai-translated forum thread, not a domain-swapped `link`. See below.
 - If the Steam fetch fails entirely: `sources.steam` is `"error"` and the
   previous publish's `entries` are reused verbatim (stale-while-error, spec
   10.1b) instead of publishing an empty list.
 - `content` is published in full (not truncated) -- any length limit for
   display (e.g. Discord's embed description cap) is a consumer concern.
+
+#### `link_th` (phase 11)
+
+From the bot repo's 2026-07-15 survey (`Bot-Poe-Discord/poe-discord-bot`'s
+`HISTORY.md`): `th.pathofexile.com` carries **genuinely separate,
+independently-translated threads** for some but not all news -- it is not a
+1:1 domain mirror of the English forum. Two things had to be confirmed live
+before this could be implemented at all:
+
+1. **Which Thai forum category actually has translations.** PoE1's Thai
+   `forum/view-forum/news` is real and translated (same URL path as
+   English, just the `th.` domain). PoE2 is *not* that simple: English
+   categories `2211`/`2212` return English content verbatim on `th.` (Thai
+   UI chrome only, no translation) -- the real Thai PoE2 categories are
+   **different forum ids**, `2282` ("ประกาศ Early Access") and `2283`
+   ("รายละเอียดแพทช์"), confirmed live 2026-07-15 by opening a sample thread
+   and checking its `<title>` matched the Thai listing.
+2. **How to match an English entry to its Thai counterpart.** Not every
+   thread has a translation (survey found 3/30 missing for PoE1), so
+   list-position pairing breaks the moment any one is skipped. Steam's own
+   `published` timestamp was tried and rejected -- cross-checked live
+   against a real thread and found a **~7000 second (nearly 2 hour) gap**
+   between Steam's `date` and that same thread's own forum post_date
+   (different GGG systems, not a clean timezone offset, so no fixed
+   correction is possible). What *does* line up tightly: **the English
+   GGG-forum thread's own post_date against the Thai thread's own
+   post_date** -- both are the same forum software on the same display
+   clock. Real examples confirmed live 2026-07-15 (PoE1, EN vs TH post_date):
+   `Jul 7, 4:19:03 AM` vs `7 ก.ค. 04:19:11` (8s apart), `Jun 20, 4:00:00 AM`
+   vs `20 มิ.ย. 04:00:00` (exact), `Jun 8, 7:07:18 AM` vs `8 มิ.ย. 07:08:13`
+   (55s apart) -- every real pair found was under 60 seconds apart.
+
+Because of #2, `link_th` is **only ever attempted for entries that already
+have a confident `link_is_ggg: true`** -- that English thread's own
+post_date (not Steam's `published`) is the reference point matched against
+the Thai listing by closest time, within `TH_MATCH_TOLERANCE_SECONDS = 300`
+(`src/fetchers/news.py`; 300s is ~5x every real gap observed, still far
+tighter than a "same day" window). **Strict per the project owner's
+instruction**: if more than one Thai candidate falls within that tolerance,
+the match is ambiguous and `link_th` is left out entirely -- never a guess
+("จับคู่ไม่มั่นใจ = ไม่ใส่ field เด็ดขาด" — an uncertain match must never
+produce a field, a wrong Thai link is worse than no Thai link). PoE2's
+Thai patch-notes category sometimes merges multiple English hotfix threads
+into one combined Thai thread (survey finding) -- this can validly result
+in two different English entries pointing at the same `link_th`, which is
+correct (both hotfixes really are covered by that one Thai thread), not a
+bug.
 
 ### 8.5 `mtx/latest.json` (phase 8)
 
@@ -510,10 +561,13 @@ pipeline end-to-end (see the Status entry below).
 News + mtx run as **one job** (`run_news_once`, `schedule.news_interval_minutes`,
 default **5 minutes** -- approved cadence) since both are cheap, time-sensitive,
 and share no fetch cost worth separating: per game, one Steam News API call
-+ up to 2 GGG forum-listing scrapes (`src/fetchers/news.py`); plus one
++ up to 2 English GGG forum-listing scrapes + up to 2 Thai forum-listing
+scrapes (phase 11, `link_th` -- `src/fetchers/news.py`); plus one
 `pathofexile.com` homepage scrape for deals (`src/fetchers/deals.py`).
-Total ~7-9 requests per run across 2 hosts already covered by existing
-`rate_limits` entries (`api.steampowered.com`, `www.pathofexile.com`) --
+Total ~9-11 requests per run (poe1: 1+1+1=3, poe2: 1+2+2=5, deals: 1) across
+3 hosts already covered by existing `rate_limits` entries
+(`api.steampowered.com`, `www.pathofexile.com`, `th.pathofexile.com` --
+`th.` is a distinct rate-limit bucket from `www.`, added phase 11) --
 negligible next to the prices job's own budget (see the rate-limit
 subsection above), no separate analysis needed.
 
@@ -737,3 +791,20 @@ follow-up if poe.ninja 429s are ever observed during that window.
       one. PoE1 data collected now is explicitly flagged as late-league/
       event-biased (8.2) -- real value starts next PoE1 league.
       215/215 tests passing.
+- [x] Phase 11: Thai forum link (`link_th`, 8.4), from the bot repo's
+      2026-07-15 survey (its `HISTORY.md`). Two things confirmed live before
+      writing any code (both diverged from the naive "just swap the
+      domain" assumption): PoE2's Thai forum categories are different ids
+      from English (`2282`/`2283`, not `2211`/`2212` -- the English ids
+      return untranslated English content on `th.`), and Steam's
+      `published` timestamp is unusable for EN<->TH matching (~7000s gap
+      from a real thread's own forum post_date, not a clean timezone
+      offset) -- what actually lines up tightly is the English GGG-forum
+      thread's own post_date against the Thai thread's own post_date, every
+      real pair found live within 60 seconds. `link_th` is therefore only
+      attempted for entries with an already-confident `link_is_ggg: true`,
+      matched by time-proximity with a strict single-candidate-within-300s
+      rule (project owner's explicit instruction: ambiguous = no field,
+      never a guess). Purely additive (`link_th` key absent, never `null`,
+      when no confident match) -- no `schema_version` bump.
+      228/228 tests passing.

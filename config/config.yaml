@@ -36,6 +36,7 @@ rate_limits:
   "poe.ninja": 2
   "poe2scout.com": 2
   "www.pathofexile.com": 2
+  "th.pathofexile.com": 2 # phase 11: link_th Thai forum scrape -- separate host/bucket from www.
   "api.steampowered.com": 2
 
 http:
