@@ -48,10 +48,22 @@ from src.utils.rate_limiter import RateLimiter
 
 log = logging.getLogger("poe_data_hub")
 
-META_BLOB_PATH_LATEST = "poe2/meta/latest.json"
 STATUS_BLOB_PATH = "status.json"
-STATS_CACHE_BLOB_PATH = "internal/stats_cache.json"
 MTX_BLOB_PATH = "mtx/latest.json"
+# Must match tools/refresh_stats.py's TARGETS blob_paths exactly -- that's
+# what actually publishes these files (phase 10: PoE1 added alongside PoE2).
+META_STATS_CACHE_BLOB_PATH_BY_GAME = {
+    "poe2": "internal/stats_cache.json",
+    "poe1": "internal/stats_cache_poe1.json",
+}
+
+
+def _meta_blob_path(game: str) -> str:
+    return f"{game}/meta/latest.json"
+
+
+def _meta_dated_blob_path(game: str, date_str: str) -> str:
+    return f"{game}/meta/{date_str}.json"
 
 
 def _prices_blob_path(game: str) -> str:
@@ -320,44 +332,44 @@ def run_news_once(cfg: dict[str, Any]) -> dict[str, Any]:
     return {"games": per_game, "mtx": {"ok": deals_ok, "generated_at": mtx_data["generated_at"], "count": len(mtx_data["deals"])}, "ok": overall_ok}
 
 
-def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
+def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str) -> dict[str, Any]:
     job_start = time.monotonic()
-    http = _build_http_client(cfg)
 
     league_cfg = cfg.get("league", {})
     detector = LeagueDetector(
         http,
-        game="poe2",
-        league_override=league_cfg.get("poe2_override", ""),
+        game=game,
+        league_override=league_cfg.get(f"{game}_override", ""),
         cache_ttl_seconds=league_cfg.get("cache_ttl_seconds", 12 * 60 * 60),
     )
     league_result = detector.detect()
     league = league_result.main
-    log.info("meta job: detected league=%s events=%s", league, league_result.events)
+    log.info("meta job(%s): detected league=%s events=%s", game, league, league_result.events)
 
-    league_dates = LeagueDatesFetcher(http).fetch(league)
+    league_dates = LeagueDatesFetcher(http, game=game).fetch(league)
     days_since_league_start: Optional[int] = (
         (datetime.now(timezone.utc) - league_dates.start_at).days if league_dates.start_at else None
     )
-    log.info("meta job: league_dates start_at=%s end_at=%s", league_dates.start_at, league_dates.end_at)
+    log.info("meta job(%s): league_dates start_at=%s end_at=%s", game, league_dates.start_at, league_dates.end_at)
 
-    builds_fetcher = NinjaBuildsFetcher(http)
+    builds_fetcher = NinjaBuildsFetcher(http, game=game)
     snapshot = builds_fetcher.resolve_snapshot(league)
 
     by_slot, per_slot_counts = builds_fetcher.fetch_all(snapshot)
-    log.info("meta job: fetched %d slot lists: %s", len(by_slot), per_slot_counts)
+    log.info("meta job(%s): fetched %d slot lists: %s", game, len(by_slot), per_slot_counts)
 
     firebase_bucket = cfg["firebase"]["bucket"]
     normalizer = ModNormalizer(
         http,
+        game=game,
         cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
-        firebase_stats_url=f"https://storage.googleapis.com/{firebase_bucket}/{STATS_CACHE_BLOB_PATH}",
+        firebase_stats_url=f"https://storage.googleapis.com/{firebase_bucket}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
     )
     normalizer.load()
-    log.info("meta job: trade2 stats loaded from %s (fetched_at=%s)", normalizer.stats_source, normalizer.stats_fetched_at)
+    log.info("meta job(%s): stats loaded from %s (fetched_at=%s)", game, normalizer.stats_source, normalizer.stats_fetched_at)
     archetyper = Archetyper()
 
-    chars_fetcher = NinjaCharsFetcher(http)
+    chars_fetcher = NinjaCharsFetcher(http, game=game)
     cache = DedupedCharacterCache(chars_fetcher, snapshot)
 
     def get_detail(account: str, name: str):
@@ -380,6 +392,7 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
     db = LocalDb()
     try:
         snapshot_id = db.insert_snapshot(
+            game=game,
             league=league,
             days_since_league_start=days_since_league_start,
             sample_total=sum(per_slot_counts.values()),
@@ -402,9 +415,6 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
     finally:
         db.close()
 
-    firebase_cfg = cfg["firebase"]
-    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
-
     data = build_meta_schema(
         league=league,
         days_since_league_start=days_since_league_start,
@@ -417,23 +427,22 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
         min_count=cfg.get("meta", {}).get("min_mod_count", 5),
     )
 
-    dated_path = f"poe2/meta/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.json"
-    publisher.publish(data, META_BLOB_PATH_LATEST, cache_control="public, max-age=3600")
+    dated_path = _meta_dated_blob_path(game, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    publisher.publish(data, _meta_blob_path(game), cache_control="public, max-age=3600")
     publisher.publish(data, dated_path, cache_control="public, max-age=3600")
-    log.info("meta job: published %d mods (%d before count>=5 filter)", len(data["mods"]), len(all_mod_counts))
-    _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
+    log.info("meta job(%s): published %d mods (%d before count>=5 filter)", game, len(data["mods"]), len(all_mod_counts))
 
     unmapped_pct = (
         round(normalizer.unmapped_count / normalizer.processed_count * 100, 2)
         if normalizer.processed_count else 0.0
     )
     peak_rss_mb = _peak_memory_mb()
-    log.info("meta job: peak RSS = %s MB", peak_rss_mb if peak_rss_mb is not None else "unknown (non-Unix)")
-    _update_meta_status(
-        publisher,
-        data=data,
-        end_at=league_dates.end_at,
-        summary={
+    log.info("meta job(%s): peak RSS = %s MB", game, peak_rss_mb if peak_rss_mb is not None else "unknown (non-Unix)")
+
+    return {
+        "data": data,
+        "end_at": league_dates.end_at,
+        "summary": {
             "duration_seconds": round(time.monotonic() - job_start, 1),
             "sample_total": sum(per_slot_counts.values()),
             "unique_characters_fetched": cache.fetched_count,
@@ -445,9 +454,31 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, Any]:
             "stats_source": normalizer.stats_source,
             "stats_cache_fetched_at": normalizer.stats_fetched_at,
         },
-    )
+    }
 
-    return data
+
+def run_meta_once(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Runs poe2 then poe1 sequentially in one job invocation (approved:
+    same nightly cron slot, one game after the other -- see SPEC.md for the
+    measured combined wall-clock time and peak RAM). One game's failure
+    never blocks or corrupts the other's publish; one healthchecks.io ping
+    fires only after both have been attempted, so a failure in either game
+    is visible (task 7)."""
+    http = _build_http_client(cfg)
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+
+    results: dict[str, dict[str, Any]] = {}
+    for game in cfg.get("game_versions", ["poe2"]):
+        try:
+            results[game] = _run_meta_for_game(http, publisher, cfg, game)
+        except Exception as e:
+            log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
+
+    _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
+    _update_meta_status(publisher, results)
+
+    return {game: r["data"] for game, r in results.items()}
 
 
 def _peak_memory_mb() -> Optional[float]:
@@ -511,32 +542,51 @@ def _check_stats_cache_stale(
     return reasons
 
 
-def _update_meta_status(
-    publisher: PricesPublisher,
-    data: dict[str, Any],
-    end_at: Optional[datetime],
-    summary: dict[str, Any],
-) -> None:
+def _update_meta_status(publisher: PricesPublisher, results: dict[str, dict[str, Any]]) -> None:
+    """Nested per-game shape (`status["meta"][game]`, `status["meta_unmapped_history"][game]`)
+    since phase 10 -- a game absent from `results` (failed entirely this run)
+    simply keeps its last-known status entry untouched, same stale-while-error
+    precedent as `_update_status`'s prices restructuring (phase 7).
+
+    `meta_unmapped_history` was a flat list (PoE2-only) before this phase;
+    the isinstance check below resets it to `{}` the first time this runs
+    against an old-shape status.json, losing that rolling baseline once --
+    acceptable (it's a monitoring baseline, not data) and self-healing within
+    `UNMAPPED_HISTORY_LEN` runs, same as the old flat prices-status keys were
+    left as harmless cruft rather than migrated in phase 7."""
     status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
-
-    history = status.get("meta_unmapped_history", [])
-    stale_reasons = _check_stats_cache_stale(history, summary.get("stats_cache_fetched_at"), summary["unmapped_mod_pct"])
-    history.append(summary["unmapped_mod_pct"])
-    status["meta_unmapped_history"] = history[-UNMAPPED_HISTORY_LEN:]
-
-    status["last_meta"] = data["generated_at"]
-    status["league"] = data["league"]
-    status["league_end_at"] = end_at.strftime("%Y-%m-%dT%H:%M:%SZ") if end_at else None
-    status["meta_job_summary"] = summary
-    status["stats_cache_stale"] = bool(stale_reasons)
+    status.setdefault("meta", {})
+    if not isinstance(status.get("meta_unmapped_history"), dict):
+        status["meta_unmapped_history"] = {}
 
     new_errors = []
-    if stale_reasons:
-        new_errors.append({"ts": data["generated_at"], "job": "meta", "detail": "stats_cache_stale: " + "; ".join(stale_reasons)})
-    if summary["unmapped_mod_pct"] >= 5.0:
-        new_errors.append(
-            {"ts": data["generated_at"], "job": "meta", "detail": f"unmapped_mod_pct={summary['unmapped_mod_pct']} >= 5% threshold"}
-        )
+    for game, result in results.items():
+        data = result["data"]
+        end_at = result["end_at"]
+        summary = result["summary"]
+
+        history = status["meta_unmapped_history"].get(game, [])
+        stale_reasons = _check_stats_cache_stale(history, summary.get("stats_cache_fetched_at"), summary["unmapped_mod_pct"])
+        history.append(summary["unmapped_mod_pct"])
+        status["meta_unmapped_history"][game] = history[-UNMAPPED_HISTORY_LEN:]
+
+        status["meta"][game] = {
+            "last_meta": data["generated_at"],
+            "league": data["league"],
+            "league_end_at": end_at.strftime("%Y-%m-%dT%H:%M:%SZ") if end_at else None,
+            "meta_job_summary": summary,
+            "stats_cache_stale": bool(stale_reasons),
+        }
+
+        if stale_reasons:
+            new_errors.append(
+                {"ts": data["generated_at"], "job": f"meta({game})", "detail": "stats_cache_stale: " + "; ".join(stale_reasons)}
+            )
+        if summary["unmapped_mod_pct"] >= 5.0:
+            new_errors.append(
+                {"ts": data["generated_at"], "job": f"meta({game})", "detail": f"unmapped_mod_pct={summary['unmapped_mod_pct']} >= 5% threshold"}
+            )
+
     if new_errors:
         status.setdefault("errors", []).extend(new_errors)
         status["errors"] = status["errors"][-10:]
@@ -561,10 +611,11 @@ def run_cleanup_once(cfg: dict[str, Any]) -> None:
 
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
-    deleted_meta = publisher.delete_old_blobs(
-        "poe2/meta/", older_than_days=retention_cfg.get("meta_files_days", 30), keep_names=frozenset({"latest.json"})
-    )
-    log.info("cleanup job: deleted %d old meta files from Firebase", deleted_meta)
+    for game in cfg.get("game_versions", ["poe2"]):
+        deleted_meta = publisher.delete_old_blobs(
+            f"{game}/meta/", older_than_days=retention_cfg.get("meta_files_days", 30), keep_names=frozenset({"latest.json"})
+        )
+        log.info("cleanup job(%s): deleted %d old meta files from Firebase", game, deleted_meta)
 
     deleted_failed = _cleanup_old_local_files(
         Path("data/failed_responses"), older_than_days=retention_cfg.get("failed_responses_days", 30)

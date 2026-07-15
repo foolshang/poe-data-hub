@@ -25,12 +25,19 @@ archetypes:
   - unknown
 
 # Gem name contains any of these -> "minion", regardless of weapon/element.
+# Shared across both games on purpose -- keyword-substring matching turned
+# out to already generalize well to PoE1 (phase 10 live-tested: 0% unknown
+# in a real 30-character weapon-attack sample once weapon fallback data was
+# included; see SPEC.md). "Animate" is the one gap PoE1's real skill names
+# (Animate Guardian, Animate Weapon) exposed -- doesn't affect PoE2, which
+# has no "Animate*" skill gems.
 minion_keywords:
   - "Summon"
   - "Raise"
   - "Herald of Purity"
   - "Spectral Wolf"
   - "Skeletal"
+  - "Animate"
 
 # Gem name contains any of these -> "totem-trap-mine".
 totem_trap_mine_keywords:

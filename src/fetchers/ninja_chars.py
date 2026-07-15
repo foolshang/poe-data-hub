@@ -7,14 +7,23 @@ https://poe.ninja/poe2/builds/<league>/character/<account>/<name> in a
 headless browser and inspecting network traffic (see
 data/samples/ninja_poe2_char_detail.json for the captured sample):
 
-  GET /poe2/api/builds/{version}/character
+  GET /{game}/api/builds/{version}/character
       ?account={account}&name={name}&overview={snapshotName}&timeMachine=
+
+PoE1 (phase 10) uses the exact same shape under `/poe1/` -- confirmed live
+2026-07-14 (data/samples/ninja_poe1_char_detail.json): same top-level keys,
+same `itemData`/`inventoryId`/mod-array structure, same `PassiveJewels`
+inventoryId for jewels. No code branching needed beyond the URL's game
+segment and `SLOT_BY_INVENTORY_ID` already covering every inventoryId seen
+in a real PoE1 character (Amulet/Belt/BodyArmour/Boots/Gloves/Helm/Offhand/
+Offhand2/Ring/Ring2/Weapon/Weapon2 -- no "Focus", PoE1 has no focus slot,
+consistent with it never appearing there).
 
 Mod text comes from `itemData.explicitMods` / `.implicitMods` / `.fracturedMods`
 — GGG-style display strings with reference-tag brackets, e.g.
 `"+24% to all [ElementalDamage|Elemental] [Resistances]"`. These are cleaned
 (bracket tags collapsed to their display portion) before being handed to
-src/processing/normalizer.py, which expects plain text matching the trade2
+src/processing/normalizer.py, which expects plain text matching the trade(2)
 stats table's templates — NOT poe.ninja's own internal `mods.explicit[].stats`
 keys, which use a different, non-trade-API vocabulary.
 
@@ -22,6 +31,14 @@ keys, which use a different, non-trade-API vocabulary.
 (SLOT_BY_INVENTORY_ID below); jewels use `PassiveJewels` for every base type
 and are split by `baseType` per spec 6.4 (jewel:emerald, jewel:diamond, ...).
 `Chakra` (PoE2 rune-socket items) has no slot in spec 8.2 and is skipped.
+
+PoE1's jewel `baseType` strings carry a trailing "Jewel" word PoE2's don't
+("Cobalt Jewel" vs PoE2's bare "Diamond"/"Emerald"), and cluster jewels carry
+a size prefix ("Medium Cluster Jewel", "Large Cluster Jewel", ...) -- both
+stripped in `_slugify_jewel_base` (phase 10) so PoE1 produces the same clean
+`jewel:cobalt`/`jewel:cluster`/`jewel:abyss` shape as PoE2's `jewel:diamond`,
+confirmed live 2026-07-14 against real PoE1 character data (Cobalt/Viridian/
+Prismatic jewels + Medium/Large Cluster Jewels all seen in one character).
 """
 from __future__ import annotations
 
@@ -38,9 +55,10 @@ from src.utils.http_client import HttpClient
 
 log = logging.getLogger(__name__)
 
-CHARACTER_URL_TEMPLATE = "https://poe.ninja/poe2/api/builds/{version}/character"
+CHARACTER_URL_TEMPLATE = "https://poe.ninja/{game}/api/builds/{version}/character"
 
 DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
+KNOWN_GAMES = {"poe1", "poe2"}
 
 SLOT_BY_INVENTORY_ID: dict[str, str] = {
     "Weapon": "weapon",
@@ -63,13 +81,21 @@ SLOT_BY_INVENTORY_ID: dict[str, str] = {
 # "[Foo]" -> "Foo" (no pipe = the bracket content IS the display text).
 _REF_TAG_RE = re.compile(r"\[([^\[\]|]+)(?:\|([^\[\]]+))?\]")
 
+# PoE1-only: "Small/Medium/Large Cluster Jewel" -> "Cluster Jewel" first, then
+# the trailing "Jewel" word strip below collapses it to just "Cluster".
+_CLUSTER_SIZE_PREFIX_RE = re.compile(r"^(?:Small|Medium|Large)\s+", re.IGNORECASE)
+_TRAILING_JEWEL_WORD_RE = re.compile(r"\bJewel\b", re.IGNORECASE)
+
 
 def _clean_mod_text(raw: str) -> str:
     return _REF_TAG_RE.sub(lambda m: m.group(2) if m.group(2) is not None else m.group(1), raw)
 
 
 def _slugify_jewel_base(base_type: str) -> str:
-    return "jewel:" + re.sub(r"[^a-z0-9]+", "", base_type.lower())
+    name = _CLUSTER_SIZE_PREFIX_RE.sub("", base_type.strip())
+    name = _TRAILING_JEWEL_WORD_RE.sub("", name).strip()
+    slug = re.sub(r"[^a-z0-9]+", "", name.lower())
+    return "jewel:" + (slug or "unknown")
 
 
 @dataclass(frozen=True)
@@ -99,8 +125,11 @@ class CharacterDetail:
 
 
 class NinjaCharsFetcher:
-    def __init__(self, http_client: HttpClient, failed_responses_dir: Path = DEFAULT_FAILED_RESPONSES_DIR):
+    def __init__(self, http_client: HttpClient, game: str = "poe2", failed_responses_dir: Path = DEFAULT_FAILED_RESPONSES_DIR):
+        if game not in KNOWN_GAMES:
+            raise ValueError(f"ninja_chars: unknown game {game!r}")
         self._http = http_client
+        self._game = game
         self._failed_dir = failed_responses_dir
         self._failed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,7 +146,7 @@ class NinjaCharsFetcher:
             "overview": snapshot.snapshot_name,
             "timeMachine": "",
         }
-        return f"{CHARACTER_URL_TEMPLATE.format(version=snapshot.version)}?{urllib.parse.urlencode(params)}"
+        return f"{CHARACTER_URL_TEMPLATE.format(game=self._game, version=snapshot.version)}?{urllib.parse.urlencode(params)}"
 
     def _validate(self, data: Any, url: str) -> None:
         required = ("account", "name", "level", "class", "items")

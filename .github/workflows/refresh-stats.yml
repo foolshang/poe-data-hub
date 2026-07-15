@@ -1,9 +1,18 @@
-name: Refresh trade2 stats cache
+name: Refresh mod-stats cache (PoE1 + PoE2)
 
 # GGG permanently blocks trade2/data/stats from GCP IPs (see CLAUDE.md), so
 # the deploy VM can't refresh this table itself. This runs from GitHub's
 # hosted runners instead (confirmed reachable) and publishes the result to
 # Firebase Storage, which ModNormalizer checks first on every environment.
+#
+# Phase 10: also refreshes PoE1's trade/data/stats (not trade2) to its own
+# Firebase path (internal/stats_cache_poe1.json) -- routed through this same
+# GitHub Actions path out of caution even though trade/data/stats wasn't
+# independently reconfirmed blocked from GCP IPs the way trade2 was; both
+# games are fetched/validated/published independently by tools/refresh_stats.py
+# so one game's failure can't corrupt or block the other's cache. Both blob
+# paths stay under internal/, which is all the scoped service account below
+# has IAM permission to touch (CLAUDE.md) -- no permission changes needed.
 #
 # A failed run just shows red here -- no extra alerting -- because
 # ModNormalizer falls back to a stale on-disk/Firebase copy on failure

@@ -12,6 +12,7 @@ data/*
 data/samples/_*
 # Runtime-overwritten on every successful builds-search decode, not a fixture.
 data/samples/last_good_builds.bin
+data/samples/last_good_builds_poe1.bin
 
 *.log
 .env

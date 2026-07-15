@@ -31,6 +31,14 @@ window when no HC variant can be found, same reasoning as event files.
 Only checks freshness when `index.hardcore` is present; a null value is
 never flagged as a problem.
 
+Meta freshness (phase 10: both games) reads `status.json`'s
+`meta.{game}.last_meta` -- the nested per-game shape `_update_meta_status`
+writes. Both games' meta run together in one job invocation (`run_meta_once`
+loops poe2 then poe1 and writes both games' status in the same call), so
+there's no asymmetric-migration window here the way prices/news had: the
+first meta run under the new code populates both games' `status.meta.*` in
+one write, not two separate job schedules drifting in and out of sync.
+
 This is deliberately a second, independent system from the
 healthchecks.io dead-man-switch pings the hub sends itself (Layer 1, see
 src/main.py's _ping_healthcheck and CLAUDE.md): Layer 1 watches "is the
@@ -114,7 +122,7 @@ def check_meta_freshness(last_meta: str, now: Optional[datetime] = None) -> Opti
     now = now or datetime.now(timezone.utc)
     age_hours = (now - _parse_iso(last_meta)).total_seconds() / 3600
     if age_hours > META_MAX_AGE_HOURS:
-        return f"status.json last_meta is {age_hours:.1f} hours old (> {META_MAX_AGE_HOURS})"
+        return f"meta.last_meta is {age_hours:.1f} hours old (> {META_MAX_AGE_HOURS})"
     return None
 
 
@@ -171,9 +179,11 @@ def run() -> int:
 
     try:
         status = requests.get(STATUS_URL, timeout=15).json()
-        problem = check_meta_freshness(status["last_meta"])
-        if problem:
-            problems.append(problem)
+        meta_by_game = status["meta"]
+        for game in ("poe2", "poe1"):
+            problem = check_meta_freshness(meta_by_game[game]["last_meta"])
+            if problem:
+                problems.append(f"{game}: {problem}")
     except Exception as e:
         problems.append(f"could not fetch/parse {STATUS_URL}: {e}")
 
@@ -182,7 +192,7 @@ def run() -> int:
             print(f"::error::{p}")
         return 1
 
-    print("OK: prices, news (all games), and meta are fresh")
+    print("OK: prices, news, and meta (all games) are fresh")
     return 0
 
 

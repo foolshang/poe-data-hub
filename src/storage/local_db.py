@@ -9,6 +9,14 @@ Three tables:
                  league age (early-league = res/life, late-league = damage),
                  so keeping mod_counts across leagues lets next league compare
                  against "last league's early days" (spec 6.5).
+
+`snapshots.game` added phase 10 (PoE1 meta) via an explicit migration
+(`_migrate`) rather than just adding it to `_SCHEMA`'s `CREATE TABLE IF NOT
+EXISTS`, since that clause is a no-op on a table that already exists --
+production already has real poe2-only snapshot rows from phases 1-9 that
+need this new column added in place, not silently ignored. Existing rows
+backfill to `'poe2'` (correct: every row inserted before this migration was
+poe2, this project's only game with a meta pipeline until now).
 """
 from __future__ import annotations
 
@@ -73,13 +81,20 @@ class LocalDb:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(snapshots)")}
+        if "game" not in cols:
+            self._conn.execute("ALTER TABLE snapshots ADD COLUMN game TEXT NOT NULL DEFAULT 'poe2'")
 
     def close(self) -> None:
         self._conn.close()
 
     def insert_snapshot(
         self,
+        game: str,
         league: str,
         days_since_league_start: Optional[int],
         sample_total: int,
@@ -89,11 +104,12 @@ class LocalDb:
     ) -> int:
         cur = self._conn.execute(
             """INSERT INTO snapshots
-               (snapshot_date, league, days_since_league_start, sample_total,
+               (snapshot_date, game, league, days_since_league_start, sample_total,
                 unique_characters_fetched, fetch_failed, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                game,
                 league,
                 days_since_league_start,
                 sample_total,

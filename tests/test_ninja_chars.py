@@ -12,15 +12,23 @@ from pathlib import Path
 import pytest
 
 from src.fetchers.ninja_builds import SnapshotVersion
-from src.fetchers.ninja_chars import DedupedCharacterCache, NinjaCharsFetcher, _clean_mod_text
+from src.fetchers.ninja_chars import DedupedCharacterCache, NinjaCharsFetcher, _clean_mod_text, _slugify_jewel_base
 
 SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "samples" / "ninja_poe2_char_detail.json"
+POE1_SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "samples" / "ninja_poe1_char_detail.json"
 
 SNAPSHOT = SnapshotVersion(
     league_url="runesofaldur",
     league_name="Runes of Aldur",
     version="0848-20260708-30655",
     snapshot_name="runes-of-aldur",
+)
+
+POE1_SNAPSHOT = SnapshotVersion(
+    league_url="mirage",
+    league_name="Mirage",
+    version="1036-20260714-09576",
+    snapshot_name="mirage",
 )
 
 
@@ -113,3 +121,78 @@ def test_deduped_cache_counts_failures_without_raising(tmp_path, sample_payload)
     result = cache.get("acc", "char")
     assert result is None
     assert cache.failed_count == 1
+
+
+def test_unknown_game_raises_at_construction(tmp_path):
+    with pytest.raises(ValueError, match="unknown game"):
+        NinjaCharsFetcher(http_client=_FakeHttpClient({}), game="poe3", failed_responses_dir=tmp_path)
+
+
+# ── phase 10: jewel base-type slugification (both games) ──────────────────
+
+def test_slugify_jewel_base_poe1_color_jewel():
+    assert _slugify_jewel_base("Cobalt Jewel") == "jewel:cobalt"
+    assert _slugify_jewel_base("Crimson Jewel") == "jewel:crimson"
+    assert _slugify_jewel_base("Viridian Jewel") == "jewel:viridian"
+    assert _slugify_jewel_base("Prismatic Jewel") == "jewel:prismatic"
+
+
+def test_slugify_jewel_base_poe1_cluster_collapses_size_prefix():
+    assert _slugify_jewel_base("Small Cluster Jewel") == "jewel:cluster"
+    assert _slugify_jewel_base("Medium Cluster Jewel") == "jewel:cluster"
+    assert _slugify_jewel_base("Large Cluster Jewel") == "jewel:cluster"
+
+
+def test_slugify_jewel_base_poe1_abyss():
+    assert _slugify_jewel_base("Abyss Jewel") == "jewel:abyss"
+
+
+def test_slugify_jewel_base_poe1_named_abyss_variants():
+    # Discovered live (phase 10 meta smoke test, 2026-07-15): PoE1 abyss
+    # jewels don't share one generic "Abyss Jewel" baseType -- each named
+    # variant is its own baseType string, so they naturally split into their
+    # own buckets rather than collapsing into a single "jewel:abyss".
+    assert _slugify_jewel_base("Searching Eye Jewel") == "jewel:searchingeye"
+    assert _slugify_jewel_base("Murderous Eye Jewel") == "jewel:murderouseye"
+    assert _slugify_jewel_base("Ghastly Eye Jewel") == "jewel:ghastlyeye"
+    assert _slugify_jewel_base("Hypnotic Eye Jewel") == "jewel:hypnoticeye"
+
+
+def test_slugify_jewel_base_poe1_timeless():
+    assert _slugify_jewel_base("Timeless Jewel") == "jewel:timeless"
+
+
+def test_slugify_jewel_base_poe2_unchanged():
+    assert _slugify_jewel_base("Diamond") == "jewel:diamond"
+    assert _slugify_jewel_base("Time-Lost Emerald") == "jewel:timelostemerald"
+
+
+# ── phase 10: PoE1 character fetch (real sample) ───────────────────────────
+
+@pytest.fixture
+def poe1_fetcher(tmp_path):
+    payload = json.loads(POE1_SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FakeHttpClient(payload)
+    return NinjaCharsFetcher(http_client=http, game="poe1", failed_responses_dir=tmp_path / "failed")
+
+
+def test_fetch_poe1_character_basic_fields(poe1_fetcher: NinjaCharsFetcher):
+    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
+    assert detail.char_class == "Pathfinder"
+    assert detail.level == 100
+    assert detail.main_skill == "Vaal Caustic Arrow"
+
+
+def test_fetch_poe1_character_jewels_split_by_clean_base_type(poe1_fetcher: NinjaCharsFetcher):
+    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
+    jewel_slots = {i.slot for i in detail.items if i.slot.startswith("jewel:")}
+    assert "jewel:cobalt" in jewel_slots
+    assert "jewel:viridian" in jewel_slots
+    assert "jewel:prismatic" in jewel_slots
+    assert "jewel:cluster" in jewel_slots
+    assert "jewel:cobaltjewel" not in jewel_slots  # the un-stripped bug this fix prevents
+
+
+def test_fetch_poe1_character_no_focus_slot(poe1_fetcher: NinjaCharsFetcher):
+    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
+    assert all(i.slot != "focus" for i in detail.items)

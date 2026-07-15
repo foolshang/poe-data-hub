@@ -1,18 +1,32 @@
-"""Fetch PoE2 character lists per equipped-item-slot from poe.ninja's builds
-pages (spec sections 3.3 and 6.1).
+"""Fetch PoE1/PoE2 character lists per equipped-item-slot from poe.ninja's
+builds pages (spec sections 3.3 and 6.1).
 
 There is no public documentation or `.proto` schema for this API — it was
 reverse-engineered live on 2026-07-08 by running a headless browser against
 https://poe.ninja/poe2/builds/<league> and inspecting network traffic (see
 data/samples/ninja_poe2_build_index_state.json, ninja_poe2_index_state.json,
 ninja_poe2_builds_search*.json, ninja_poe2_dict_*.json for captured samples).
+
+PoE1 (phase 10) uses the **exact same** endpoints/binary format under
+`/poe1/` instead of `/poe2/` — confirmed live 2026-07-14 (data/samples/
+ninja_poe1_index_state.json, ninja_poe1_builds_search_ring.json,
+ninja_poe1_char_detail.json, ninja_poe1_dict_*.json): same field numbers,
+same value-list names (name/account/class/skills/level/...), same
+dictionary-ref system. The one real difference: PoE1's `snapshotVersions[]`
+entries carry a `type` field ("exp", "depthsolo", "streamers", ...) with
+multiple entries per league name — poe.ninja's Delve-Depth-Solo and
+streamer-only leaderboards, not general population data. PoE2 entries have
+no `type` field at all (single entry per league). `resolve_snapshot` always
+picks `type == "exp"` (defaulting missing-key to "exp" so PoE2 keeps
+matching unconditionally) since "exp" is the general population sample this
+project wants for build/mod-frequency stats, not a niche leaderboard.
 Endpoints:
 
-  GET /poe2/api/data/index-state
+  GET /{game}/api/data/index-state
       -> JSON. `snapshotVersions[]` maps a league display name to the
          {version, snapshotName} pair the search endpoint needs.
 
-  GET /poe2/api/builds/{version}/search?overview={snapshotName}&items={value}
+  GET /{game}/api/builds/{version}/search?overview={snapshotName}&items={value}
       -> a custom binary format (protobuf wire format with no known message
          schema — decoded field-by-field via src/utils/pbwire.py). The `items`
          query param name is plural and filters to characters with that
@@ -64,15 +78,21 @@ from src.utils.http_client import HttpClient
 
 log = logging.getLogger(__name__)
 
-INDEX_STATE_URL = "https://poe.ninja/poe2/api/data/index-state"
-SEARCH_URL_TEMPLATE = "https://poe.ninja/poe2/api/builds/{version}/search"
-DICTIONARY_URL_TEMPLATE = "https://poe.ninja/poe2/api/builds/dictionary/{hash}"
+INDEX_STATE_URL_TEMPLATE = "https://poe.ninja/{game}/api/data/index-state"
+SEARCH_URL_TEMPLATE = "https://poe.ninja/{game}/api/builds/{version}/search"
+DICTIONARY_URL_TEMPLATE = "https://poe.ninja/{game}/api/builds/dictionary/{hash}"
 
 DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
-LAST_GOOD_SAMPLE_PATH = Path("data/samples/last_good_builds.bin")
+
+# snapshotVersions entries whose `type` is not this are a different
+# leaderboard (Delve Depth Solo, streamer-only, ...), not the general
+# population sample this project wants -- see module docstring. PoE2
+# entries have no `type` key at all; `entry.get("type", _WANTED_SNAPSHOT_TYPE)`
+# treats that as an implicit match, same as before this existed.
+_WANTED_SNAPSHOT_TYPE = "exp"
 
 # slot -> value(s) passed as the "items" filter (poe.ninja's ITEMS facet).
-# Discovered live 2026-07-08 from the "item" dictionary
+# PoE2 discovered live 2026-07-08 from the "item" dictionary
 # (data/samples/ninja_poe2_dict_6cf3eaac2a9cfcf9dd7d89a9063407550338c3a2.json).
 # PoE2 flasks/charms are capped at Magic rarity, hence "Magic" not "Rare" for those two.
 # "weapon" and "offhand" have no generic bucket in the ITEMS facet -- it's split by base
@@ -82,7 +102,7 @@ LAST_GOOD_SAMPLE_PATH = Path("data/samples/last_good_builds.bin")
 # and dedupes them by (name, account).
 # "jewel" here samples all rare jewels; per-base-type split (jewel:emerald etc, spec 6.4)
 # is not available from this endpoint and needs a separate approach -- see spec Status.
-SLOT_FILTERS: dict[str, list[str]] = {
+POE2_SLOT_FILTERS: dict[str, list[str]] = {
     "helmet": ["Rare Helmet"],
     "body": ["Rare Body Armour"],
     "gloves": ["Rare Gloves"],
@@ -101,6 +121,41 @@ SLOT_FILTERS: dict[str, list[str]] = {
     "charm": ["Magic Charm"],
     "jewel": ["Rare Jewel"],
 }
+
+# PoE1 (phase 10) discovered live 2026-07-14 from the "item" dictionary
+# (data/samples/ninja_poe1_dict_93136ab7072cadfa5a91590fc91b5ca29e6a66ef.json,
+# fetched via the dictRef named "item" in a search response -- not re-saved
+# separately since it's 1371 entries dominated by unique-item names; the
+# generic Rare/Magic category filters below were extracted from it, and
+# re-deriving the list is a one-line dictionary fetch if needed again).
+# No "focus"/"charm" slot exists in PoE1 at all -- confirmed absent from the
+# item facet entirely, not just omitted here. No "Crossbow"/"Quarterstaff"/
+# "Sceptre"/"Spear" either (PoE2-only weapon types); PoE1 instead has
+# Claw/Dagger/Sword/Axe types PoE2's own filter list doesn't include (that's
+# PoE2's own facet gap, pre-existing, not touched here). "Rare Fishing Rod"
+# exists as a real filter value but is deliberately excluded -- a gathering
+# tool, not combat gear, not meaningful build/mod data.
+POE1_SLOT_FILTERS: dict[str, list[str]] = {
+    "helmet": ["Rare Helmet"],
+    "body": ["Rare Body Armour"],
+    "gloves": ["Rare Gloves"],
+    "boots": ["Rare Boots"],
+    "belt": ["Rare Belt"],
+    "ring": ["Rare Ring"],
+    "amulet": ["Rare Amulet"],
+    "weapon": [
+        "Rare Bow", "Rare Claw", "Rare Dagger",
+        "Rare One Handed Axe", "Rare One Handed Mace", "Rare One Handed Sword",
+        "Rare Two Handed Axe", "Rare Two Handed Mace", "Rare Two Handed Sword",
+        "Rare Staff", "Rare Wand",
+    ],
+    "offhand": ["Rare Shield"],
+    "quiver": ["Rare Quiver"],
+    "flask": ["Magic Flask"],
+    "jewel": ["Rare Jewel"],
+}
+
+SLOT_FILTERS_BY_GAME: dict[str, dict[str, list[str]]] = {"poe2": POE2_SLOT_FILTERS, "poe1": POE1_SLOT_FILTERS}
 
 
 @dataclass(frozen=True)
@@ -124,43 +179,50 @@ class NinjaBuildsFetcher:
     def __init__(
         self,
         http_client: HttpClient,
+        game: str = "poe2",
         failed_responses_dir: Path = DEFAULT_FAILED_RESPONSES_DIR,
-        last_good_sample_path: Path = LAST_GOOD_SAMPLE_PATH,
+        last_good_sample_path: Optional[Path] = None,
     ):
+        if game not in SLOT_FILTERS_BY_GAME:
+            raise ValueError(f"ninja_builds: unknown game {game!r}")
         self._http = http_client
+        self._game = game
+        self._slot_filters = SLOT_FILTERS_BY_GAME[game]
         self._failed_dir = failed_responses_dir
         self._failed_dir.mkdir(parents=True, exist_ok=True)
-        self._last_good_sample_path = last_good_sample_path
+        self._last_good_sample_path = last_good_sample_path or Path(f"data/samples/last_good_builds_{game}.bin")
         self._dict_cache: dict[str, list[str]] = {}
 
     def resolve_snapshot(self, league_name: str) -> SnapshotVersion:
-        data = self._http.get_json(INDEX_STATE_URL)
-        self._validate_index_state(data)
+        url = INDEX_STATE_URL_TEMPLATE.format(game=self._game)
+        data = self._http.get_json(url)
+        self._validate_index_state(data, url)
         for entry in data["snapshotVersions"]:
-            if entry.get("name") == league_name:
+            if entry.get("name") == league_name and entry.get("type", _WANTED_SNAPSHOT_TYPE) == _WANTED_SNAPSHOT_TYPE:
                 return SnapshotVersion(
                     league_url=entry["url"],
                     league_name=entry["name"],
                     version=entry["version"],
                     snapshot_name=entry["snapshotName"],
                 )
-        raise ValueError(f"ninja_builds: no snapshotVersions entry for league {league_name!r}")
+        raise ValueError(f"ninja_builds({self._game}): no snapshotVersions entry for league {league_name!r}")
 
-    def _validate_index_state(self, data: Any) -> None:
+    def _validate_index_state(self, data: Any, url: str) -> None:
         if not isinstance(data, dict) or not isinstance(data.get("snapshotVersions"), list) or not data["snapshotVersions"]:
-            self._dump_failed_json(data, INDEX_STATE_URL)
-            raise ValueError(f"ninja_builds: index-state validation failed: {INDEX_STATE_URL}")
+            self._dump_failed_json(data, url)
+            raise ValueError(f"ninja_builds({self._game}): index-state validation failed: {url}")
 
     def fetch_all(
         self, snapshot: SnapshotVersion, slots: Optional[list[str]] = None
     ) -> tuple[dict[str, list[CharacterRef]], dict[str, int]]:
-        """Fetch the character sample for every slot in `slots` (default: all of SLOT_FILTERS).
+        """Fetch the character sample for every slot in `slots` (default: all
+        slots for this instance's game).
 
         Returns (per_slot characters, per_slot fetched-count) — counting
         failures is the caller's job via the second dict having fewer/zero
         entries for a slot that errored (logged, never raised).
         """
-        slots = slots if slots is not None else list(SLOT_FILTERS)
+        slots = slots if slots is not None else list(self._slot_filters)
         by_slot: dict[str, list[CharacterRef]] = {}
         counts: dict[str, int] = {}
         for slot in slots:
@@ -174,9 +236,9 @@ class NinjaBuildsFetcher:
         return by_slot, counts
 
     def fetch_slot(self, snapshot: SnapshotVersion, slot: str) -> list[CharacterRef]:
-        item_filters = SLOT_FILTERS.get(slot)
+        item_filters = self._slot_filters.get(slot)
         if item_filters is None:
-            raise ValueError(f"ninja_builds: unknown slot {slot!r}")
+            raise ValueError(f"ninja_builds({self._game}): unknown slot {slot!r}")
 
         seen: set[tuple[str, str]] = set()
         merged: list[CharacterRef] = []
@@ -200,7 +262,7 @@ class NinjaBuildsFetcher:
             self._validate_search_response(value_lists, url)
         except pb.ProtoParseError as e:
             self._dump_failed_bytes(raw, url)
-            raise ValueError(f"ninja_builds: could not parse search response ({url}): {e}") from e
+            raise ValueError(f"ninja_builds({self._game}): could not parse search response ({url}): {e}") from e
 
         self._save_last_good_sample(raw)
         return self._extract_characters(value_lists, dict_refs)
@@ -217,7 +279,7 @@ class NinjaBuildsFetcher:
             log.warning("ninja_builds: could not save last-good sample", exc_info=True)
 
     def _build_search_url(self, snapshot: SnapshotVersion, item_filter: str) -> str:
-        base = SEARCH_URL_TEMPLATE.format(version=snapshot.version)
+        base = SEARCH_URL_TEMPLATE.format(game=self._game, version=snapshot.version)
         overview = urllib.parse.quote(snapshot.snapshot_name)
         items = urllib.parse.quote(item_filter)
         return f"{base}?overview={overview}&items={items}"
@@ -300,7 +362,7 @@ class NinjaBuildsFetcher:
             return []
         if hash_ in self._dict_cache:
             return self._dict_cache[hash_]
-        url = DICTIONARY_URL_TEMPLATE.format(hash=hash_)
+        url = DICTIONARY_URL_TEMPLATE.format(game=self._game, hash=hash_)
         raw = self._http.get_bytes(url)
         try:
             values = [pb.as_str(v) for v in pb.all_of(raw, 2)]

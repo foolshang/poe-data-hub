@@ -1,22 +1,32 @@
 """Normalizes item mod text into stat_id-keyed templates (spec section 7.1).
 
-Loads the GGG trade2 `data/stats` table and caches it to disk for up to 7
-days. Every raw mod line scraped from an item (via ninja_chars) is matched
-against this table by replacing its numeric rolls with `#` and doing an
-exact lookup against the known template text: GGG's own table already
-represents placeholders as literal `#`, so no per-template regex is needed.
+Loads GGG's `data/stats` table (trade2 for PoE2, trade for PoE1 -- phase 10,
+see STATS_URL_BY_GAME) and caches it to disk for up to 7 days. Every raw mod
+line scraped from an item (via ninja_chars) is matched against this table by
+replacing its numeric rolls with `#` and doing an exact lookup against the
+known template text: GGG's own table already represents placeholders as
+literal `#`, so no per-template regex is needed. PoE1's `trade/data/stats`
+has the identical `{"result": [{"id", "entries": [{"id", "text"}]}]}` shape
+as trade2 (confirmed live 2026-07-14, data/samples/poe1_trade_stats.json --
+15496 entries across 13 groups, including the "explicit"/"implicit"/
+"fractured" groups this project actually uses), so no parsing changes were
+needed beyond making the URL/cache path/Firebase path per-game.
 
 Load order (added 2026-07-10, see CLAUDE.md): **Firebase
-(`internal/stats_cache.json`, refreshed weekly by a GitHub Actions workflow)
--> direct GGG fetch -> stale on-disk cache as a last resort**. Firebase is
-checked first every call, not just when the local disk cache has expired --
-GGG permanently blocks requests to `trade2/data/stats` from GCP IPs (a 403,
+(`internal/stats_cache.json` for PoE2 / `internal/stats_cache_poe1.json` for
+PoE1, both refreshed weekly by the same GitHub Actions workflow) -> direct
+GGG fetch -> stale on-disk cache as a last resort**. Firebase is checked
+first every call, not just when the local disk cache has expired -- GGG
+permanently blocks requests to `trade2/data/stats` from GCP IPs (a 403,
 confirmed live from the production VM), so the direct-GGG tier only ever
 succeeds from non-cloud environments; Firebase is the primary source for
-anything running on the deploy VM. The disk-cache tier ignores its own TTL
-entirely (any stale data beats crashing the whole meta job) since GGG rarely
-removes a `stat_id`, only adds new ones -- staleness there mostly means
-"missing recently-added stats", not "wrong mappings".
+anything running on the deploy VM. `trade/data/stats` (PoE1) wasn't
+independently reconfirmed blocked the same way, but is routed through the
+same GitHub-Actions-refreshed Firebase path out of caution regardless (see
+tools/refresh_stats.py). The disk-cache tier ignores its own TTL entirely
+(any stale data beats crashing the whole meta job) since GGG rarely removes
+a `stat_id`, only adds new ones -- staleness there mostly means "missing
+recently-added stats", not "wrong mappings".
 """
 from __future__ import annotations
 
@@ -32,9 +42,18 @@ from src.utils.http_client import HttpClient
 
 log = logging.getLogger(__name__)
 
-STATS_URL = "https://www.pathofexile.com/api/trade2/data/stats"
-DEFAULT_CACHE_PATH = Path("data/cache/ggg_trade2_stats.json")
-DEFAULT_UNMAPPED_LOG_PATH = Path("data/unmapped_mods.log")
+STATS_URL_BY_GAME = {
+    "poe2": "https://www.pathofexile.com/api/trade2/data/stats",
+    "poe1": "https://www.pathofexile.com/api/trade/data/stats",
+}
+DEFAULT_CACHE_PATH_BY_GAME = {
+    "poe2": Path("data/cache/ggg_trade2_stats.json"),
+    "poe1": Path("data/cache/ggg_trade_stats_poe1.json"),
+}
+DEFAULT_UNMAPPED_LOG_PATH_BY_GAME = {
+    "poe2": Path("data/unmapped_mods.log"),
+    "poe1": Path("data/unmapped_mods_poe1.log"),
+}
 
 # Only these mod kinds are tracked on items, per spec 7.1.
 KNOWN_MOD_KINDS = {"explicit", "implicit", "fractured"}
@@ -85,16 +104,21 @@ class ModNormalizer:
     def __init__(
         self,
         http_client: HttpClient,
-        cache_path: Path = DEFAULT_CACHE_PATH,
+        game: str = "poe2",
+        cache_path: Optional[Path] = None,
         cache_ttl_seconds: float = 7 * 24 * 60 * 60,
-        unmapped_log_path: Path = DEFAULT_UNMAPPED_LOG_PATH,
+        unmapped_log_path: Optional[Path] = None,
         firebase_stats_url: Optional[str] = None,
     ):
+        if game not in STATS_URL_BY_GAME:
+            raise ValueError(f"normalizer: unknown game {game!r}")
+        self._game = game
+        self._stats_url = STATS_URL_BY_GAME[game]
         self._http = http_client
-        self._cache_path = cache_path
+        self._cache_path = cache_path or DEFAULT_CACHE_PATH_BY_GAME[game]
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._ttl = cache_ttl_seconds
-        self._unmapped_log_path = unmapped_log_path
+        self._unmapped_log_path = unmapped_log_path or DEFAULT_UNMAPPED_LOG_PATH_BY_GAME[game]
         self._unmapped_log_path.parent.mkdir(parents=True, exist_ok=True)
         self._firebase_stats_url = firebase_stats_url
         # mod_kind -> {template text ("+# to maximum Life"): stat_id}
@@ -132,11 +156,11 @@ class ModNormalizer:
                 source = "disk_cache_stale"
                 cache_age_days = round((time.time() - fetched_at) / 86400, 1)
                 log.warning(
-                    "normalizer: trade2 stats unavailable from Firebase and GGG (%s) -- "
+                    "normalizer(%s): stats unavailable from Firebase and GGG (%s) -- "
                     "falling back to disk cache (%s days old; some environments, e.g. cloud-hosted "
                     "VMs, get a persistent 403 from GGG's API even though it works fine from a "
                     "residential IP; see CLAUDE.md)",
-                    e, cache_age_days,
+                    self._game, e, cache_age_days,
                 )
 
         self.stats_source = source
@@ -152,13 +176,13 @@ class ModNormalizer:
             fetched_at = float(envelope["fetched_at"])
             _validate_stats_shape(data)
         except Exception as e:
-            log.warning("normalizer: could not load stats from Firebase (%s), falling back", e)
+            log.warning("normalizer(%s): could not load stats from Firebase (%s), falling back", self._game, e)
             return None
         self._write_disk_cache(data, fetched_at)
         return data, fetched_at
 
     def _fetch_from_ggg(self) -> dict[str, Any]:
-        data = self._http.get_json(STATS_URL)
+        data = self._http.get_json(self._stats_url)
         _validate_stats_shape(data)
         return data
 

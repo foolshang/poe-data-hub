@@ -1,28 +1,37 @@
-"""Standalone tool: refresh the GGG trade2/data/stats cache on Firebase.
+"""Standalone tool: refresh GGG's mod-stats cache for both games on Firebase.
 
 GGG permanently blocks trade2/data/stats requests from GCP IPs (confirmed
 live 2026-07-09 from the production VM -- see CLAUDE.md), so the deploy VM
 can't refresh this table itself. This script is meant to run from anywhere
 that CAN reach GGG -- a dev machine, or (primarily) the refresh-stats.yml
-GitHub Actions workflow -- and publishes the result to Firebase Storage at
-internal/stats_cache.json, which ModNormalizer checks first in every
-environment (see src/processing/normalizer.py's Firebase -> GGG direct ->
-disk cache load order).
+GitHub Actions workflow -- and publishes the result to Firebase Storage,
+which ModNormalizer checks first in every environment (see
+src/processing/normalizer.py's Firebase -> GGG direct -> disk cache load
+order).
+
+Phase 10: PoE1 uses `trade/data/stats` (not `trade2`) -- a different GGG
+endpoint, published to its own Firebase path so PoE1 and PoE2 mod
+normalization never share a cache. Routed through the same GitHub-Actions
+path as trade2 out of caution (not independently reconfirmed blocked from
+GCP IPs the way trade2 was, but there's no reason to assume GGG's blocking
+rule is scoped to trade2 specifically, and this path is already known-safe).
+Each game is fetched/validated/published independently -- one game's
+failure must never block or corrupt the other's cache.
 
 Usage:
     GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json python -m tools.refresh_stats
 
 Validates the response shape and a minimum total-entry-count floor before
 uploading -- a malformed or truncated response must never overwrite a good
-cache. Exits non-zero (and uploads nothing) on any fetch or validation
-failure, so a scheduled run just shows red in CI rather than corrupting
-production data.
+cache. Exits non-zero (and uploads nothing for the failing game(s)) on any
+fetch or validation failure, so a scheduled run just shows red in CI rather
+than corrupting production data.
 """
 from __future__ import annotations
 
 import logging
 import sys
-import time
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -31,23 +40,37 @@ from src.storage.publisher import PricesPublisher
 
 log = logging.getLogger("refresh_stats")
 
-STATS_URL = "https://www.pathofexile.com/api/trade2/data/stats"
 USER_AGENT = "poe-data-hub-stats-refresh/0.1 (contact: foolshang.live@gmail.com)"
 BUCKET_NAME = "poe-data-hub"
-BLOB_PATH = "internal/stats_cache.json"
-# Sanity floor: the real table has 10k+ entries across all groups. A
-# truncated or broken response would be far smaller than this.
+# Sanity floor: the real tables have thousands of entries across all groups.
+# A truncated or broken response would be far smaller than either game's
+# floor -- PoE1's trade/data/stats has ~15.5k entries live-checked
+# 2026-07-14, PoE2's trade2 has 10k+; both floors kept well below their
+# real live count so routine table growth never trips this.
 MIN_TOTAL_ENTRIES = 5000
 
 
-def fetch_stats() -> dict[str, Any]:
-    resp = requests.get(STATS_URL, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}, timeout=15)
+@dataclass(frozen=True)
+class StatsTarget:
+    game: str
+    stats_url: str
+    blob_path: str
+
+
+TARGETS: list[StatsTarget] = [
+    StatsTarget("poe2", "https://www.pathofexile.com/api/trade2/data/stats", "internal/stats_cache.json"),
+    StatsTarget("poe1", "https://www.pathofexile.com/api/trade/data/stats", "internal/stats_cache_poe1.json"),
+]
+
+
+def fetch_stats(stats_url: str) -> dict[str, Any]:
+    resp = requests.get(stats_url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}, timeout=15)
     resp.raise_for_status()
     return resp.json()
 
 
 def validate(data: Any) -> int:
-    """Returns the total entry count if `data` looks like a real trade2
+    """Returns the total entry count if `data` looks like a real trade(2)
     stats response; raises ValueError otherwise (caller must not upload)."""
     if not isinstance(data, dict) or not isinstance(data.get("result"), list) or not data["result"]:
         raise ValueError(f"unexpected shape: {type(data).__name__}")
@@ -61,32 +84,45 @@ def validate(data: Any) -> int:
     return total
 
 
-def run() -> int:
+def refresh_one(publisher: PricesPublisher, target: StatsTarget) -> bool:
+    """Returns True on success. Never raises -- logs and returns False so
+    one game's failure doesn't stop the other's refresh."""
+    import time
+
     try:
-        data = fetch_stats()
+        data = fetch_stats(target.stats_url)
     except requests.RequestException as e:
-        log.error("fetch failed: %s", e)
-        return 1
+        log.error("%s: fetch failed: %s", target.game, e)
+        return False
 
     try:
         total_entries = validate(data)
     except ValueError as e:
-        log.error("validation failed, NOT uploading (keeping whatever's already published): %s", e)
-        return 1
+        log.error("%s: validation failed, NOT uploading (keeping whatever's already published): %s", target.game, e)
+        return False
 
     envelope = {"fetched_at": time.time(), "data": data}
 
-    publisher = PricesPublisher(bucket_name=BUCKET_NAME)
     try:
-        publisher.publish(envelope, BLOB_PATH, cache_control="no-cache")
+        publisher.publish(envelope, target.blob_path, cache_control="no-cache")
     except Exception as e:
-        log.error("upload (or post-upload verification) failed: %s", e)
-        return 1
+        log.error("%s: upload (or post-upload verification) failed: %s", target.game, e)
+        return False
 
     log.info(
-        "uploaded trade2 stats to gs://%s/%s: %d groups, %d entries",
-        BUCKET_NAME, BLOB_PATH, len(data["result"]), total_entries,
+        "%s: uploaded stats to gs://%s/%s: %d groups, %d entries",
+        target.game, BUCKET_NAME, target.blob_path, len(data["result"]), total_entries,
     )
+    return True
+
+
+def run() -> int:
+    publisher = PricesPublisher(bucket_name=BUCKET_NAME)
+    results = {target.game: refresh_one(publisher, target) for target in TARGETS}
+    if not all(results.values()):
+        failed = [game for game, ok in results.items() if not ok]
+        log.error("stats refresh failed for: %s", ", ".join(failed))
+        return 1
     return 0
 
 

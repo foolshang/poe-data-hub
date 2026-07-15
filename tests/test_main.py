@@ -14,6 +14,7 @@ from src.main import (
     _ping_healthcheck,
     _update_meta_status,
     _update_status,
+    run_meta_once,
     run_prices_once,
 )
 from src.storage.publisher import PricesPublisher
@@ -84,38 +85,153 @@ def test_no_stats_fetched_at_only_checks_history():
     assert reasons == []
 
 
+def _meta_result(pct, fetched_at=None, league="Runes of Aldur"):
+    return {
+        "data": {"generated_at": "2026-07-10T00:00:00Z", "league": league},
+        "end_at": None,
+        "summary": {"unmapped_mod_pct": pct, "stats_cache_fetched_at": fetched_at or time.time()},
+    }
+
+
 def test_update_meta_status_tracks_rolling_history(tmp_path):
     publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
     publisher._client = _FakeStorageClient()
 
-    data = {"generated_at": "2026-07-10T00:00:00Z", "league": "Runes of Aldur"}
     for pct in [2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7]:
-        _update_meta_status(
-            publisher, data=data, end_at=None,
-            summary={"unmapped_mod_pct": pct, "stats_cache_fetched_at": time.time()},
-        )
+        _update_meta_status(publisher, {"poe2": _meta_result(pct)})
 
     status = publisher.fetch_previous("status.json")
-    assert len(status["meta_unmapped_history"]) == UNMAPPED_HISTORY_LEN
+    history = status["meta_unmapped_history"]["poe2"]
+    assert len(history) == UNMAPPED_HISTORY_LEN
     # oldest entry (2.0) should have been dropped once the window filled past 7
-    assert 2.0 not in status["meta_unmapped_history"]
-    assert status["stats_cache_stale"] is False
+    assert 2.0 not in history
+    assert status["meta"]["poe2"]["stats_cache_stale"] is False
 
 
 def test_update_meta_status_flags_stale_and_logs_error(tmp_path):
     publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
     publisher._client = _FakeStorageClient()
 
-    data = {"generated_at": "2026-07-10T00:00:00Z", "league": "Runes of Aldur"}
     old_ts = time.time() - 45 * 86400
-    _update_meta_status(
-        publisher, data=data, end_at=None,
-        summary={"unmapped_mod_pct": 1.0, "stats_cache_fetched_at": old_ts},
-    )
+    _update_meta_status(publisher, {"poe2": _meta_result(1.0, fetched_at=old_ts)})
 
     status = publisher.fetch_previous("status.json")
-    assert status["stats_cache_stale"] is True
+    assert status["meta"]["poe2"]["stats_cache_stale"] is True
     assert any("stats_cache_stale" in e["detail"] for e in status["errors"])
+
+
+def test_update_meta_status_tracks_poe1_and_poe2_histories_independently(tmp_path):
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+
+    _update_meta_status(publisher, {
+        "poe2": _meta_result(2.0, league="Runes of Aldur"),
+        "poe1": _meta_result(9.0, league="Mirage"),
+    })
+
+    status = publisher.fetch_previous("status.json")
+    assert status["meta"]["poe2"]["league"] == "Runes of Aldur"
+    assert status["meta"]["poe1"]["league"] == "Mirage"
+    assert status["meta_unmapped_history"]["poe2"] == [2.0]
+    assert status["meta_unmapped_history"]["poe1"] == [9.0]
+    # poe1's high unmapped_mod_pct crosses the 5% threshold -> its own error, unrelated to poe2
+    assert any("meta(poe1)" == e["job"] for e in status["errors"])
+    assert not any("meta(poe2)" == e["job"] for e in status["errors"])
+
+
+def test_update_meta_status_keeps_other_game_untouched_when_one_fails(tmp_path):
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+
+    _update_meta_status(publisher, {
+        "poe2": _meta_result(2.0, league="Runes of Aldur"),
+        "poe1": _meta_result(3.0, league="Mirage"),
+    })
+    # next run: poe1 failed entirely (absent from results) -- poe2 updates,
+    # poe1's last-known entry must survive untouched.
+    _update_meta_status(publisher, {"poe2": _meta_result(2.5, league="Runes of Aldur")})
+
+    status = publisher.fetch_previous("status.json")
+    assert status["meta"]["poe1"]["league"] == "Mirage"  # untouched
+    assert status["meta_unmapped_history"]["poe2"] == [2.0, 2.5]
+
+
+def _fake_meta_result(game: str) -> dict:
+    league = "Runes of Aldur" if game == "poe2" else "Mirage"
+    return {
+        "data": {
+            "schema_version": 2, "generated_at": "2026-07-15T02:00:00Z", "league": league,
+            "mods": [], "sample": {"per_slot": {}, "unique_characters_fetched": 10, "fetch_failed": 0},
+            "archetype_distribution": [], "stat_dictionary": [], "days_since_league_start": 5,
+        },
+        "end_at": None,
+        "summary": {"unmapped_mod_pct": 1.0, "stats_cache_fetched_at": 1752500000.0, "duration_seconds": 1.0},
+    }
+
+
+def test_run_meta_once_publishes_both_games_and_pings_once(tmp_path):
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {"meta_ping_url": "https://hc-ping.com/test-meta"},
+    }
+
+    created_publishers: list = []
+
+    def fake_run_meta_for_game(http, publisher, cfg, game):
+        return _fake_meta_result(game)
+
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main._run_meta_for_game", side_effect=fake_run_meta_for_game), \
+         patch("src.main.HttpClient") as MockHttpClient:
+        mock_http = MockHttpClient.return_value
+        result = run_meta_once(cfg)
+
+    # one ping for the whole job, not per game
+    mock_http.get_bytes.assert_called_once_with("https://hc-ping.com/test-meta")
+
+    # run_meta_once's own return value + status.json are what it actually
+    # builds from _run_meta_for_game's results (the per-game latest.json/
+    # dated-file publish happens *inside* the mocked-out function, so it's
+    # covered by _run_meta_for_game's own tests / the live smoke test, not
+    # re-asserted here -- this test is about the orchestration layer).
+    assert result["poe2"]["league"] == "Runes of Aldur"
+    assert result["poe1"]["league"] == "Mirage"
+
+    publisher = created_publishers[-1]
+    status = publisher.fetch_previous("status.json")
+    assert status["meta"]["poe2"]["league"] == "Runes of Aldur"
+    assert status["meta"]["poe1"]["league"] == "Mirage"
+
+
+def test_run_meta_once_one_game_failure_does_not_block_the_other(tmp_path):
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {},
+    }
+
+    def fake_run_meta_for_game(http, publisher, cfg, game):
+        if game == "poe2":
+            raise RuntimeError("simulated poe2 meta failure")
+        return _fake_meta_result(game)
+
+    created_publishers: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main._run_meta_for_game", side_effect=fake_run_meta_for_game):
+        result = run_meta_once(cfg)
+
+    assert "poe2" not in result
+    assert result["poe1"]["league"] == "Mirage"
+
+    publisher = created_publishers[-1]
+    status = publisher.fetch_previous("status.json")
+    assert "poe2" not in status.get("meta", {})
+    assert status["meta"]["poe1"]["league"] == "Mirage"
 
 
 def test_update_status_keeps_other_games_untouched_on_partial_failure(tmp_path):

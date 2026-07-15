@@ -75,3 +75,38 @@ def test_malformed_response_raises_and_dumps(tmp_path):
     with pytest.raises(ValueError, match="validation failed"):
         fetcher.fetch("Runes of Aldur")
     assert len(list((tmp_path / "failed").glob("*.json"))) == 1
+
+
+def test_unknown_game_raises_at_construction(tmp_path):
+    with pytest.raises(ValueError, match="unknown game"):
+        LeagueDatesFetcher(http_client=_FakeHttpClient({}), game="poe3", failed_responses_dir=tmp_path / "failed")
+
+
+# ── phase 10: PoE1, including its differently-worded end-date phrasing ────
+
+POE1_SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "samples" / "steam_news_poe1_wide.json"
+
+
+@pytest.fixture
+def poe1_fetcher(tmp_path) -> LeagueDatesFetcher:
+    payload = json.loads(POE1_SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FakeHttpClient(payload)
+    return LeagueDatesFetcher(http_client=http, game="poe1", failed_responses_dir=tmp_path / "failed")
+
+
+def test_poe1_finds_real_launch_date(poe1_fetcher: LeagueDatesFetcher):
+    # "Path of Exile: Mirage is Now Available" -- confirmed live 2026-07-14.
+    dates = poe1_fetcher.fetch("Mirage")
+    assert dates.start_at is not None
+
+
+def test_poe1_end_date_parses_present_tense_phrasing(poe1_fetcher: LeagueDatesFetcher):
+    # PoE1's real end-of-league post says "...the league ends on July 20th
+    # 3PM PDT" (present tense, no "will") -- different from PoE2's "will end
+    # on <date>". Title is also worded differently ("What Happens When The
+    # Mirage League Ends" vs PoE2's "What Will Happen When ... Ends") but
+    # both contain the substring "league ends" the matcher looks for.
+    dates = poe1_fetcher.fetch("Mirage")
+    assert dates.end_at is not None
+    assert dates.end_at.month == 7
+    assert dates.end_at.day == 20

@@ -288,3 +288,52 @@ def test_stat_dictionary_embeds_all_known_kinds(normalizer: ModNormalizer):
     kinds = {e["mod_kind"] for e in entries}
     assert kinds == {"explicit", "implicit", "fractured"}
     assert any(e["stat_id"] == "explicit.stat_3299347043" for e in entries)
+
+
+def test_unknown_game_raises_at_construction(tmp_path):
+    with pytest.raises(ValueError, match="unknown game"):
+        ModNormalizer(
+            http_client=_FakeHttpClient({}), game="poe3",
+            cache_path=tmp_path / "c.json", unmapped_log_path=tmp_path / "u.log",
+        )
+
+
+# ── phase 10: PoE1 uses trade/data/stats (not trade2), same shape ─────────
+
+POE1_SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "samples" / "poe1_trade_stats.json"
+
+
+@pytest.fixture
+def poe1_normalizer(tmp_path) -> ModNormalizer:
+    payload = json.loads(POE1_SAMPLE_PATH.read_text(encoding="utf-8"))
+    http = _FakeHttpClient(payload)
+    n = ModNormalizer(
+        http_client=http,
+        game="poe1",
+        cache_path=tmp_path / "poe1_stats_cache.json",
+        unmapped_log_path=tmp_path / "poe1_unmapped_mods.log",
+    )
+    n.load()
+    return n
+
+
+def test_poe1_normalizer_loads_real_sample(poe1_normalizer: ModNormalizer):
+    assert poe1_normalizer.stats_source == "ggg_direct"
+    kinds = {e["mod_kind"] for e in poe1_normalizer.stat_dictionary()}
+    assert {"explicit", "implicit", "fractured"} <= kinds
+
+
+def test_poe1_normalizer_matches_simple_life_mod(poe1_normalizer: ModNormalizer):
+    result = poe1_normalizer.normalize("+87 to maximum Life", "explicit")
+    assert len(result) == 1
+    assert result[0].mod_kind == "explicit"
+    assert result[0].values == [87.0]
+
+
+def test_poe1_and_poe2_normalizers_use_different_stats_urls():
+    from src.processing.normalizer import STATS_URL_BY_GAME
+
+    assert STATS_URL_BY_GAME["poe1"] != STATS_URL_BY_GAME["poe2"]
+    assert "trade2" in STATS_URL_BY_GAME["poe2"]
+    assert "trade2" not in STATS_URL_BY_GAME["poe1"]
+    assert "trade/" in STATS_URL_BY_GAME["poe1"]

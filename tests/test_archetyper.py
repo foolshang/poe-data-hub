@@ -8,6 +8,14 @@ def test_minion_keyword_wins_over_everything():
     assert a.classify("Summon Skeletal Warrior", "Fire Staff") == "minion"
 
 
+def test_animate_keyword_classifies_minion_poe1():
+    # Real PoE1 skill names (live-tested phase 10) that don't match
+    # "Summon"/"Raise"/"Skeletal" but are genuinely minion skills.
+    a = Archetyper()
+    assert a.classify("Animate Guardian", None) == "minion"
+    assert a.classify("Animate Weapon of Ranged Arms", "Bow") == "minion"
+
+
 def test_totem_trap_mine_wins_over_element():
     a = Archetyper()
     assert a.classify("Fire Trap", "Wand") == "totem-trap-mine"

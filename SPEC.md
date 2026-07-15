@@ -235,44 +235,102 @@ actively deleted (`PricesPublisher.delete_blobs_not_in`, same mechanism
 event-league cleanup uses) so that `index.json`'s `hardcore: null` always
 means "the file genuinely doesn't exist", never "we just didn't update it".
 
-### 8.2 `poe2/meta/latest.json`
+### 8.2 `{game}/meta/latest.json` (`{game}` = `poe1` | `poe2`, PoE1 added phase 10)
 
-Live on Firebase since 2026-07-08. Shape matches spec exactly: mods
-normalized to `stat_id` via `trade2/data/stats` templates, `value_min` (first
-number)/`value_max` (last number) per mod, jewels counted per-base-type
-per-gem (`jewel:emerald` etc, denominator = gem count not character count),
-`count >= 5` noise floor before publish, `stat_dictionary` embedded.
+Live on Firebase since 2026-07-08 (PoE2), 2026-07-15 (PoE1). Same schema for
+both games. Mods normalized to `stat_id` via the game's own trade-stats
+templates (`trade2/data/stats` for PoE2, `trade/data/stats` for PoE1 --
+8.3), `value_min` (first number)/`value_max` (last number) per mod, jewels
+counted per-base-type per-gem (`jewel:emerald` etc, denominator = gem count
+not character count), `count >= 5` noise floor before publish,
+`stat_dictionary` embedded.
 
 `days_since_league_start` is computed from `src/fetchers/league_dates.py`
 (Steam news API, not GGG — see below), `null` only if no matching launch
-announcement is found. `status.json`'s `league_end_at` comes from the same
-fetcher and is `null` for most of a league's life (GGG only posts an "ends"
-announcement in the final stretch).
+announcement is found. `status.json`'s `meta.{game}.league_end_at` comes
+from the same fetcher and is `null` for most of a league's life (GGG only
+posts an "ends" announcement in the final stretch).
+
+**PoE1 data collected around 2026-07 is heavily league/event-biased and
+should be read with that in mind**: it was gathered in the last days of the
+Mirage challenge league, overlapping the closing days of the "Return of the
+Ancestors" event -- late-league gear/mod distributions skew toward
+end-game/damage-focused builds (per the general "meta shifts with league
+age" pattern spec 6.5 already documents), and a portion of the sampled
+population was specifically playing the event rather than a fresh-start
+Mirage character. **The real value of PoE1 meta starts from the first day
+of the *next* PoE1 league** (see 8.3 and "Job cadence" below for how the hub
+is already set up to capture that automatically). This is flagged here, not
+hidden, per CLAUDE.md's "never silently drop/misrepresent" spirit even
+though it's not a price field.
+
+PoE1's builds/character-detail endpoints are **byte-for-byte the same
+protobuf/JSON format** as PoE2's, just under `/poe1/` instead of `/poe2/`
+(confirmed live 2026-07-14 -- see `src/fetchers/ninja_builds.py` and
+`ninja_chars.py` module docstrings for the one real structural difference,
+`snapshotVersions[]` entries carrying a `type` field PoE2's lack). PoE1 has
+no `focus`/`charm` slots (confirmed absent from its item facet entirely) and
+uses the classic jewel system -- Cobalt/Crimson/Viridian/Prismatic (colors)
++ Cluster (all sizes collapsed to one `jewel:cluster` bucket) + named Abyss
+jewel variants (`jewel:searchingeye`, `jewel:murderouseye`,
+`jewel:ghastlyeye`, `jewel:hypnoticeye` -- PoE1 abyss jewels don't share one
+generic base type, unlike Cluster) + `jewel:timeless`, all via the same
+`_slugify_jewel_base()` PoE2 uses (extended phase 10 to strip a trailing
+"Jewel" word and a cluster-size prefix, which PoE2's simpler bare names like
+"Diamond" never had to begin with).
 
 Known limitations, all logged rather than silently papered over:
 
 - Sample size per slot is capped at poe.ninja's default ~100-row page; no
   working pagination/offset param was found on the builds-search endpoint,
   so `meta.sample_per_slot` in `config.yaml` has no effect yet (documented
-  in `src/fetchers/ninja_builds.py`).
+  in `src/fetchers/ninja_builds.py`). Applies to both games.
 - `weapon` and `offhand` slots are unions of several base-type sub-fetches
-  (Bow, Wand, Sceptre, ... / Buckler, Shield) merged and deduped client-side,
-  since poe.ninja's `items` filter has no generic "any weapon" bucket and
-  repeated `items=` query params are AND, not OR (verified live).
+  merged and deduped client-side, since poe.ninja's `items` filter has no
+  generic "any weapon" bucket and repeated `items=` query params are AND,
+  not OR (verified live). PoE2: Bow, Crossbow, Mace, Quarterstaff, Sceptre,
+  Spear, Staff, Wand / Buckler, Shield. PoE1: Bow, Claw, Dagger, Axe, Mace,
+  Sword, Staff, Wand / Shield (no Crossbow/Quarterstaff/Sceptre/Spear --
+  PoE2-only weapon types; no Buckler).
 - `ModNormalizer` has two text-fallback rules beyond direct template
-  matching, both discovered from real unmapped-log data: (1) trade2's table
-  normalizes plurals away ("Has # Charm Slot", never "Slots") -- the
-  trailing word is singularized and retried; (2) the game displays a
+  matching, both discovered from real unmapped-log data: (1) the trade
+  stats table normalizes plurals away ("Has # Charm Slot", never "Slots")
+  -- the trailing word is singularized and retried; (2) the game displays a
   negative "increased X" roll as "reduced X" (and "more X" as "less X"),
   but the table only lists the positive form -- retried with the word
   swapped back and the value negated. Together these fixed 55% of a sampled
-  unmapped-log corpus (1211/2208). Remaining unmapped mods are dominated by
-  unique-item-only flavor text and per-player-level scaling implicits that
-  genuinely aren't in the trade2 stats table.
-- Unmapped mod rate measured live: 0.88% and 2.76% on early test runs;
-  5.57% on a full run before the plural/negation fallbacks existed (still
-  under the DoD ceiling isn't guaranteed run-to-run without them — this is
-  why `status.json` logs an error when `unmapped_mod_pct >= 5`).
+  PoE2 unmapped-log corpus (1211/2208). Remaining unmapped mods are
+  dominated by unique-item-only flavor text and per-player-level scaling
+  implicits that genuinely aren't in either game's trade stats table.
+- Unmapped mod rate measured live (PoE2): 0.88% and 2.76% on early test
+  runs; 5.57% on a full run before the plural/negation fallbacks existed
+  (still under the DoD ceiling isn't guaranteed run-to-run without them —
+  this is why `status.json` logs an error when `unmapped_mod_pct >= 5`, now
+  tracked independently per game in `meta_unmapped_history.{game}`).
+- Archetype classification rules (`config/archetype_rules.yaml`) are
+  **shared between both games on purpose**, not split -- keyword-substring
+  matching against element names ("Fire", "Cold", ...) turned out to
+  already generalize well: live-tested phase 10 against a real 30-character
+  PoE1 sample (weapon slot, so every character had real weapon data for the
+  fallback path) and got **0% unknown**. The one real gap PoE1's actual
+  skill names exposed was "Animate Guardian"/"Animate Weapon" (real PoE1
+  minion skills) not matching any minion keyword -- fixed by adding
+  `"Animate"` to `minion_keywords` (harmless for PoE2, which has no
+  `Animate*` skill gems).
+
+### 8.3 Internal GGG mod-stats cache (`internal/stats_cache.json`, `internal/stats_cache_poe1.json`)
+
+Not a public consumer-facing schema (lives under `internal/`, referenced
+internally by `ModNormalizer` -- see 8.2), but documented here since it's
+part of the meta pipeline's data flow. Refreshed weekly by
+`tools/refresh_stats.py` via `.github/workflows/refresh-stats.yml` (GitHub
+Actions, not the deploy VM -- GGG permanently blocks `trade2/data/stats`
+requests from GCP IPs, confirmed live 2026-07-09; `trade/data/stats`
+(PoE1) wasn't independently reconfirmed blocked the same way but is routed
+through the same safe path out of caution, phase 10). Both games fetched,
+validated, and published independently in one script run -- one game's
+failure can't corrupt or block the other's cache. Envelope shape:
+`{"fetched_at": <unix epoch>, "data": <raw GGG trade(2)/data/stats response>}`.
 
 ### 8.4 `{game}/news/latest.json` (`{game}` = `poe1` | `poe2`, phase 8)
 
@@ -378,13 +436,74 @@ poe-data-hub/
 ├── poe1/prices/index.json
 ├── poe1/prices/events/{sanitized-league}.json   (0..n)
 ├── poe1/prices/hardcore/latest.json             (only while an HC variant is found)
+├── poe1/meta/latest.json                        (phase 10)
+├── poe1/meta/2026-07-15.json                    (phase 10)
 ├── poe1/news/latest.json
 ├── mtx/latest.json
+├── internal/stats_cache.json                    (PoE2 trade2 stats, weekly refresh)
+├── internal/stats_cache_poe1.json                (PoE1 trade stats, weekly refresh, phase 10)
 └── status.json
 ```
 
 `Cache-Control`: `max-age=300` สำหรับ prices/index/events, `max-age=3600`
 สำหรับ meta, `max-age=120` สำหรับ news/mtx.
+
+#### Job cadence (phase 10: PoE1 meta added to the same nightly slot)
+
+`run_meta_once` loops `game_versions` (poe2 then poe1) **sequentially in one
+job invocation**, same `schedule.meta_cron_hour_thailand` cron slot as
+before (default 02:00 ICT) -- not two separate schedules. One game's
+failure never blocks or corrupts the other's publish (each game's whole
+pipeline runs in its own try/except in `run_meta_once`); one Layer-1
+healthchecks.io ping fires only after *both* games have been attempted
+(task 7: a failure in either game must be visible, not maskable by the
+other game happening to succeed).
+
+Real measured combined wall-clock time and peak RSS (both games, full run,
+production VM): **[TODO: filled in after the live deploy-verification run
+-- see the Status entry below for the actual numbers once measured]**.
+PoE2 alone was already measured at ~40 minutes; PoE1's own category/slot
+counts are comparable (22-23 poe.ninja builds-search filter requests per
+game, see the rate-limit subsection below), so a roughly-doubled combined
+total was expected going in, but VM wall-clock is dominated by unique
+*character* count after dedup (one `NinjaCharsFetcher` request per unique
+character, all sharing the same `poe.ninja` 2s rate-limit bucket the prices
+job also uses), which isn't knowable without an actual measured run --
+hence deferring to a real number rather than assuming the estimate. Either
+way this runs once/day in an off-peak cron slot with no other job
+contending for the same time window, so even a materially-larger-than-2x
+total remains comfortably inside a nightly maintenance window.
+
+#### Readiness for PoE1's next league launch (phase 10)
+
+The whole point of adding PoE1 meta now, before Mirage/Ancestors ends, is
+to capture data starting the *first day* of the next PoE1 league without
+needing another deploy. Confirmed ready, no further code changes needed:
+
+- **`LeagueDetector(game="poe1")`** already auto-detects the new league from
+  poe.ninja's league list with zero code changes -- it's the same generic
+  token-matching logic PoE2 already uses (phase 2), and `poe1_override` in
+  `config.yaml` only needs updating if a *second* non-excluded PoE1 league
+  is active simultaneously (an overlapping event, same ambiguity class as
+  today's Mirage/Ancestors) and auto-guess picks wrong -- not required for
+  every league transition.
+- **`LeagueDatesFetcher(game="poe1")`** (phase 10) already resolves
+  start/end dates from PoE1's own Steam news feed (separate appid, 238960)
+  with the same "now available" / "league ends" pattern matching PoE2 uses
+  -- including the present-tense "ends on" phrasing fix this phase found
+  (see 8.2), which was specifically discovered by testing against Mirage's
+  *own* real end-of-league Steam post, not a hypothetical.
+- **`schedule.meta_runs_per_day_league_start`** (existing config knob, spec
+  9) already applies to the *whole* meta job now that both games run in one
+  invocation -- bumping it to 2-4 runs/day during the first few days of a
+  new league (either game) speeds up both games' initial data collection
+  together, not just one. No new per-game config was needed for this.
+
+No dry-run against a hypothetical "next league" was possible (it doesn't
+exist yet), but every piece was independently live-tested against Mirage's
+real data this phase: league detection, league dates (including the actual
+end-of-league post), and the full builds→chars→normalize→aggregate→publish
+pipeline end-to-end (see the Status entry below).
 
 #### Job cadence (phase 8)
 
@@ -438,6 +557,23 @@ utilization. `LeagueDetector`'s own league-list request is cached 12h
 (`league.cache_ttl_seconds`) and amortizes to effectively zero marginal
 requests per cycle (the hardcore lookup reuses the same cached fetch, no
 extra request).
+
+**Pre-existing characteristic worth flagging now that meta job runtime
+roughly doubles (phase 10), not introduced by this phase**: `run_scheduler`
+uses APScheduler's `BlockingScheduler` with its default executor
+(`ThreadPoolExecutor(max_workers=10)`), and `max_instances=1` is set
+*per job id* (prices, meta, news, cleanup each independently), not across
+jobs -- so a meta run overlapping a prices cycle is possible and each job
+builds its own fresh `HttpClient`/`RateLimiter` via `_build_http_client()`,
+meaning the two run with **independent** rate-limit state against the same
+`poe.ninja` host during any overlap window, not a shared budget. This
+already existed pre-phase-10 (PoE2-only meta ran ~40min, up to two 20-min
+prices cycles could fall inside that window); phase 10's ~2x meta runtime
+roughly doubles the overlap window too. Not fixed here (would need a
+shared rate limiter across concurrently-running jobs, a real architecture
+change, and is out of this phase's scope) -- noted so it's a known,
+documented characteristic rather than a silent gap, and worth its own
+follow-up if poe.ninja 429s are ever observed during that window.
 
 ## Binding conditions (from project owner, still in force)
 
@@ -572,3 +708,32 @@ extra request).
       padded estimate still only ~31%. `tools/heartbeat_check.py` now also
       checks hardcore freshness via `index.json`'s `hardcore` key (never
       flags a null value). 183/183 tests passing.
+- [x] Phase 10: PoE1 meta pipeline (`poe1/meta/latest.json`, 8.2), reusing
+      the whole poe2 pipeline (sample→dedupe→normalize→archetype→aggregate→
+      publish) unchanged at every layer except the fetcher URLs -- PoE1's
+      builds-search/character-detail endpoints turned out to be
+      byte-for-byte the same protobuf/JSON format as PoE2's (confirmed live
+      2026-07-14), which was the one open question this phase had to answer
+      before committing to an approach. `ModNormalizer` now game-aware
+      (`trade/data/stats` for PoE1 vs `trade2` for PoE2, 8.3); PoE1's stats
+      cache refreshed by the same `refresh-stats.yml` GitHub Actions
+      workflow, published to its own `internal/stats_cache_poe1.json`.
+      `LeagueDatesFetcher` made game-aware too and, while verifying it
+      against Mirage's real Steam posts, found and fixed a real bug: PoE1's
+      end-of-league post phrasing is present-tense ("ends on", not PoE2's
+      "will end on") and the original PoE2-only regex would have silently
+      failed to parse it -- caught by testing against real data, not
+      hypothetically. `_slugify_jewel_base()` extended to handle PoE1's
+      jewel-base naming (trailing "Jewel" word, cluster-size prefixes,
+      named Abyss variants -- see 8.2). Archetype rules stayed a single
+      shared file by design after live-testing showed 0% unknown against a
+      real 30-character PoE1 sample; only gap found was "Animate" as a
+      minion keyword. `LocalDb.snapshots` gained a `game` column via an
+      explicit migration (backfills existing rows as `'poe2'`).
+      `_update_meta_status`/`heartbeat_check.py` restructured to nested
+      per-game shape (`status.meta.{game}`), same precedent as phase 7's
+      prices restructuring. Confirmed league-detection/league-dates need no
+      further changes to auto-capture PoE1's next league launch from day
+      one. PoE1 data collected now is explicitly flagged as late-league/
+      event-biased (8.2) -- real value starts next PoE1 league.
+      215/215 tests passing.
