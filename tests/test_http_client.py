@@ -2,6 +2,7 @@
 "โดน 429/timeout แล้วระบบ backoff เองโดยไม่ crash", spec section 4)."""
 from __future__ import annotations
 
+import time
 from unittest.mock import Mock, patch
 
 import pytest
@@ -65,6 +66,49 @@ def test_4xx_client_error_does_not_retry(client: HttpClient):
         with pytest.raises(HttpError, match="client error 404"):
             client.get_json("https://example.com/x")
     assert mock_get.call_count == 1
+
+
+def test_429_with_retry_after_broadcasts_to_shared_rate_limiter(tmp_path):
+    """2026-07-15 fix: a 429+Retry-After must push the *shared* RateLimiter's
+    per-host state out, so any other job/thread sharing the same instance
+    backs off too instead of independently retrying into a longer ban."""
+    rl = RateLimiter(default_interval_seconds=0.0)
+    http = HttpClient(rl, max_retries=3, timeout_seconds=5, fetch_log_path=tmp_path / "fetch.log")
+    responses = [_resp(429, headers={"Retry-After": "30"}), _resp(200, {"ok": True})]
+    with patch("requests.get", side_effect=responses), patch("time.sleep"):
+        http.get_json("https://example.com/x")
+
+    next_allowed = rl._next_allowed.get("example.com")
+    assert next_allowed is not None
+    assert next_allowed - time.monotonic() > 20  # ~30s minus test overhead
+
+
+def test_429_exhausted_retries_still_broadcasts_retry_after(tmp_path):
+    rl = RateLimiter(default_interval_seconds=0.0)
+    http = HttpClient(rl, max_retries=1, timeout_seconds=5, fetch_log_path=tmp_path / "fetch.log")
+    with patch("requests.get", return_value=_resp(429, headers={"Retry-After": "45"})), patch("time.sleep"):
+        with pytest.raises(HttpError):
+            http.get_json("https://example.com/x")
+
+    next_allowed = rl._next_allowed.get("example.com")
+    assert next_allowed is not None
+    assert next_allowed - time.monotonic() > 35
+
+
+def test_429_without_retry_after_header_does_not_push_shared_state_forward(tmp_path):
+    """wait() itself always records *some* next-allowed time (even with a
+    0s interval) -- the thing note_retry_after must NOT do here is push
+    that time meaningfully into the future when there's no Retry-After
+    header to broadcast, since the fallback exponential backoff is meant to
+    stay local to this one retrying call, not announced host-wide."""
+    rl = RateLimiter(default_interval_seconds=0.0)
+    http = HttpClient(rl, max_retries=2, timeout_seconds=5, fetch_log_path=tmp_path / "fetch.log")
+    responses = [_resp(429, headers={}), _resp(200, {"ok": True})]
+    with patch("requests.get", side_effect=responses), patch("time.sleep"):
+        http.get_json("https://example.com/x")
+    next_allowed = rl._next_allowed.get("example.com")
+    assert next_allowed is not None
+    assert next_allowed - time.monotonic() < 1.0
 
 
 def test_get_bytes_returns_raw_content(client: HttpClient):

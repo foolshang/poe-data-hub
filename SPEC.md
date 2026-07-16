@@ -324,13 +324,26 @@ Not a public consumer-facing schema (lives under `internal/`, referenced
 internally by `ModNormalizer` -- see 8.2), but documented here since it's
 part of the meta pipeline's data flow. Refreshed weekly by
 `tools/refresh_stats.py` via `.github/workflows/refresh-stats.yml` (GitHub
-Actions, not the deploy VM -- GGG permanently blocks `trade2/data/stats`
-requests from GCP IPs, confirmed live 2026-07-09; `trade/data/stats`
-(PoE1) wasn't independently reconfirmed blocked the same way but is routed
-through the same safe path out of caution, phase 10). Both games fetched,
-validated, and published independently in one script run -- one game's
-failure can't corrupt or block the other's cache. Envelope shape:
+Actions, not the deploy VM -- GGG permanently blocks both `trade2/data/stats`
+(PoE2, confirmed 2026-07-09) and `trade/data/stats` (PoE1, confirmed
+2026-07-15 -- see CLAUDE.md's "deploy gotcha" note) from GCP IPs). Both
+games fetched, validated, and published independently in one script run --
+one game's failure can't corrupt or block the other's cache. Envelope shape:
 `{"fetched_at": <unix epoch>, "data": <raw GGG trade(2)/data/stats response>}`.
+
+**Operational note (learned the hard way, 2026-07-15)**: PoE1 meta's very
+first run on the deploy VM failed outright -- `internal/stats_cache_poe1.json`
+didn't exist yet (this blob path didn't exist before phase 10's code merged,
+and the existing weekly cron had last run *before* that, so it never
+populated it), so `ModNormalizer.load()` fell through Firebase (404) ->
+direct GGG (403, blocked) -> disk cache (nothing there yet either) and
+raised, failing that cycle's PoE1 meta run entirely (caught by
+`run_meta_once`'s per-game try/except -- PoE2 was unaffected). Fixed by
+manually triggering `refresh-stats.yml` (`gh workflow run`) once, then
+re-running the meta job. Lesson generalized in CLAUDE.md: **any new
+stats-cache Firebase path needs an actual manually-triggered
+`refresh-stats.yml` run before its first meta job on the VM, not just
+"routed through a safe path" reasoning** -- verify the blob exists.
 
 ### 8.4 `{game}/news/latest.json` (`{game}` = `poe1` | `poe2`, phase 8)
 
@@ -510,20 +523,63 @@ healthchecks.io ping fires only after *both* games have been attempted
 (task 7: a failure in either game must be visible, not maskable by the
 other game happening to succeed).
 
-Real measured combined wall-clock time and peak RSS (both games, full run,
-production VM): **[TODO: filled in after the live deploy-verification run
--- see the Status entry below for the actual numbers once measured]**.
-PoE2 alone was already measured at ~40 minutes; PoE1's own category/slot
-counts are comparable (22-23 poe.ninja builds-search filter requests per
-game, see the rate-limit subsection below), so a roughly-doubled combined
-total was expected going in, but VM wall-clock is dominated by unique
-*character* count after dedup (one `NinjaCharsFetcher` request per unique
-character, all sharing the same `poe.ninja` 2s rate-limit bucket the prices
-job also uses), which isn't knowable without an actual measured run --
-hence deferring to a real number rather than assuming the estimate. Either
-way this runs once/day in an off-peak cron slot with no other job
-contending for the same time window, so even a materially-larger-than-2x
-total remains comfortably inside a nightly maintenance window.
+Real measured wall-clock time and peak RSS, production VM, from the
+2026-07-15 02:00 ICT (19:00 UTC) scheduled run -- the first clean,
+uncontended measurement (see the job-collision incident in CLAUDE.md for
+why the first attempt at this measurement didn't produce a clean number):
+
+- **PoE2**: started 19:00:00 UTC, published 19:44:13 UTC -- **44m13s**,
+  peak RSS **197.4 MB**, 1056 mods (3518 before the count>=5 filter).
+- **PoE1**: **[TODO: still pending -- this same run's PoE1 stage collided
+  with a manually-launched retry (see CLAUDE.md), got throttled by
+  poe.ninja's server-side rate limiting, and neither run produced a clean
+  number. The service was restarted and the job-lock/shared-rate-limiter
+  fixes below were added specifically so this can't happen again; a clean
+  PoE1 number will be captured on the next successful run and filled in
+  here.]**
+
+PoE2's clean number came in noticeably above the pre-phase-10 ~40min
+estimate/baseline (197.4MB peak RSS is also higher than earlier informal
+poe2-only runs) -- both are plausible normal day-to-day variance (sample
+composition, character count) rather than a regression, but worth
+rechecking against a few more days of real runs once PoE1 is live too.
+PoE1's own category/slot counts are comparable to poe2's (22-23 poe.ninja
+builds-search filter requests per game, see the rate-limit subsection
+below), so a roughly-doubled combined total is still the expectation, to
+be confirmed once PoE1's own clean number lands. Either way this runs
+once/day in an off-peak cron slot with no other job contending for the
+same time window, so even a materially-larger-than-2x total remains
+comfortably inside a nightly maintenance window.
+
+#### Meta job collision incident + fixes (2026-07-15)
+
+While capturing the numbers above, a manually-launched `--run-meta-once`
+retry collided with the already-running scheduled cron (see CLAUDE.md for
+the full root-cause writeup -- both independently hammered poe.ninja and
+triggered its server-side rate limiting for 2+ hours before being caught
+and fixed by a service restart). Three permanent fixes landed as a result,
+all covered by tests (`tests/test_job_lock.py`, `tests/test_rate_limiter.py`,
+plus additions to `tests/test_http_client.py` and `tests/test_main.py`):
+
+1. **`src/utils/job_lock.py`** -- a cross-process filesystem lock
+   (`data/locks/{job_name}.lock`). `run_meta_once` acquires the `"meta"`
+   lock before doing any work; since the scheduler and the manual CLI both
+   call this same function, a second concurrent attempt from either source
+   now skips cleanly and logs `meta job: skip -- previous run still active`
+   instead of colliding. Stale locks (holder pid no longer alive) self-clear
+   rather than jamming the job forever after a crash.
+2. **`RateLimiter.note_retry_after(host, seconds)`** -- a 429's
+   `Retry-After` header now pushes that host's next-allowed time out for
+   *every* caller sharing the same `RateLimiter` instance, not just the one
+   that received the 429.
+3. **`src/main._build_http_client`** now returns one `RateLimiter` shared
+   by every job in the process instead of a fresh instance per job call --
+   without this, fix 2 has no one else to actually broadcast to.
+
+Also added: `status.json`'s new `running_jobs.{job_name}` field (pid +
+`started_at`), so a human can check what's currently running before
+launching a manual CLI retry instead of guessing from `ps`/journalctl --
+additive, no `schema_version` bump (this file has never had one; see 8.6).
 
 #### Readiness for PoE1's next league launch (phase 10)
 

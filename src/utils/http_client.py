@@ -79,8 +79,14 @@ class HttpClient:
 
             if resp.status_code == 429:
                 self._log_request(host, url, 429, start, attempt, "retry")
+                retry_after = self._parse_retry_after(resp.headers.get("Retry-After"))
+                if retry_after is not None:
+                    # Broadcast to every other caller sharing this rate
+                    # limiter (see RateLimiter.note_retry_after) -- even on
+                    # the final failing attempt, so other threads/jobs still
+                    # benefit from what this call learned.
+                    self._rate_limiter.note_retry_after(host, retry_after)
                 if attempt < self._max_retries:
-                    retry_after = self._parse_retry_after(resp.headers.get("Retry-After"))
                     time.sleep(retry_after if retry_after is not None else 2 ** attempt)
                     continue
                 raise HttpError(f"{url} rate limited (429) after {attempt} attempts", 429)

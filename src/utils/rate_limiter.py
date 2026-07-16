@@ -26,3 +26,20 @@ class RateLimiter:
         sleep_for = start_at - time.monotonic()
         if sleep_for > 0:
             time.sleep(sleep_for)
+
+    def note_retry_after(self, host: str, seconds: float) -> None:
+        """Push `host`'s next-allowed time out by `seconds` from now, on top
+        of whatever's already scheduled. Called when a response carries a
+        Retry-After header, so every other caller sharing *this* RateLimiter
+        instance (any thread/job in the same process, when HttpClient
+        instances are built from a shared limiter -- see
+        src/main.py's `_build_http_client`) backs off together instead of
+        each independently retrying into a longer ban. Learned the hard way
+        2026-07-15: a manual meta-job retry collided with the already-running
+        scheduled meta cron, both hammering poe.ninja with independent
+        rate-limiter state, and neither backed off from the other's 429s
+        (see CLAUDE.md)."""
+        with self._lock:
+            now = time.monotonic()
+            current = self._next_allowed.get(host, now)
+            self._next_allowed[host] = max(current, now + seconds)

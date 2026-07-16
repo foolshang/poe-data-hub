@@ -12,7 +12,9 @@ import argparse
 import dataclasses
 import logging
 import logging.handlers
+import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,7 @@ from src.storage.publisher import (
     build_prices_schema,
     sanitize_league_filename,
 )
+from src.utils import job_lock
 from src.utils.config import load_config
 from src.utils.http_client import HttpClient
 from src.utils.rate_limiter import RateLimiter
@@ -90,11 +93,29 @@ def _news_blob_path(game: str) -> str:
     return f"{game}/news/latest.json"
 
 
+_shared_rate_limiter: Optional[RateLimiter] = None
+_shared_rate_limiter_lock = threading.Lock()
+
+
+def _get_shared_rate_limiter(cfg: dict[str, Any]) -> RateLimiter:
+    """One RateLimiter per process, reused by every job (prices/meta/news/
+    cleanup). Needed so a 429+Retry-After learned by one job's HttpClient
+    (via RateLimiter.note_retry_after) is immediately visible to every other
+    job's concurrently-running thread hitting the same host -- previously
+    each `_build_http_client` call made a fresh, isolated RateLimiter, so
+    concurrent jobs backed off independently instead of together (see
+    CLAUDE.md's 2026-07-15 incident)."""
+    global _shared_rate_limiter
+    with _shared_rate_limiter_lock:
+        if _shared_rate_limiter is None:
+            _shared_rate_limiter = RateLimiter(default_interval_seconds=2.0, per_host=cfg.get("rate_limits", {}))
+    return _shared_rate_limiter
+
+
 def _build_http_client(cfg: dict[str, Any]) -> HttpClient:
-    rate_limiter = RateLimiter(default_interval_seconds=2.0, per_host=cfg.get("rate_limits", {}))
     http_cfg = cfg.get("http", {})
     return HttpClient(
-        rate_limiter,
+        _get_shared_rate_limiter(cfg),
         max_retries=http_cfg.get("max_retries", 3),
         timeout_seconds=http_cfg.get("timeout_seconds", 15),
     )
@@ -463,22 +484,66 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
     measured combined wall-clock time and peak RAM). One game's failure
     never blocks or corrupts the other's publish; one healthchecks.io ping
     fires only after both have been attempted, so a failure in either game
-    is visible (task 7)."""
+    is visible (task 7).
+
+    Guarded by job_lock so the scheduler's own cron and a manually launched
+    `--run-meta-once` (or two overlapping manual runs) can never race the
+    same rate-limited hosts concurrently -- both call this exact function,
+    so locking here covers both callers. A second attempt while one is
+    already running skips cleanly rather than colliding (see CLAUDE.md's
+    2026-07-15 incident, where exactly this collision stalled poe.ninja
+    requests for hours via duplicate, uncoordinated retries)."""
+    try:
+        with job_lock.acquire("meta"):
+            return _run_meta_once_locked(cfg)
+    except job_lock.JobAlreadyRunning as e:
+        log.warning(
+            "meta job: skip -- previous run still active (pid=%s, started_at=%s)",
+            e.holder.pid, e.holder.started_at,
+        )
+        return {}
+
+
+def _run_meta_once_locked(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
     http = _build_http_client(cfg)
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
 
-    results: dict[str, dict[str, Any]] = {}
-    for game in cfg.get("game_versions", ["poe2"]):
-        try:
-            results[game] = _run_meta_for_game(http, publisher, cfg, game)
-        except Exception as e:
-            log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
+    _mark_job_running(publisher, "meta")
+    try:
+        results: dict[str, dict[str, Any]] = {}
+        for game in cfg.get("game_versions", ["poe2"]):
+            try:
+                results[game] = _run_meta_for_game(http, publisher, cfg, game)
+            except Exception as e:
+                log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
 
-    _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
-    _update_meta_status(publisher, results)
+        _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
+        _update_meta_status(publisher, results)
 
-    return {game: r["data"] for game, r in results.items()}
+        return {game: r["data"] for game, r in results.items()}
+    finally:
+        _mark_job_finished(publisher, "meta")
+
+
+def _mark_job_running(publisher: PricesPublisher, job_name: str) -> None:
+    """Records that `job_name` has started, in `status["running_jobs"]`, so
+    a human can check status.json before launching a manual CLI run instead
+    of SSHing in to guess at `ps`/journalctl (see CLAUDE.md's 2026-07-15
+    incident, where exactly that guesswork led to a collision). Paired with
+    job_lock (which is the actual enforcement) -- this is visibility only."""
+    status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
+    status.setdefault("running_jobs", {})[job_name] = {
+        "pid": os.getpid(),
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+
+
+def _mark_job_finished(publisher: PricesPublisher, job_name: str) -> None:
+    status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
+    status.setdefault("running_jobs", {}).pop(job_name, None)
+    publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
 
 
 def _peak_memory_mb() -> Optional[float]:

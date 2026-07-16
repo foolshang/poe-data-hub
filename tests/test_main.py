@@ -18,6 +18,7 @@ from src.main import (
     run_prices_once,
 )
 from src.storage.publisher import PricesPublisher
+from src.utils import job_lock
 
 
 def test_ping_healthcheck_noop_when_url_missing():
@@ -262,6 +263,55 @@ def test_update_status_keeps_other_games_untouched_on_partial_failure(tmp_path):
     assert status["prices"]["poe2"]["generated_at"] == "2026-07-11T00:20:00Z"
     assert status["prices"]["poe1"]["generated_at"] == "2026-07-11T00:00:00Z"  # untouched
     assert status["errors"][-1]["job"] == "prices"
+
+
+def test_run_meta_once_skips_when_lock_already_held(tmp_path):
+    """2026-07-15 fix: a second run_meta_once (from either the scheduler or
+    a manual CLI retry) must never proceed while another is already
+    running -- it must skip cleanly instead of colliding with it over the
+    same rate-limited hosts (see CLAUDE.md's incident writeup)."""
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {},
+    }
+    created_publishers: list = []
+
+    with patch("src.main.job_lock.DEFAULT_LOCK_DIR", tmp_path / "locks"), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main._run_meta_for_game") as fake_run_meta_for_game:
+        with job_lock.acquire("meta", lock_dir=tmp_path / "locks"):
+            result = run_meta_once(cfg)
+
+    assert result == {}
+    fake_run_meta_for_game.assert_not_called()
+    assert created_publishers == []  # never even got as far as building a publisher
+
+
+def test_run_meta_once_acquires_and_releases_lock_around_a_normal_run(tmp_path):
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {},
+    }
+    created_publishers: list = []
+
+    def fake_run_meta_for_game(http, publisher, cfg, game):
+        return _fake_meta_result(game)
+
+    lock_dir = tmp_path / "locks"
+    with patch("src.main.job_lock.DEFAULT_LOCK_DIR", lock_dir), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main._run_meta_for_game", side_effect=fake_run_meta_for_game), \
+         patch("src.main.HttpClient"):
+        assert job_lock.read_lock("meta", lock_dir=lock_dir) is None
+        run_meta_once(cfg)
+        # lock must be released again once the run completes
+        assert job_lock.read_lock("meta", lock_dir=lock_dir) is None
 
 
 def _fake_prices_publisher_factory(tmp_path, created: list):

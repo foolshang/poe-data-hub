@@ -11,12 +11,17 @@ order).
 
 Phase 10: PoE1 uses `trade/data/stats` (not `trade2`) -- a different GGG
 endpoint, published to its own Firebase path so PoE1 and PoE2 mod
-normalization never share a cache. Routed through the same GitHub-Actions
-path as trade2 out of caution (not independently reconfirmed blocked from
-GCP IPs the way trade2 was, but there's no reason to assume GGG's blocking
-rule is scoped to trade2 specifically, and this path is already known-safe).
+normalization never share a cache. Also confirmed permanently blocked from
+GCP IPs (2026-07-15, the hard way -- see CLAUDE.md's "Deploy gotcha"), so
+it's routed through the same GitHub-Actions path as trade2.
 Each game is fetched/validated/published independently -- one game's
 failure must never block or corrupt the other's cache.
+
+IMPORTANT: after adding a new game/target here, its Firebase blob doesn't
+exist until this workflow actually runs -- trigger `gh workflow run
+refresh-stats.yml` manually rather than waiting for the weekly cron, or
+that game's meta job will fail on its first VM run (Firebase 404 -> GGG
+direct 403 -> empty disk cache -> raises).
 
 Usage:
     GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json python -m tools.refresh_stats
