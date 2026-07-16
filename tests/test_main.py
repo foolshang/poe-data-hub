@@ -16,6 +16,7 @@ from src.main import (
     _update_status,
     run_meta_once,
     run_prices_once,
+    run_scheduler,
 )
 from src.storage.publisher import PricesPublisher
 from src.utils import job_lock
@@ -525,6 +526,38 @@ def test_run_news_once_fetch_failure_reuses_previous_news(tmp_path):
     poe2_news = publisher.fetch_previous("poe2/news/latest.json")
     assert poe2_news["sources"] == {"steam": "error"}
     assert poe2_news["entries"][0]["id"] == "1"  # stale-while-error reused the first run's entry
+
+
+def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one():
+    from apscheduler.triggers.cron import CronTrigger
+
+    cfg = {"schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1}}
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler):
+        run_scheduler(cfg)
+
+    meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
+    trigger = meta_call.args[1]
+    assert isinstance(trigger, CronTrigger)
+
+
+def test_run_scheduler_switches_to_evenly_spaced_runs_for_league_start():
+    """League-start mode (spec 9): bumping meta_runs_per_day_league_start
+    above 1 must switch the meta job from a once-daily cron to N
+    evenly-spaced runs/day, via this one config line -- no code change.
+    Confirmed here since the pipeline's own SPEC.md relies on this switch
+    being ready before the next PoE1 league launch (2026-07-25)."""
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    cfg = {"schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 4}}
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler):
+        run_scheduler(cfg)
+
+    meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
+    trigger = meta_call.args[1]
+    assert isinstance(trigger, IntervalTrigger)
+    assert trigger.interval.total_seconds() == 6 * 3600  # 24h / 4 runs
 
 
 class _FakeStorageClient:

@@ -523,33 +523,44 @@ healthchecks.io ping fires only after *both* games have been attempted
 (task 7: a failure in either game must be visible, not maskable by the
 other game happening to succeed).
 
-Real measured wall-clock time and peak RSS, production VM, from the
-2026-07-15 02:00 ICT (19:00 UTC) scheduled run -- the first clean,
-uncontended measurement (see the job-collision incident in CLAUDE.md for
-why the first attempt at this measurement didn't produce a clean number):
+Real measured wall-clock time and peak RSS, production VM. PoE2's number is
+from the 2026-07-15 02:00 ICT (19:00 UTC) scheduled run. PoE1's is from a
+manually-launched `--run-meta-once` at 2026-07-16 21:19 ICT (14:19 UTC),
+run immediately after the post-incident service restart but ~16h after the
+2026-07-15 22:28 UTC incident actually finished -- well outside the 1-2h
+poe.ninja ban-window guidance, so this is the first clean, uncontended
+measurement for both games (see the job-collision incident below for why
+the first PoE1 attempt didn't produce a clean number). Job-lock held for
+the whole invocation (`data/locks/meta.lock`), `running_jobs` empty
+immediately after, zero `characters_failed` for PoE1, no 429s in
+`data/hub.log` for the run -- nothing contended this measurement:
 
 - **PoE2**: started 19:00:00 UTC, published 19:44:13 UTC -- **44m13s**,
   peak RSS **197.4 MB**, 1056 mods (3518 before the count>=5 filter).
-- **PoE1**: **[TODO: still pending -- this same run's PoE1 stage collided
-  with a manually-launched retry (see CLAUDE.md), got throttled by
-  poe.ninja's server-side rate limiting, and neither run produced a clean
-  number. The service was restarted and the job-lock/shared-rate-limiter
-  fixes below were added specifically so this can't happen again; a clean
-  PoE1 number will be captured on the next successful run and filled in
-  here.]**
+- **PoE1**: started 14:59:36 UTC, published 15:43:17 UTC -- **43m41s**,
+  peak RSS **118.5 MB**, 1404 mods (6182 before the count>=5 filter).
+  Combined poe2+poe1 in one invocation: **84m18s** end to end (started
+  14:18:59 UTC, both published by 15:43:17 UTC) -- comfortably inside a
+  nightly maintenance window, as expected (8.10).
 
 PoE2's clean number came in noticeably above the pre-phase-10 ~40min
 estimate/baseline (197.4MB peak RSS is also higher than earlier informal
 poe2-only runs) -- both are plausible normal day-to-day variance (sample
 composition, character count) rather than a regression, but worth
-rechecking against a few more days of real runs once PoE1 is live too.
-PoE1's own category/slot counts are comparable to poe2's (22-23 poe.ninja
-builds-search filter requests per game, see the rate-limit subsection
-below), so a roughly-doubled combined total is still the expectation, to
-be confirmed once PoE1's own clean number lands. Either way this runs
-once/day in an off-peak cron slot with no other job contending for the
-same time window, so even a materially-larger-than-2x total remains
-comfortably inside a nightly maintenance window.
+rechecking against a few more days of real runs now both games are live.
+PoE1 came in slightly faster than PoE2 despite publishing more mods (1404
+vs 1056) and a much higher raw pre-filter count (6182 vs 3518) -- lower
+peak RSS too (118.5MB vs 197.4MB) -- plausible given PoE1's simpler slot
+set (12 slots fetched this run vs PoE2's 14, no focus/charm) rather than a
+concern. The roughly-2x combined total (84m18s vs PoE2-alone's ~40min
+baseline) matches the pre-phase-10 expectation.
+
+**Open item, separate from timing**: this same PoE1 run's `unmapped_mod_pct`
+was **10.27%**, over twice PoE2's own 2.2-2.3% and above the 5% alert
+threshold (logged to `status.json.errors` as `meta(poe1)`). Consistent with
+the known late-league/event data bias already flagged (8.2) rather than a
+pipeline bug -- worth rechecking once the new PoE1 league starts and
+Ancestors-specific gear drops out of the sample, not fixed here.
 
 #### Meta job collision incident + fixes (2026-07-15)
 
