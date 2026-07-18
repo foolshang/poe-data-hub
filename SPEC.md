@@ -713,10 +713,15 @@ per game per 5-minute cycle in practice, so the added cost is 0-4s at the
 exception**: the very first run after this redesign deploys has no
 `previous_entries` in the new `forum-*` id space yet, so every thread
 currently on page 1 of each listing looks "new" and gets its content
-scraped -- bounded (~20-40 threads combined worst case across both PoE2
-listings), one-time only, budget ~2s/thread ≈ up to ~80s added to that one
-job run, still well inside the 5-minute cadence. Plus one
-`pathofexile.com` homepage scrape for deals (`src/fetchers/deals.py`).
+scraped -- bounded, one-time only. **Confirmed live on the 2026-07-18
+deploy**: actual first-cycle burst was 90 thread-detail fetches combined
+(60 poe2 across both listings + 30 poe1), larger than an earlier ~40
+estimate -- real listing pages held more threads per page than the
+spot-check that produced that number. At ~2s/thread this took a few
+minutes for that one job run (still well inside the 5-minute cadence, just
+a longer single cycle), and the very next cycle dropped to 0 new fetches
+as designed. Plus one `pathofexile.com` homepage scrape for deals
+(`src/fetchers/deals.py`).
 Hosts already covered by existing `rate_limits` entries
 (`www.pathofexile.com`, `th.pathofexile.com` -- `th.` is a distinct
 rate-limit bucket from `www.`, added phase 11) -- negligible next to the
@@ -1015,3 +1020,35 @@ follow-up if poe.ninja 429s are ever observed during that window.
       `test_wait_enforces_interval_between_calls`, is a pre-existing timing
       flake on this dev machine unrelated to this change -- passes in
       isolation, `src/utils/rate_limiter.py` untouched by this phase).
+      **Deployed and verified live, 2026-07-18**, following the required
+      deploy order above (bot migrated + confirmed first, then hub
+      restarted): `poe1|poe2/news/latest.json` in production confirmed
+      `schema_version: 2`, `sources.forum`, every id `forum-`-prefixed;
+      thread 3985152 present with real content. First post-restart cycle's
+      backlog burst was **90 thread-detail fetches** (60 poe2 + 30 poe1),
+      larger than this phase's earlier ~40 estimate -- real listing pages
+      held more threads than the spot-check that produced that number;
+      corrected in the job-cadence note above. Confirmed via
+      `data/fetch.log`: burst cycle took ~2min for poe2 (matches the
+      2s/thread rate limit), and the very next cycle (5 min later) dropped
+      to 0 new fetches, ~16s total -- steady state reached in one cycle, as
+      designed. `hc-ping.com` pings confirmed `200 OK` every cycle for 8+
+      hours of continuous post-deploy observation, zero news-related
+      WARNING/ERROR in that window. Bot side confirmed via the real Discord
+      channel (not just logs, which stayed silent throughout -- the bot
+      apparently doesn't log routine news polls): 2 posts went out normally
+      after the flip, `link_th` resolved for 1 of the 2, no backlog flood.
+      **Second timezone finding, worth knowing for next time**: the VM's
+      own observed `momentTimezone` was confirmed to *drift over time*, not
+      just differ by geography from a dev machine -- `Asia/Bangkok` during
+      the actual first post-restart job run, `America/Chicago` (stable
+      across 4 repeated checks) about 10 minutes later from the same VM.
+      `_localize_to_utc`'s "read fresh per page, never hardcode" design
+      handled this correctly in both cases (the published value for
+      3985152 mathematically matches the Bangkok conversion the job
+      actually observed at run time), but the implication is that
+      `published` for an *already-known* thread can shift slightly between
+      publish cycles if the hub's observed timezone changes between one
+      listing scrape and the next -- not a bug, just a real source-data
+      characteristic to be aware of if a consumer ever diffs `published`
+      across snapshots expecting it to be perfectly stable.

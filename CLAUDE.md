@@ -104,6 +104,33 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   human can check what's currently running before launching a manual CLI
   retry, instead of SSHing in to guess from `ps`/journalctl output — which
   is what led to the collision in the first place.
+- **The production deploy VM lives under a *different* GCP project than
+  Firebase** (learned the hard way 2026-07-18, first time deploying from a
+  fresh session): the hub publishes to Firebase Storage under
+  `poe-hub-b4723` (`config/config.yaml`'s `firebase.project_id`), but the
+  actual GCE instance (`poe-bot-vm`, zone `us-central1-a`, "alongside the
+  existing Discord bot" per `deploy/README.md`) is provisioned under
+  `poe-discord-bot-501417` instead — `gcloud compute instances list
+  --project=poe-hub-b4723` returns nothing (Compute Engine API isn't even
+  enabled there). Always target `poe-discord-bot-501417` for
+  `gcloud compute ssh`/instance lookups, not the Firebase project. Also:
+  the VM's actual `poe-data-hub.service` runs as `User=Winai`, not the
+  dedicated system user `deploy/README.md` describes setting up — the real
+  deployed setup diverged from that doc at some point; don't assume
+  `sudo -u poe-data-hub` works.
+- **GGG forum's `window.momentTimezone` (used to correctly localize
+  `post_date` to UTC in `src/fetchers/news.py`, see SPEC.md 8.4) drifts
+  over time on the same source, not just by requester geography** (found
+  2026-07-18 during the news-v2 deploy's live verification): the VM
+  observed `Asia/Bangkok` during the actual first post-restart job run,
+  then `America/Chicago` (stable across 4 repeated checks) about 10
+  minutes later from the same VM. The "read the tz name fresh from every
+  scraped page, never hardcode it" design handles this correctly per-page,
+  but it does mean a `forum-*` news entry's `published` value can shift
+  slightly between publish cycles even though the real-world post time
+  never changed — expected behavior given the source, not a bug, but
+  don't assume `published` is bitwise-stable across snapshots for the same
+  id.
 - **Monitoring is two independent layers on purpose — never collapse them
   into one** (added 2026-07-11, after a ~23h silent outage where the VM
   service was stopped for manual testing and nobody noticed until asked):
