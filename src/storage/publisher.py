@@ -135,7 +135,7 @@ def sanitize_league_filename(league_name: str) -> str:
     return slug or "league"
 
 
-NEWS_SCHEMA_VERSION = 1
+NEWS_SCHEMA_VERSION = 2
 
 
 def build_news_schema(
@@ -143,10 +143,15 @@ def build_news_schema(
     ok: bool,
     previous: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Build `{game}/news/latest.json` (phase 8): the latest ~15 Steam news
-    entries for one game, GGG-link-resolved (src/fetchers/news.py). Stateless
-    on purpose -- which entries a consumer has already posted is *their*
-    state, not published here (CLAUDE.md).
+    """Build `{game}/news/latest.json` (schema v2, 2026-07-18: GGG-forum-
+    sourced, replaces the v1 Steam-sourced shape -- src/fetchers/news.py's
+    `fetch_forum_news`). One entry per forum thread on the configured
+    listing(s), `id` = `"forum-{thread_id}"`. `entries` is *not* fully
+    stateless like v1 was: `fetch_forum_news` is handed the previous
+    publish's entries so it can skip re-scraping content for threads it
+    already knows about, but the id list itself is always rebuilt fresh
+    from the current listing every run -- which entries a *consumer* has
+    already posted is still their own state, not published here (CLAUDE.md).
 
     Stale-while-error: if this run's fetch failed entirely (`ok=False`),
     reuse the previous publish's `entries` verbatim rather than publish an
@@ -157,7 +162,7 @@ def build_news_schema(
     return {
         "schema_version": NEWS_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "sources": {"steam": "ok" if ok else "error"},
+        "sources": {"forum": "ok" if ok else "error"},
         "entries": entries,
     }
 

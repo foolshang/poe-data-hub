@@ -1,0 +1,12 @@
+<!-- Synthetic fixture: simulates a GGG forum thread page whose layout has
+changed enough that no post table / content div can be located. Used to
+test fetch_thread_content's graceful failure path (log + raise, caller
+falls back to content=""). -->
+<html>
+<head><title>Some Thread - Forum - Path of Exile</title></head>
+<body>
+<div class="content">
+  <p>This page intentionally has no forumTable/forumPostListTable structure.</p>
+</div>
+</body>
+</html>

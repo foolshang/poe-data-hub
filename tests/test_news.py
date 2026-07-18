@@ -1,28 +1,31 @@
-"""Unit tests for src/fetchers/news.py against real captured samples
-(data/samples/steam_news_current_poe1.json, steam_news_current_poe2.json,
-ggg_forum_poe1_news.html, ggg_forum_poe2_2211.html, ggg_forum_poe2_2212.html,
-captured live 2026-07-12; th_forum_poe1_news.html, th_forum_poe2_2282.html,
-th_forum_poe2_2283.html, captured live 2026-07-15)."""
+"""Unit tests for src/fetchers/news.py (GGG-forum-sourced, 2026-07-18
+redesign) against real captured samples:
+data/samples/ggg_forum_poe1_news.html, ggg_forum_poe2_2211.html,
+ggg_forum_poe2_2212.html, th_forum_poe1_news.html, th_forum_poe2_2282.html,
+th_forum_poe2_2283.html (captured live 2026-07-15); ggg_thread_poe2_3985152.html
+(the real "0.5.4c Patch Notes" thread that never made it to Steam) and
+ggg_thread_poe1_3985393.html (captured live 2026-07-18); ggg_thread_malformed.html
+(synthetic, no post-table structure)."""
 from __future__ import annotations
 
-import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from src.fetchers.news import (
-    _normalize_title,
+    FORCED_PATCH_LISTING_URLS,
+    _extract_thread_id,
+    _localize_to_utc,
     _parse_en_post_date,
     _parse_th_post_date,
-    _resolve_ggg_link,
     _resolve_th_link,
     _scrape_ggg_listing,
     _scrape_th_listing,
     categorize,
     clean_content,
-    fetch_news,
-    fetch_steam_news,
+    fetch_forum_news,
+    fetch_thread_content,
     is_mtx_sale,
 )
 
@@ -30,15 +33,8 @@ SAMPLES = Path(__file__).resolve().parents[1] / "data" / "samples"
 
 
 class _FakeHttpClient:
-    def __init__(self, json_by_fragment=None, text_by_fragment=None):
-        self._json = json_by_fragment or {}
+    def __init__(self, text_by_fragment=None):
         self._text = text_by_fragment or {}
-
-    def get_json(self, url, headers=None):
-        for fragment, payload in self._json.items():
-            if fragment in url:
-                return payload
-        raise AssertionError(f"unexpected JSON URL in test: {url}")
 
     def get_text(self, url, headers=None):
         for fragment, text in self._text.items():
@@ -69,82 +65,6 @@ def test_clean_content_empty_input():
     assert clean_content(None) == ""
 
 
-def test_normalize_title_strips_punctuation_and_case():
-    assert _normalize_title("Path of Exile: Curse of the Allflame!") == "path of exile curse of the allflame"
-
-
-def test_fetch_steam_news_poe1_shape():
-    payload = json.loads((SAMPLES / "steam_news_current_poe1.json").read_text(encoding="utf-8"))
-    http = _FakeHttpClient(json_by_fragment={"GetNewsForApp": payload})
-
-    entries = fetch_steam_news(http, "poe1")
-    assert len(entries) > 0
-    for e in entries:
-        assert e["id"]
-        assert e["title"]
-        assert e["category"] in ("news", "patch", "mtx")
-        assert e["link"].startswith("http")
-        assert e["link_is_ggg"] is False
-        assert e["published"].endswith("Z")
-
-
-def test_fetch_steam_news_filters_non_official_feedname():
-    payload = json.loads((SAMPLES / "steam_news_current_poe1.json").read_text(encoding="utf-8"))
-    http = _FakeHttpClient(json_by_fragment={"GetNewsForApp": payload})
-    entries = fetch_steam_news(http, "poe1")
-    raw_items = payload["appnews"]["newsitems"]
-    non_official = [i for i in raw_items if i.get("feedname") != "steam_community_announcements"]
-    assert len(non_official) > 0  # sample actually contains e.g. "PC Gamer" press items
-    assert len(entries) < len(raw_items)
-
-
-def test_fetch_steam_news_unknown_game_raises():
-    with pytest.raises(ValueError, match="unknown game"):
-        fetch_steam_news(_FakeHttpClient(), "poe3")
-
-
-def test_fetch_steam_news_invalid_shape_raises(tmp_path):
-    http = _FakeHttpClient(json_by_fragment={"GetNewsForApp": {"not": "expected"}})
-    with pytest.raises(ValueError, match="validation failed"):
-        fetch_steam_news(http, "poe1", failed_responses_dir=tmp_path)
-    assert list(tmp_path.iterdir())  # failed response dumped
-
-
-def test_scrape_ggg_listing_poe1():
-    html = (SAMPLES / "ggg_forum_poe1_news.html").read_text(encoding="utf-8")
-    http = _FakeHttpClient(text_by_fragment={"forum/view-forum/news": html})
-    entries = _scrape_ggg_listing(http, "https://www.pathofexile.com/forum/view-forum/news")
-    assert len(entries) > 0
-    link, norm_title, post_date = entries[0]
-    assert link.startswith("https://www.pathofexile.com/forum/view-thread/")
-    assert norm_title == norm_title.lower()
-    assert isinstance(post_date, datetime)
-
-
-def test_resolve_ggg_link_exact_match():
-    index = [
-        ("https://www.pathofexile.com/forum/view-thread/1", "curse of the allflame releases on july 24 pdt", None),
-        ("https://www.pathofexile.com/forum/view-thread/2", "some other thread", None),
-    ]
-    link = _resolve_ggg_link(index, "Curse of the Allflame Releases on July 24 PDT")
-    assert link == "https://www.pathofexile.com/forum/view-thread/1"
-
-
-def test_resolve_ggg_link_no_match_returns_none():
-    index = [("https://www.pathofexile.com/forum/view-thread/1", "totally unrelated title here", None)]
-    assert _resolve_ggg_link(index, "Something Completely Different Long Enough") is None
-
-
-def test_resolve_ggg_link_ambiguous_exact_match_refuses():
-    index = [
-        ("https://www.pathofexile.com/forum/view-thread/1", "patch notes", None),
-        ("https://www.pathofexile.com/forum/view-thread/2", "patch notes", None),
-    ]
-    assert _resolve_ggg_link(index, "Patch Notes") is None
-
-
-# ── phase 11: Thai forum link (link_th) ────────────────────────────────────
-
 def test_parse_en_post_date():
     assert _parse_en_post_date("Jul 10, 2026, 4:00:00 AM") == datetime(2026, 7, 10, 4, 0, 0)
 
@@ -166,15 +86,65 @@ def test_parse_th_post_date_garbage_returns_none():
     assert _parse_th_post_date("not a thai date") is None
 
 
+# ── timezone localization ───────────────────────────────────────────────
+
+def test_localize_to_utc_converts_using_scraped_tz_name():
+    naive = datetime(2026, 7, 17, 1, 30, 0)  # forum's own Asia/Bangkok display time
+    result = _localize_to_utc(naive, "Asia/Bangkok")
+    assert result == datetime(2026, 7, 16, 18, 30, 0, tzinfo=timezone.utc)
+
+
+def test_localize_to_utc_none_naive_dt_returns_none():
+    assert _localize_to_utc(None, "Asia/Bangkok") is None
+
+
+def test_localize_to_utc_missing_tz_name_falls_back_to_utc():
+    naive = datetime(2026, 7, 17, 1, 30, 0)
+    result = _localize_to_utc(naive, None)
+    assert result == datetime(2026, 7, 17, 1, 30, 0, tzinfo=timezone.utc)
+
+
+def test_localize_to_utc_invalid_tz_name_falls_back_to_utc():
+    naive = datetime(2026, 7, 17, 1, 30, 0)
+    result = _localize_to_utc(naive, "Not/A_Real_Zone")
+    assert result == datetime(2026, 7, 17, 1, 30, 0, tzinfo=timezone.utc)
+
+
+# ── thread id extraction ────────────────────────────────────────────────
+
+def test_extract_thread_id():
+    assert _extract_thread_id("https://www.pathofexile.com/forum/view-thread/3985152") == "3985152"
+
+
+def test_extract_thread_id_no_match_returns_none():
+    assert _extract_thread_id("https://www.pathofexile.com/forum/view-forum/2212") is None
+
+
+# ── listing scrape ──────────────────────────────────────────────────────
+
+def test_scrape_ggg_listing_poe1():
+    html = (SAMPLES / "ggg_forum_poe1_news.html").read_text(encoding="utf-8")
+    http = _FakeHttpClient(text_by_fragment={"forum/view-forum/news": html})
+    entries, tz_name = _scrape_ggg_listing(http, "https://www.pathofexile.com/forum/view-forum/news")
+    assert len(entries) > 0
+    link, title, post_date = entries[0]
+    assert link.startswith("https://www.pathofexile.com/forum/view-thread/")
+    assert title  # original (unescaped, not normalized) title text
+    assert isinstance(post_date, datetime)
+    assert tz_name == "Asia/Bangkok"
+
+
 def test_scrape_th_listing_poe1():
     html = (SAMPLES / "th_forum_poe1_news.html").read_text(encoding="utf-8")
     http = _FakeHttpClient(text_by_fragment={"forum/view-forum/news": html})
-    entries = _scrape_th_listing(http, "https://th.pathofexile.com/forum/view-forum/news")
+    entries, _tz_name = _scrape_th_listing(http, "https://th.pathofexile.com/forum/view-forum/news")
     assert len(entries) > 0
     link, _title, post_date = entries[0]
     assert link.startswith("https://th.pathofexile.com/forum/view-thread/")
     assert isinstance(post_date, datetime)
 
+
+# ── link_th resolution (unchanged logic) ────────────────────────────────
 
 def test_resolve_th_link_single_close_candidate_matches():
     en_post_date = datetime(2026, 7, 15, 10, 10, 13)
@@ -209,70 +179,185 @@ def test_resolve_th_link_empty_index_returns_none():
     assert _resolve_th_link([], datetime(2026, 7, 15, 10, 10, 13)) is None
 
 
-def test_fetch_news_end_to_end_poe1_resolves_link_th_for_real_pairs():
-    steam_payload = json.loads((SAMPLES / "steam_news_current_poe1.json").read_text(encoding="utf-8"))
+# ── thread content scraping ─────────────────────────────────────────────
+
+def test_fetch_thread_content_regular_layout_real_patch_note():
+    """The real "0.5.4c Patch Notes" thread (3985152) -- confirmed live
+    2026-07-18 to be missing from Steam entirely, the whole reason this
+    redesign exists."""
+    html = (SAMPLES / "ggg_thread_poe2_3985152.html").read_text(encoding="utf-8")
+    http = _FakeHttpClient(text_by_fragment={"view-thread/3985152": html})
+    content = fetch_thread_content(http, "https://www.pathofexile.com/forum/view-thread/3985152")
+    assert "0.5.4c Patch Notes" in content
+    assert "Supporter Packs" in content
+    # replies (e.g. "Wow") must not be included, only the first post
+    assert "Wow" not in content
+
+
+def test_fetch_thread_content_newspost_layout():
+    """GGG's official "news"-style post layout (<tr class="newsPost">,
+    no content-container class) -- different HTML shape than a regular
+    reply-style thread, must still extract correctly."""
+    html = (SAMPLES / "ggg_thread_poe1_3985393.html").read_text(encoding="utf-8")
+    http = _FakeHttpClient(text_by_fragment={"view-thread/3985393": html})
+    content = fetch_thread_content(http, "https://www.pathofexile.com/forum/view-thread/3985393")
+    assert "ExileCon" in content
+
+
+def test_fetch_thread_content_malformed_page_raises():
+    html = (SAMPLES / "ggg_thread_malformed.html").read_text(encoding="utf-8")
+    http = _FakeHttpClient(text_by_fragment={"view-thread/1": html})
+    with pytest.raises(ValueError, match="could not locate first-post content"):
+        fetch_thread_content(http, "https://www.pathofexile.com/forum/view-thread/1")
+
+
+# ── fetch_forum_news end-to-end ─────────────────────────────────────────
+
+class _CountingHttpClient(_FakeHttpClient):
+    """Tracks which thread-detail URLs were actually fetched, so tests can
+    assert that already-known threads never trigger a content fetch."""
+
+    def __init__(self, text_by_fragment=None):
+        super().__init__(text_by_fragment)
+        self.thread_fetches: list[str] = []
+
+    def get_text(self, url, headers=None):
+        if "/view-thread/" in url and "/view-forum/" not in url:
+            self.thread_fetches.append(url)
+        return super().get_text(url, headers=headers)
+
+
+def _poe1_listing_http(extra_text_by_fragment=None):
     en_html = (SAMPLES / "ggg_forum_poe1_news.html").read_text(encoding="utf-8")
     th_html = (SAMPLES / "th_forum_poe1_news.html").read_text(encoding="utf-8")
+    text_by_fragment = {
+        "th.pathofexile.com/forum/view-forum/news": th_html,
+        "www.pathofexile.com/forum/view-forum/news": en_html,
+    }
+    if extra_text_by_fragment:
+        text_by_fragment.update(extra_text_by_fragment)
+    return text_by_fragment
 
-    class _Http(_FakeHttpClient):
+
+def test_fetch_forum_news_new_thread_fetches_content():
+    thread_html = (SAMPLES / "ggg_thread_poe2_3985152.html").read_text(encoding="utf-8")
+    http = _CountingHttpClient(_poe1_listing_http({"view-thread/3982460": thread_html}))
+
+    entries = fetch_forum_news(http, "poe1", previous_entries=[])
+    assert len(entries) > 0
+    assert any(http.thread_fetches)  # at least one new-thread content fetch happened
+    new_entry = next(e for e in entries if e["id"] == "forum-3982460")
+    assert new_entry["content"]  # got real content from the thread page
+    assert new_entry["link"] == "https://www.pathofexile.com/forum/view-thread/3982460"
+    assert new_entry["id"] not in ("", None)
+
+
+def test_fetch_forum_news_known_thread_skips_content_fetch():
+    http = _CountingHttpClient(_poe1_listing_http())
+    previous_entries = [{"id": "forum-3982460", "content": "previously scraped content"}]
+
+    entries = fetch_forum_news(http, "poe1", previous_entries=previous_entries)
+    known_entry = next(e for e in entries if e["id"] == "forum-3982460")
+    assert known_entry["content"] == "previously scraped content"
+    assert not any("3982460" in u for u in http.thread_fetches)
+
+
+def test_fetch_forum_news_content_scrape_failure_still_emits_entry():
+    http = _CountingHttpClient(_poe1_listing_http({"view-thread/3982460": "<html>no post table here</html>"}))
+
+    entries = fetch_forum_news(http, "poe1", previous_entries=[])
+    new_entry = next(e for e in entries if e["id"] == "forum-3982460")
+    assert new_entry["content"] == ""
+    assert new_entry["title"]
+    assert new_entry["link"]
+    assert new_entry["category"] in ("news", "patch", "mtx")
+
+
+def test_fetch_forum_news_empty_listing_raises():
+    http = _FakeHttpClient(text_by_fragment={"forum/view-forum/news": "<html>nothing here</html>"})
+    with pytest.raises(ValueError, match="no threads"):
+        fetch_forum_news(http, "poe1", previous_entries=[])
+
+
+def test_fetch_forum_news_listing_scrape_exception_raises():
+    class _FailingHttp(_FakeHttpClient):
         def get_text(self, url, headers=None):
-            if "th.pathofexile.com" in url:
-                return th_html
-            return en_html
+            raise RuntimeError("boom")
 
-    entries = fetch_news(_Http(json_by_fragment={"GetNewsForApp": steam_payload}), "poe1")
+    with pytest.raises(ValueError, match="no threads"):
+        fetch_forum_news(_FailingHttp(), "poe1", previous_entries=[])
+
+
+def test_fetch_forum_news_unknown_game_raises():
+    with pytest.raises(ValueError, match="unknown game"):
+        fetch_forum_news(_FakeHttpClient(), "poe3", previous_entries=[])
+
+
+def test_fetch_forum_news_resolves_link_th_for_real_pairs():
+    http = _CountingHttpClient(_poe1_listing_http())
+    previous_entries = [{"id": "forum-3982460", "content": "c"}, {"id": "forum-3982050", "content": "c"}]
+
+    entries = fetch_forum_news(http, "poe1", previous_entries=previous_entries)
     assert len(entries) > 0
     with_th = [e for e in entries if "link_th" in e]
     assert len(with_th) > 0  # real overlapping data -- at least some should match
     for e in with_th:
         assert e["link_th"].startswith("https://th.pathofexile.com/forum/view-thread/")
-        assert e["link_is_ggg"] is True  # link_th only ever set alongside a confident EN match
-    # entries without a confident match must not have the key at all (not even null)
     without_th = [e for e in entries if "link_th" not in e]
-    assert all("link_th" not in e for e in without_th)
+    assert all("link_th" not in e for e in without_th)  # never a null placeholder
 
 
-def test_fetch_news_th_scrape_failure_leaves_link_th_absent():
-    steam_payload = json.loads((SAMPLES / "steam_news_current_poe1.json").read_text(encoding="utf-8"))
+def test_fetch_forum_news_th_scrape_failure_leaves_link_th_absent():
     en_html = (SAMPLES / "ggg_forum_poe1_news.html").read_text(encoding="utf-8")
 
-    class _Http(_FakeHttpClient):
+    class _Http(_CountingHttpClient):
         def get_text(self, url, headers=None):
             if "th.pathofexile.com" in url:
                 raise RuntimeError("boom")
-            return en_html
+            return super().get_text(url, headers=headers)
 
-    entries = fetch_news(_Http(json_by_fragment={"GetNewsForApp": steam_payload}), "poe1")
+    listing_entries, _tz = _scrape_ggg_listing(
+        _FakeHttpClient({"forum/view-forum/news": en_html}), "https://www.pathofexile.com/forum/view-forum/news"
+    )
+    # mark every listed thread already-known so this test only exercises
+    # link_th failure handling, not content fetching.
+    previous_entries = [{"id": f"forum-{_extract_thread_id(link)}", "content": "c"} for link, _t, _d in listing_entries]
+    http = _Http({"www.pathofexile.com/forum/view-forum/news": en_html})
+    entries = fetch_forum_news(http, "poe1", previous_entries=previous_entries)
     assert len(entries) > 0
     assert all("link_th" not in e for e in entries)
-    assert any(e["link_is_ggg"] for e in entries)  # EN resolution unaffected by TH failure
 
 
-def test_fetch_news_end_to_end_resolves_ggg_links():
-    steam_payload = json.loads((SAMPLES / "steam_news_current_poe1.json").read_text(encoding="utf-8"))
-    ggg_html = (SAMPLES / "ggg_forum_poe1_news.html").read_text(encoding="utf-8")
-    http = _FakeHttpClient(
-        json_by_fragment={"GetNewsForApp": steam_payload},
-        text_by_fragment={"forum/view-forum/news": ggg_html},
-    )
+def test_fetch_forum_news_poe2_forces_patch_category_for_2212():
+    listing_2211 = (SAMPLES / "ggg_forum_poe2_2211.html").read_text(encoding="utf-8")
+    listing_2212 = (SAMPLES / "ggg_forum_poe2_2212.html").read_text(encoding="utf-8")
+    th_2282 = (SAMPLES / "th_forum_poe2_2282.html").read_text(encoding="utf-8")
+    th_2283 = (SAMPLES / "th_forum_poe2_2283.html").read_text(encoding="utf-8")
+    http = _CountingHttpClient({
+        "www.pathofexile.com/forum/view-forum/2211": listing_2211,
+        "www.pathofexile.com/forum/view-forum/2212": listing_2212,
+        "th.pathofexile.com/forum/view-forum/2282": th_2282,
+        "th.pathofexile.com/forum/view-forum/2283": th_2283,
+    })
+    # avoid content-fetch dependence on live thread pages: pretend every
+    # thread is already known so this test only exercises listing+category.
+    _, tz = _scrape_ggg_listing(http, "https://www.pathofexile.com/forum/view-forum/2212")
+    entries_2212, _ = _scrape_ggg_listing(http, "https://www.pathofexile.com/forum/view-forum/2212")
+    previous_entries = [
+        {"id": f"forum-{_extract_thread_id(link)}", "content": "c"} for link, _t, _d in entries_2212
+    ]
+    entries_2211, _ = _scrape_ggg_listing(http, "https://www.pathofexile.com/forum/view-forum/2211")
+    previous_entries += [
+        {"id": f"forum-{_extract_thread_id(link)}", "content": "c"} for link, _t, _d in entries_2211
+    ]
 
-    entries = fetch_news(http, "poe1")
+    entries = fetch_forum_news(http, "poe2", previous_entries=previous_entries)
     assert len(entries) > 0
-    # link never rewritten to th. -- approved decision, display concern for the consumer
-    for e in entries:
-        assert not e["link"].startswith("https://th.pathofexile.com")
-    assert any(e["link_is_ggg"] for e in entries)
+    by_id = {e["id"]: e for e in entries}
+    for link, _title, _date in entries_2212:
+        thread_id = _extract_thread_id(link)
+        assert by_id[f"forum-{thread_id}"]["category"] == "patch"
 
 
-def test_fetch_news_ggg_scrape_failure_keeps_steam_link():
-    steam_payload = json.loads((SAMPLES / "steam_news_current_poe1.json").read_text(encoding="utf-8"))
-
-    class _FailingGgg(_FakeHttpClient):
-        def get_text(self, url, headers=None):
-            raise RuntimeError("boom")
-
-    http = _FailingGgg(json_by_fragment={"GetNewsForApp": steam_payload})
-    entries = fetch_news(http, "poe1")
-    assert len(entries) > 0
-    assert all(e["link_is_ggg"] is False for e in entries)
-    assert all(e["link"].startswith("https://steamstore") or "steam" in e["link"] or e["link"].startswith("http") for e in entries)
+def test_forced_patch_listing_urls_is_poe2_patch_notes_forum():
+    assert FORCED_PATCH_LISTING_URLS == {"https://www.pathofexile.com/forum/view-forum/2212"}

@@ -221,23 +221,23 @@ def test_build_index_schema_no_events():
 
 
 def test_build_news_schema_ok():
-    entries = [{"id": "1", "title": "Hello"}]
+    entries = [{"id": "forum-1", "title": "Hello"}]
     data = build_news_schema(entries, ok=True)
-    assert data["sources"] == {"steam": "ok"}
+    assert data["sources"] == {"forum": "ok"}
     assert data["entries"] == entries
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
 
 
 def test_build_news_schema_error_reuses_previous_entries():
-    previous = {"entries": [{"id": "1", "title": "Old"}]}
+    previous = {"entries": [{"id": "forum-1", "title": "Old"}]}
     data = build_news_schema([], ok=False, previous=previous)
-    assert data["sources"] == {"steam": "error"}
+    assert data["sources"] == {"forum": "error"}
     assert data["entries"] == previous["entries"]
 
 
 def test_build_news_schema_error_no_previous_publishes_empty():
     data = build_news_schema([], ok=False, previous=None)
-    assert data["sources"] == {"steam": "error"}
+    assert data["sources"] == {"forum": "error"}
     assert data["entries"] == []
 
 

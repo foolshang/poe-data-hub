@@ -58,10 +58,16 @@ from typing import Any, Optional
 
 from dateutil import parser as dateutil_parser
 
-from src.fetchers.news import STEAM_APPIDS
 from src.utils.http_client import HttpClient
 
 log = logging.getLogger(__name__)
+
+# Relocated from src/fetchers/news.py (2026-07-18 news-pipeline redesign):
+# the news feed dropped Steam entirely in favor of GGG's forum, but league
+# start/end date detection is a separate, unrelated feature that still uses
+# Steam News on purpose (CLAUDE.md: GGG's own leagues API doesn't support
+# PoE2) -- this is now the only consumer of these Steam appids.
+STEAM_APPIDS: dict[str, int] = {"poe1": 238960, "poe2": 2694490}
 
 STEAM_NEWS_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/"
 OFFICIAL_FEED_LABEL = "Community Announcements"

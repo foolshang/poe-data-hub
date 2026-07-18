@@ -13,9 +13,10 @@ publisher's output shape.
 2. ดึงข้อมูล mod ของ item ที่ผู้เล่นใช้จริง จากหน้า builds ของ poe.ninja → นับความถี่
    mod แยกตาม slot / archetype พร้อมช่วง roll (min-max) ที่เจอจริง → publish เป็น
    `meta/latest.json`
-3. ดึงข่าว (Steam News API + GGG forum link resolve) และ Deal of the Day
+3. ดึงข่าว (forum ของ GGG เอง — scrape listing + เนื้อ thread รายอัน, phase 8
+   เดิมใช้ Steam News, เปลี่ยนมาเป็น forum ล้วน 2026-07-18) และ Deal of the Day
    (pathofexile.com) → publish เป็น `{game}/news/latest.json` / `mtx/latest.json`
-   (phase 8) — state ว่า consumer โพสต์อะไรไปแล้วยังอยู่ฝั่ง consumer เสมอ
+   — state ว่า consumer โพสต์อะไรไปแล้วยังอยู่ฝั่ง consumer เสมอ
 4. เป็นตัวเดียวที่ยิง API ภายนอก — consumer ดึงจาก Firebase เท่านั้น
 
 ห้ามยิง character API ของ GGG (`character-window/get-items`). GGG แตะแค่
@@ -345,56 +346,99 @@ stats-cache Firebase path needs an actual manually-triggered
 `refresh-stats.yml` run before its first meta job on the VM, not just
 "routed through a safe path" reasoning** -- verify the blob exists.
 
-### 8.4 `{game}/news/latest.json` (`{game}` = `poe1` | `poe2`, phase 8)
+### 8.4 `{game}/news/latest.json` (`{game}` = `poe1` | `poe2`, schema v2, 2026-07-18 redesign)
 
-Steam news for one game, GGG-link-resolved (`src/fetchers/news.py`, ported
-from `Bot-Poe-Discord/poe-discord-bot/feeds.py`). Stateless: the hub always
-publishes the latest ~15 entries every run (matches Steam's own `count=15`),
-regardless of what any consumer has already posted -- which entries have
-been *posted* is consumer-side state (e.g. the bot repo's `seen.json`),
-never published here (binding condition 4).
+**GGG's own forum is now the sole source** (`src/fetchers/news.py`'s
+`fetch_forum_news`) -- Steam News was dropped entirely. Reason: Steam is
+not a reliable primary source. A real patch note, GGG thread 3985152
+("0.5.4c Patch Notes", posted 2026-07-17), never made it to Steam's feed at
+all -- confirmed live 2026-07-18, the day this redesign happened. The forum
+listing pages (`GGG_LISTING_URLS`) were already being scraped here since
+phase 8 to *upgrade* Steam links to real GGG threads; that scrape is now
+the entry source itself. One entry per thread on the configured listing(s);
+`content` is the thread's first post, scraped from the thread's own page.
 
 ```json
 {
-  "schema_version": 1,
-  "generated_at": "2026-07-12T15:00:00Z",
-  "sources": {"steam": "ok"},
+  "schema_version": 2,
+  "generated_at": "2026-07-18T15:00:00Z",
+  "sources": {"forum": "ok"},
   "entries": [
     {
-      "id": "1836506165584601",
-      "title": "Path of Exile 2 Build Showcase: Slowmaxing Chronomancer",
-      "content": "...(full BBCode/HTML-cleaned plain text, not truncated)",
-      "category": "news",
-      "link": "https://www.pathofexile.com/forum/view-thread/3982050",
-      "link_is_ggg": true,
-      "link_th": "https://th.pathofexile.com/forum/view-thread/3983134",
-      "published": "2026-07-12T10:30:00Z"
+      "id": "forum-3985152",
+      "title": "0.5.4c Patch Notes",
+      "content": "0.5.4c Patch Notes\nAdded support for the new Supporter Packs.\nThank you for your support!",
+      "category": "patch",
+      "link": "https://www.pathofexile.com/forum/view-thread/3985152",
+      "link_th": "https://th.pathofexile.com/forum/view-thread/3986001",
+      "published": "2026-07-16T18:30:00Z"
     }
   ]
 }
 ```
 
-- `category` — `"news"` | `"patch"` | `"mtx"`, same heuristic as the bot
-  repo's original (`categorize()`): version-number-prefixed or contains
-  "patch" -> patch; contains a sale keyword -> mtx; else news.
+- `id` — `"forum-{thread_id}"`, `thread_id` from the listing href
+  (`/forum/view-thread/{id}`). **Breaking change from schema v1**, which
+  used a bare Steam `gid` with no prefix -- see "required deploy order"
+  below, this must not reach production ahead of every consumer's own
+  migration.
+- `category` — `"news"` | `"patch"` | `"mtx"`. Threads scraped from PoE2's
+  dedicated Patch Notes forum (`2212`) are unconditionally `"patch"`
+  (`FORCED_PATCH_LISTING_URLS`) regardless of title wording -- a bare
+  "Hotfix 2" title wouldn't otherwise match the title heuristic. Every
+  other thread falls back to the original title-keyword heuristic
+  (`categorize()`, unchanged since phase 8): version-number-prefixed or
+  contains "patch" -> patch; contains a sale keyword -> mtx; else news.
 - `link` — **always `www.pathofexile.com`, never rewritten to `th.`**
-  (approved decision: that's a display concern for whoever renders the
-  link, not the hub's job).
-- `link_is_ggg` — `true` when title-matching against GGG's own forum
-  listing found a confident match and `link` was upgraded from the raw
-  Steam URL to the real forum thread; `false` means `link` is still the
-  original Steam link (either no confident match, or the GGG listing
-  scrape itself failed -- both degrade gracefully, never drop the entry).
-- `link_th` (**optional, additive, phase 11** -- key is entirely absent
-  when there's no confident match, never `null`) — a genuinely
-  Thai-translated forum thread, not a domain-swapped `link`. See below.
-- If the Steam fetch fails entirely: `sources.steam` is `"error"` and the
-  previous publish's `entries` are reused verbatim (stale-while-error, spec
-  10.1b) instead of publishing an empty list.
+  (unchanged from phase 8: that's a display concern for whoever renders the
+  link). There is no more `link_is_ggg` field -- every entry is inherently
+  a GGG link by construction now, so the field would always be `true` and
+  was dropped as dead weight.
+- `link_th` (**optional, additive, phase 11, matching logic unchanged**) --
+  key is entirely absent when there's no confident match, never `null`.
+  See below.
+- `content` can legitimately be `""` for a **brand-new** thread whose
+  content scrape failed (forum layout changed for that specific thread, or
+  a transient fetch error) -- title/link/category are independent of
+  content scraping and are still published; a warning is logged
+  (`news(%s): content scrape failed for new thread ...`), this is not
+  treated as an error. Already-known threads (thread `id` present in the
+  previous publish) reuse their previously-scraped `content` unchanged --
+  a thread's content is scraped **once**, not every cycle.
+- If the listing scrape fails entirely (every configured listing URL
+  errors, or the combined result is empty -- e.g. GGG's forum HTML
+  structure changes): `sources.forum` is `"error"` and the previous
+  publish's `entries` are reused verbatim (stale-while-error, spec 10.1b)
+  instead of publishing an empty list.
 - `content` is published in full (not truncated) -- any length limit for
   display (e.g. Discord's embed description cap) is a consumer concern.
+- `published` is a real UTC timestamp, localized from the forum's own
+  displayed post_date using the timezone name scraped from that same page
+  (see "Timezone correctness" below) -- not a copy of Steam's timestamp,
+  which no longer exists in this pipeline.
 
-#### `link_th` (phase 11)
+#### Timezone correctness (`published`, 2026-07-18)
+
+Every GGG forum page (listing or thread, `www.` or `th.`) embeds
+`window.momentTimezone = '<IANA name>';` in a `<script>` block, and the
+`post_date` text displayed on that page is rendered in *that* timezone --
+**not UTC**. Confirmed live 2026-07-18 from the dev machine two independent
+ways: (1) Steam's real UTC `date` for "0.5.4b Patch Notes" was ~6.5h behind
+that same thread's own forum `post_date`; (2) the HTTP response `Date`
+header (true UTC) compared against the most recent reply's displayed
+`post_date` on an active thread showed a consistent ~5h+ gap. Both are
+consistent with the scraped value at the time, `Asia/Bangkok` (UTC+7) --
+almost certainly GeoIP-dependent (a deploy VM in a different region may see
+a different value), so the hub never hardcodes it: `_localize_to_utc` reads
+the tz name fresh from each scraped page (`_MOMENT_TZ_RE`) and converts the
+naive `post_date` to a real UTC value via `zoneinfo.ZoneInfo`. Falls back to
+treating the naive value as if it were already UTC -- logged, never silent
+-- only if the tz name is missing or unrecognized, same "never drop the
+entry, degrade precision instead" policy used for a content-scrape failure.
+(`zoneinfo` needs the `tzdata` package for a reliable IANA database on
+Windows dev machines; `requirements.txt` pins it explicitly.)
+
+#### `link_th` (phase 11, matching logic unchanged by the 2026-07-18 redesign)
 
 From the bot repo's 2026-07-15 survey (`Bot-Poe-Discord/poe-discord-bot`'s
 `HISTORY.md`): `th.pathofexile.com` carries **genuinely separate,
@@ -413,33 +457,64 @@ before this could be implemented at all:
 2. **How to match an English entry to its Thai counterpart.** Not every
    thread has a translation (survey found 3/30 missing for PoE1), so
    list-position pairing breaks the moment any one is skipped. Steam's own
-   `published` timestamp was tried and rejected -- cross-checked live
-   against a real thread and found a **~7000 second (nearly 2 hour) gap**
-   between Steam's `date` and that same thread's own forum post_date
-   (different GGG systems, not a clean timezone offset, so no fixed
-   correction is possible). What *does* line up tightly: **the English
+   `published` timestamp was tried and rejected (back when Steam was still
+   a source, phase 11) -- cross-checked live against a real thread and
+   found a **~7000 second (nearly 2 hour) gap** between Steam's `date` and
+   that same thread's own forum post_date (different GGG systems, not a
+   clean timezone offset). What *does* line up tightly: **the English
    GGG-forum thread's own post_date against the Thai thread's own
-   post_date** -- both are the same forum software on the same display
-   clock. Real examples confirmed live 2026-07-15 (PoE1, EN vs TH post_date):
-   `Jul 7, 4:19:03 AM` vs `7 ก.ค. 04:19:11` (8s apart), `Jun 20, 4:00:00 AM`
-   vs `20 มิ.ย. 04:00:00` (exact), `Jun 8, 7:07:18 AM` vs `8 มิ.ย. 07:08:13`
+   post_date** -- both are the same forum software, same display clock
+   (see "Timezone correctness" above -- this still holds even though
+   Steam is gone, since both sides come from the forum). Real examples
+   confirmed live 2026-07-15 (PoE1, EN vs TH post_date): `Jul 7, 4:19:03 AM`
+   vs `7 ก.ค. 04:19:11` (8s apart), `Jun 20, 4:00:00 AM` vs
+   `20 มิ.ย. 04:00:00` (exact), `Jun 8, 7:07:18 AM` vs `8 มิ.ย. 07:08:13`
    (55s apart) -- every real pair found was under 60 seconds apart.
 
-Because of #2, `link_th` is **only ever attempted for entries that already
-have a confident `link_is_ggg: true`** -- that English thread's own
-post_date (not Steam's `published`) is the reference point matched against
-the Thai listing by closest time, within `TH_MATCH_TOLERANCE_SECONDS = 300`
+Matched by time-proximity, within `TH_MATCH_TOLERANCE_SECONDS = 300`
 (`src/fetchers/news.py`; 300s is ~5x every real gap observed, still far
-tighter than a "same day" window). **Strict per the project owner's
-instruction**: if more than one Thai candidate falls within that tolerance,
-the match is ambiguous and `link_th` is left out entirely -- never a guess
-("จับคู่ไม่มั่นใจ = ไม่ใส่ field เด็ดขาด" — an uncertain match must never
-produce a field, a wrong Thai link is worse than no Thai link). PoE2's
-Thai patch-notes category sometimes merges multiple English hotfix threads
-into one combined Thai thread (survey finding) -- this can validly result
-in two different English entries pointing at the same `link_th`, which is
-correct (both hotfixes really are covered by that one Thai thread), not a
-bug.
+tighter than a "same day" window), attempted for **every** entry now (the
+2026-07-18 redesign dropped the old "only if a confident title-match
+already upgraded the Steam link" gate -- every entry already *is* a GGG
+thread by construction, there's nothing left to gate on). **Strict per the
+project owner's instruction**: if more than one Thai candidate falls within
+that tolerance, the match is ambiguous and `link_th` is left out entirely
+-- never a guess ("จับคู่ไม่มั่นใจ = ไม่ใส่ field เด็ดขาด" — an uncertain
+match must never produce a field, a wrong Thai link is worse than no Thai
+link). PoE2's Thai patch-notes category sometimes merges multiple English
+hotfix threads into one combined Thai thread (survey finding) -- this can
+validly result in two different English entries pointing at the same
+`link_th`, which is correct (both hotfixes really are covered by that one
+Thai thread), not a bug.
+
+#### Required deploy order (binding, 2026-07-18)
+
+The id-space break (bare Steam `gid` -> `"forum-{thread_id}"`) is
+consumer-breaking: the Discord bot's production `seen.json` keys on the old
+id scheme. If `{game}/news/latest.json` flips to schema v2 in production
+before the bot has migrated, the bot's own dedup behaves unpredictably and
+risks posting its entire visible backlog into the channel. Per the project
+owner's explicit instruction, the rollout **must** happen in this order,
+not "deploy whenever the hub code is ready":
+
+1. Hub code for this redesign is merged/present on the VM, but the running
+   process is **not** restarted yet -- production `{game}/news/latest.json`
+   still publishes the old Steam-sourced v1 shape.
+2. Bot repo is updated to read the new `forum-{thread_id}` id space, with
+   backlog protection confirmed working (deploy-time: mark everything on
+   the current listing as seen without posting; only post threads that
+   arrive after that point).
+3. Bot change deploys to production.
+4. Only then does the hub process actually restart, switching
+   `{game}/news/latest.json` to schema v2 in production.
+5. Watch the bot's first cycle after step 4: it must stay quiet (everything
+   currently listed gets silently marked seen) -- no backlog flood. This is
+   the go/no-go check for the whole rollout.
+
+All pre-rollout end-to-end testing of the new pipeline (including the
+"0.5.4c Patch Notes" live-verification case) targets a local file or a
+scratch Firebase Storage path (e.g. `poe2/news/test_v2.json`), never the
+real `{game}/news/latest.json`, until step 4 above.
 
 ### 8.5 `mtx/latest.json` (phase 8)
 
@@ -623,20 +698,30 @@ real data this phase: league detection, league dates (including the actual
 end-of-league post), and the full builds→chars→normalize→aggregate→publish
 pipeline end-to-end (see the Status entry below).
 
-#### Job cadence (phase 8)
+#### Job cadence (phase 8, updated 2026-07-18 for the GGG-forum redesign)
 
 News + mtx run as **one job** (`run_news_once`, `schedule.news_interval_minutes`,
 default **5 minutes** -- approved cadence) since both are cheap, time-sensitive,
-and share no fetch cost worth separating: per game, one Steam News API call
-+ up to 2 English GGG forum-listing scrapes + up to 2 Thai forum-listing
-scrapes (phase 11, `link_th` -- `src/fetchers/news.py`); plus one
+and share no fetch cost worth separating: per game, up to 2 English GGG
+forum-listing scrapes + up to 2 Thai forum-listing scrapes (`link_th`,
+unchanged since phase 11 -- `src/fetchers/news.py`), **plus one
+thread-detail-page fetch per genuinely new thread** (2026-07-18: content is
+now scraped from each thread's own page rather than coming from Steam).
+Steam's own API call is gone entirely. Steady-state this is 0-2 new threads
+per game per 5-minute cycle in practice, so the added cost is 0-4s at the
+`www.pathofexile.com` rate limit (2s/request) -- negligible. **One-time
+exception**: the very first run after this redesign deploys has no
+`previous_entries` in the new `forum-*` id space yet, so every thread
+currently on page 1 of each listing looks "new" and gets its content
+scraped -- bounded (~20-40 threads combined worst case across both PoE2
+listings), one-time only, budget ~2s/thread ≈ up to ~80s added to that one
+job run, still well inside the 5-minute cadence. Plus one
 `pathofexile.com` homepage scrape for deals (`src/fetchers/deals.py`).
-Total ~9-11 requests per run (poe1: 1+1+1=3, poe2: 1+2+2=5, deals: 1) across
-3 hosts already covered by existing `rate_limits` entries
-(`api.steampowered.com`, `www.pathofexile.com`, `th.pathofexile.com` --
-`th.` is a distinct rate-limit bucket from `www.`, added phase 11) --
-negligible next to the prices job's own budget (see the rate-limit
-subsection above), no separate analysis needed.
+Hosts already covered by existing `rate_limits` entries
+(`www.pathofexile.com`, `th.pathofexile.com` -- `th.` is a distinct
+rate-limit bucket from `www.`, added phase 11) -- negligible next to the
+prices job's own budget (see the rate-limit subsection above), no separate
+analysis needed.
 
 One Layer-1 healthchecks.io ping per job run (`healthchecks.news_ping_url`),
 same semantics as prices/meta. Layer 2 (`tools/heartbeat_check.py`) checks
@@ -875,3 +960,58 @@ follow-up if poe.ninja 429s are ever observed during that window.
       never a guess). Purely additive (`link_th` key absent, never `null`,
       when no confident match) -- no `schema_version` bump.
       228/228 tests passing.
+- [x] Phase 12: news pipeline redesigned to source from GGG's own forum
+      exclusively (8.4, `schema_version` 1 -> 2) -- Steam News dropped
+      entirely from `src/fetchers/news.py` (moved off it: `STEAM_APPIDS`
+      relocated to `src/fetchers/league_dates.py`, its only remaining
+      consumer, an unrelated feature that's explicitly still allowed to use
+      Steam per the binding condition in section 1). Trigger: GGG thread
+      3985152 ("0.5.4c Patch Notes") never appeared on Steam's feed at all,
+      confirmed live 2026-07-18 -- proof Steam isn't a reliable primary
+      source. `id` changed from a bare Steam `gid` to `"forum-{thread_id}"`
+      (breaking; see 8.4's "required deploy order" callout -- this must not
+      reach production ahead of the bot's own `seen.json` migration).
+      `content` now comes from each thread's own first post
+      (`fetch_thread_content`), scraped only for threads not already present
+      in the previous publish's entries (passed into `fetch_forum_news` as
+      `previous_entries` -- `run_news_once` already had `fetch_previous`
+      available, no new state file needed) -- keeps steady-state cost to
+      0-2 thread-detail fetches/game/cycle. Found and handled two real HTML
+      layout variants scraping live thread pages: the regular reply layout
+      (`td.content-container div.content`) and GGG's own "news"-style posts
+      (`<tr class="newsPost"><td colspan="2">`, no `content-container`
+      class) -- `fetch_thread_content` scopes to "first `<tr>` in the
+      post-list table, then whatever `.content` div is inside it" to cover
+      both without hardcoding either. `category` now also forces `"patch"`
+      for any thread sourced from PoE2's dedicated 2212 forum, on top of
+      the unchanged title heuristic. `link_is_ggg` field dropped (always
+      `true` now, dead weight). The whole Steam-title-matching machinery
+      (`_resolve_ggg_link`/`_normalize_title`/fuzzy-token matching) deleted
+      as dead code -- nothing left to cross-reference once the forum is the
+      only source. `link_th` (phase 11) matching logic is unchanged, just
+      simpler to invoke (every entry is already a GGG thread, no more
+      "only if a confident title-match already upgraded the Steam link"
+      gate) -- and slightly more accurate now that it's forum-post_date to
+      forum-post_date on both sides.
+      **Timezone bug found and fixed before it shipped**: every GGG forum
+      page embeds `window.momentTimezone = '<IANA name>';`, and displayed
+      `post_date` text is rendered in that timezone, not UTC (confirmed
+      live two independent ways -- Steam's real UTC date for "0.5.4b Patch
+      Notes" was ~6.5h behind that thread's own forum post_date; the HTTP
+      `Date` header vs. an active thread's most recent reply showed a
+      consistent ~5h+ gap -- both consistent with the scraped value,
+      `Asia/Bangkok`, almost certainly GeoIP-dependent). `published` would
+      have silently drifted by several hours if the naive post_date text
+      had been stamped with a `Z` suffix directly. `_localize_to_utc` reads
+      the tz name fresh from each scraped page rather than hardcoding it,
+      using stdlib `zoneinfo` (`tzdata` added to `requirements.txt` for a
+      reliable IANA database on Windows). **Rollout is sequenced, not just
+      coded and shipped**: per the project owner's explicit instruction,
+      the hub restart that actually flips production to schema v2 must wait
+      until the bot repo has migrated its `seen.json` and confirmed backlog
+      protection works -- see 8.4's "required deploy order" callout, which
+      is the authoritative sequence for whoever executes this rollout.
+      256/257 tests passing (the one failure, `test_rate_limiter.py`'s
+      `test_wait_enforces_interval_between_calls`, is a pre-existing timing
+      flake on this dev machine unrelated to this change -- passes in
+      isolation, `src/utils/rate_limiter.py` untouched by this phase).

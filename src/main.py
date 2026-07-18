@@ -301,11 +301,13 @@ def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_news_once(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Phase 8: Steam news (+ GGG link resolve) per game, and PoE1's Deal of
-    the Day, in one job (approved cadence: every 5 minutes, much more
-    frequent than prices/meta since news is time-sensitive). Which entries a
-    consumer has already posted is *their* state (CLAUDE.md) -- this job
-    always publishes a fresh stateless snapshot every run."""
+    """GGG-forum-sourced news (schema v2, 2026-07-18 redesign) per game, and
+    PoE1's Deal of the Day, in one job (approved cadence: every 5 minutes,
+    much more frequent than prices/meta since news is time-sensitive).
+    Which entries a consumer has already *posted* is still their state
+    (CLAUDE.md) -- but unlike v1, this job passes the previous publish's
+    entries into `news.fetch_forum_news` so it can skip re-scraping content
+    for threads it already knows about (see that function's docstring)."""
     http = _build_http_client(cfg)
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
@@ -313,14 +315,15 @@ def run_news_once(cfg: dict[str, Any]) -> dict[str, Any]:
     overall_ok = True
     per_game: dict[str, dict[str, Any]] = {}
     for game in cfg.get("game_versions", ["poe2"]):
-        if game not in news.STEAM_APPIDS:
+        if game not in news.GGG_LISTING_URLS:
             continue
         blob_path = _news_blob_path(game)
         previous = publisher.fetch_previous(blob_path)
+        previous_entries = previous.get("entries", []) if previous else []
         entries: list[dict[str, Any]] = []
         ok = True
         try:
-            entries = news.fetch_news(http, game)
+            entries = news.fetch_forum_news(http, game, previous_entries)
             log.info("news job(%s): fetched %d entries", game, len(entries))
         except Exception as e:
             ok = False
