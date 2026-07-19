@@ -156,6 +156,16 @@ def test_compute_archetype_distribution(normalizer, archetyper):
     assert by_archetype["attack-bow"] == pytest.approx(33.33, rel=0.01)
 
 
+def test_compute_archetype_distribution_empty_refs_returns_empty_list(archetyper):
+    """A brand-new league's first few hours can have zero characters
+    indexed yet (poe.ninja hasn't caught up) -- this must never
+    divide-by-zero or otherwise raise; the meta job should just publish an
+    empty-but-valid snapshot for that cycle, not crash (spec 9,
+    league_start_mode's automatic higher-frequency polling makes this more
+    likely to actually be hit than under the old once-daily cadence)."""
+    assert compute_archetype_distribution([], lambda acc, nm: None, archetyper) == []
+
+
 def test_rank_in_slot_orders_by_count_desc(normalizer, archetyper):
     char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", main_skill=None,
                               items=[_ring(["+87 to maximum Life", "+23% to Cold Resistance"])])

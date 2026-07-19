@@ -742,12 +742,82 @@ needing another deploy. Confirmed ready, no further code changes needed:
   invocation -- bumping it to 2-4 runs/day during the first few days of a
   new league (either game) speeds up both games' initial data collection
   together, not just one. No new per-game config was needed for this.
+  **2026-07-19: automated** -- see "Automatic league-start mode" below;
+  this knob stays as the manual escape hatch.
 
 No dry-run against a hypothetical "next league" was possible (it doesn't
 exist yet), but every piece was independently live-tested against Mirage's
 real data this phase: league detection, league dates (including the actual
 end-of-league post), and the full builds→chars→normalize→aggregate→publish
 pipeline end-to-end (see the Status entry below).
+
+#### Automatic league-start mode (`schedule.league_start_mode`, 2026-07-19)
+
+The manual knob above required someone to edit `config.yaml` and restart
+the service right when a league launches, then remember to revert it a few
+weeks later. `league_start_mode` automates both ends:
+
+```yaml
+schedule:
+  league_start_mode:
+    start_date: "2026-07-25"   # inclusive, Asia/Bangkok calendar date
+    end_date: "2026-08-15"     # inclusive
+    meta_runs_per_day: 4
+```
+
+**To set up the next league: edit these two dates, nothing else.** No
+restart needed for the switch itself to take effect (see below); a restart
+is only needed to change the *dates* (`config.yaml` is loaded once at
+process startup, same as every other config value).
+
+- **Global, not per-game** -- same precedent as the manual knob above (one
+  meta job invocation covers both games; a per-game date range would need
+  per-game trigger scheduling, a bigger change nothing here currently needs).
+- **Asia/Bangkok, explicit on purpose** -- `start_date`/`end_date` are
+  compared against `datetime.now(ZoneInfo("Asia/Bangkok")).date()`, never
+  server-local or UTC. Learned from the `momentTimezone` drift lesson (8.4):
+  never assume a bare date/time means what the reader's own locale assumes
+  -- state the timezone explicitly in code, not just in a comment.
+  `_compute_meta_trigger` (`src/main.py`) takes an optional `today`
+  parameter purely for tests, defaulting to the real current date.
+- **Checked hourly, independent of the meta job's own cadence** (new
+  `league_start_mode_check` scheduler job, `IntervalTrigger(hours=1)`) --
+  deliberately *not* "check only when the meta job is about to run", which
+  would leave up to a full day of detection lag while still on the
+  once-daily 2am cron leading up to a league (it wouldn't re-fire until the
+  next day's slot). Also checked once directly at scheduler startup, so
+  `status.json` reflects the correct state immediately on boot rather than
+  waiting up to an hour.
+- **Live reschedule, no restart**: `scheduler.reschedule_job("meta", ...)`
+  changes the running APScheduler job's trigger in place. This only affects
+  the *next* fire-time computation -- it cannot touch an in-flight
+  invocation, and `_run_meta_once_locked`'s existing job_lock (9's
+  concurrency-safety fix) already prevents any overlap regardless of when a
+  reschedule happens to land relative to a running cycle.
+- **Falls back gracefully, never crashes the scheduler**: outside the
+  configured window, or if the block is missing entirely, falls back to
+  `meta_runs_per_day_league_start`/`meta_cron_hour_thailand` unchanged. A
+  malformed block (bad date string, `start_date` after `end_date`, missing
+  key) logs an ERROR (loud, not silent -- a config typo should be noticed)
+  and falls back the same way.
+- **Visible**: every actual switch logs INFO with the old/new state and the
+  new trigger; top-level `status.json.league_start_mode` is `"active"` or
+  `"inactive"` at all times, updated on every state change and once at
+  startup. No `heartbeat.yml` change needed -- it's scheduler bookkeeping,
+  not a data-fetching job, and the existing `META_MAX_AGE_HOURS = 26`
+  tolerance (spec 9's Layer-2 check) already covers the meta job itself at
+  any active frequency.
+- **Day-1-of-league data gap**: confirmed by reading the code, not assumed
+  -- a brand-new league can have zero characters indexed on poe.ninja yet
+  for the first few hours, and this does *not* crash the meta job.
+  `compute_archetype_distribution` has an explicit `if total == 0: return []`
+  guard (`src/processing/aggregator.py`), and the rest of
+  `_run_meta_for_game`'s aggregation/publish path tolerates an empty
+  `by_slot` cleanly -- it publishes a valid but near-empty snapshot for that
+  cycle rather than crashing or reusing a true stale-while-error path
+  (nothing raised to trigger that). A pre-existing pipeline characteristic,
+  not something this feature changes; the next scheduled run (every 6h
+  during league-start mode, not 24h) retries automatically.
 
 #### Job cadence (phase 8, updated 2026-07-19 for the GGG-forum redesign + listing-coverage fix)
 
@@ -1140,3 +1210,34 @@ follow-up if poe.ninja 429s are ever observed during that window.
       confirmed `link_th` pairs), 259/260 project-wide (the one failure is
       the same pre-existing `test_rate_limiter.py` timing flake noted in
       phase 12, still unrelated to this change).
+- [x] Phase 14: automatic league-start mode (`schedule.league_start_mode`,
+      §9's "Automatic league-start mode" subsection), the last piece needed
+      before PoE1's 2026-07-25 league launch. Replaces the manual
+      "edit config, restart the service, remember to revert later" workflow
+      the existing `meta_runs_per_day_league_start` knob required (that
+      knob stays as a manual escape hatch for an unplanned/delayed league).
+      Global scope, not per-game, same precedent phase 10 already
+      established for the manual knob (`_run_meta_once_locked` already
+      covers both games in one invocation). `_compute_meta_trigger`
+      (`src/main.py`) computes the correct trigger from today's
+      Asia/Bangkok calendar date -- explicit timezone handling on purpose,
+      the exact lesson phase 12's `momentTimezone` drift taught (never
+      assume a bare date means what the reader's own locale assumes). A new
+      hourly `league_start_mode_check` scheduler job live-reschedules the
+      running meta job (`scheduler.reschedule_job`, no restart) on any
+      state change, also run once at startup so `status.json` is correct
+      immediately on boot rather than up to an hour stale. Confirmed by
+      reading the code (not assumed) that `_run_meta_once_locked`'s
+      existing job_lock (phase 9) fully covers the "meta run stuck across a
+      mode-switch boundary" case -- rescheduling only changes a trigger's
+      next-fire computation, it can't touch an in-flight run -- and that a
+      zero-sample day-1-of-league morning already can't crash the job
+      (`compute_archetype_distribution`'s existing `if total == 0: return []`
+      guard). Malformed config (bad dates, `start_date` after `end_date`,
+      missing keys) logs ERROR and falls back to the manual knob rather
+      than crashing the scheduler. 13 new tests (`_compute_meta_trigger`
+      boundary/fallback/malformed cases, `run_scheduler` wiring, the
+      checker job's reschedule/no-reschedule/status-write behavior, and
+      job-lock non-interference) plus one in `test_aggregator.py` for the
+      zero-sample guard -- 272/273 project-wide (same pre-existing
+      unrelated timing flake).

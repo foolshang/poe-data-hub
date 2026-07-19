@@ -5,12 +5,15 @@ multi-league prices job (run_prices_once, _update_status)."""
 from __future__ import annotations
 
 import time
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 from src.fetchers.league_detector import LeagueResult
 from src.main import (
     UNMAPPED_HISTORY_LEN,
+    _check_league_start_mode,
     _check_stats_cache_stale,
+    _compute_meta_trigger,
     _ping_healthcheck,
     _update_meta_status,
     _update_status,
@@ -528,12 +531,16 @@ def test_run_news_once_fetch_failure_reuses_previous_news(tmp_path):
     assert poe2_news["entries"][0]["id"] == "forum-1"  # stale-while-error reused the first run's entry
 
 
-def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one():
+def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one(tmp_path):
     from apscheduler.triggers.cron import CronTrigger
 
-    cfg = {"schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1}}
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1},
+    }
     fake_scheduler = MagicMock()
-    with patch("src.main.BlockingScheduler", return_value=fake_scheduler):
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])):
         run_scheduler(cfg)
 
     meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
@@ -541,23 +548,196 @@ def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one():
     assert isinstance(trigger, CronTrigger)
 
 
-def test_run_scheduler_switches_to_evenly_spaced_runs_for_league_start():
+def test_run_scheduler_switches_to_evenly_spaced_runs_for_league_start(tmp_path):
     """League-start mode (spec 9): bumping meta_runs_per_day_league_start
     above 1 must switch the meta job from a once-daily cron to N
     evenly-spaced runs/day, via this one config line -- no code change.
     Confirmed here since the pipeline's own SPEC.md relies on this switch
-    being ready before the next PoE1 league launch (2026-07-25)."""
+    being ready before the next PoE1 league launch (2026-07-25). This is
+    the manual escape-hatch path (no league_start_mode configured) --
+    see test_compute_meta_trigger_* for the automatic date-based switch."""
     from apscheduler.triggers.interval import IntervalTrigger
 
-    cfg = {"schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 4}}
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 4},
+    }
     fake_scheduler = MagicMock()
-    with patch("src.main.BlockingScheduler", return_value=fake_scheduler):
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])):
         run_scheduler(cfg)
 
     meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
     trigger = meta_call.args[1]
     assert isinstance(trigger, IntervalTrigger)
     assert trigger.interval.total_seconds() == 6 * 3600  # 24h / 4 runs
+
+
+# ── league_start_mode: automatic date-based switch (spec 9, 2026-07-19) ────
+
+_LEAGUE_START_CFG = {
+    "meta_cron_hour_thailand": 2,
+    "meta_runs_per_day_league_start": 1,
+    "league_start_mode": {"start_date": "2026-07-25", "end_date": "2026-08-15", "meta_runs_per_day": 4},
+}
+
+
+def test_compute_meta_trigger_before_range_falls_back_to_cron():
+    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 7, 24))
+    from apscheduler.triggers.cron import CronTrigger
+
+    assert active is False
+    assert isinstance(trigger, CronTrigger)
+
+
+def test_compute_meta_trigger_on_start_date_is_active():
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 7, 25))
+    assert active is True
+    assert isinstance(trigger, IntervalTrigger)
+    assert trigger.interval.total_seconds() == 6 * 3600  # 24h / 4 runs
+
+
+def test_compute_meta_trigger_on_end_date_is_still_active():
+    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 8, 15))
+    assert active is True
+
+
+def test_compute_meta_trigger_after_range_falls_back_to_cron():
+    from apscheduler.triggers.cron import CronTrigger
+
+    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 8, 16))
+    assert active is False
+    assert isinstance(trigger, CronTrigger)
+
+
+def test_compute_meta_trigger_no_league_start_mode_uses_manual_knob():
+    """No league_start_mode configured at all -- must fall back to the
+    existing manual meta_runs_per_day_league_start knob unchanged, same as
+    before this feature existed."""
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    cfg = {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 4}
+    trigger, active = _compute_meta_trigger(cfg, today=date(2026, 7, 25))
+    assert active is False
+    assert isinstance(trigger, IntervalTrigger)
+    assert trigger.interval.total_seconds() == 6 * 3600
+
+
+def test_compute_meta_trigger_malformed_start_after_end_falls_back(caplog):
+    cfg = {
+        "meta_cron_hour_thailand": 2,
+        "league_start_mode": {"start_date": "2026-08-15", "end_date": "2026-07-25", "meta_runs_per_day": 4},
+    }
+    from apscheduler.triggers.cron import CronTrigger
+
+    trigger, active = _compute_meta_trigger(cfg, today=date(2026, 8, 1))
+    assert active is False
+    assert isinstance(trigger, CronTrigger)
+    assert "malformed" in caplog.text.lower()
+
+
+def test_compute_meta_trigger_malformed_missing_key_falls_back(caplog):
+    cfg = {"league_start_mode": {"start_date": "2026-07-25"}}  # missing end_date/meta_runs_per_day
+    from apscheduler.triggers.cron import CronTrigger
+
+    trigger, active = _compute_meta_trigger(cfg, today=date(2026, 8, 1))
+    assert active is False
+    assert isinstance(trigger, CronTrigger)
+    assert "malformed" in caplog.text.lower()
+
+
+def test_run_scheduler_uses_league_start_mode_when_today_in_range(tmp_path):
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "schedule": _LEAGUE_START_CFG}
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main.datetime") as mock_datetime:
+        import datetime as real_datetime_module
+        mock_datetime.now.return_value = real_datetime_module.datetime(2026, 8, 1, 12, 0)
+        run_scheduler(cfg)
+
+    meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
+    trigger = meta_call.args[1]
+    assert isinstance(trigger, IntervalTrigger)
+    assert trigger.interval.total_seconds() == 6 * 3600
+
+    # a dedicated hourly checker job must also be registered
+    check_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "league_start_mode_check")
+    assert check_call.args[1].interval.total_seconds() == 3600
+
+
+def test_run_scheduler_writes_league_start_mode_status_on_startup(tmp_path):
+    created: list = []
+    cfg = {"firebase": {"bucket": "test-bucket"}, "schedule": _LEAGUE_START_CFG}
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)):
+        run_scheduler(cfg)  # real "today" -- before 2026-07-25 as of this test suite's writing
+
+    status = created[-1].fetch_previous("status.json")
+    assert status["league_start_mode"] == "inactive"
+
+
+def test_check_league_start_mode_reschedules_and_updates_status_on_state_change(tmp_path):
+    import src.main as main_module
+
+    main_module._league_start_mode_active = False
+    fake_scheduler = MagicMock()
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+    cfg = {"schedule": _LEAGUE_START_CFG}
+
+    _check_league_start_mode(fake_scheduler, cfg, publisher, today=date(2026, 8, 1))
+
+    fake_scheduler.reschedule_job.assert_called_once()
+    assert fake_scheduler.reschedule_job.call_args.args[0] == "meta"
+    assert publisher.fetch_previous("status.json")["league_start_mode"] == "active"
+    assert main_module._league_start_mode_active is True
+
+
+def test_check_league_start_mode_no_reschedule_when_state_unchanged(tmp_path):
+    import src.main as main_module
+
+    main_module._league_start_mode_active = True  # already active
+    fake_scheduler = MagicMock()
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+    cfg = {"schedule": _LEAGUE_START_CFG}
+
+    _check_league_start_mode(fake_scheduler, cfg, publisher, today=date(2026, 8, 2))  # still in range
+
+    fake_scheduler.reschedule_job.assert_not_called()
+
+
+def test_check_league_start_mode_does_not_touch_job_lock_or_run_meta(tmp_path):
+    """A meta run stuck mid-execution across a mode-switch boundary is safe:
+    rescheduling only changes the job's *next* fire-time computation, it
+    never invokes the job function itself or touches job_lock -- the
+    existing lock (CLAUDE.md's 2026-07-15 incident) is untouched by this
+    entirely separate mechanism."""
+    import src.main as main_module
+
+    main_module._league_start_mode_active = False
+    fake_scheduler = MagicMock()
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+    cfg = {"schedule": _LEAGUE_START_CFG}
+
+    lock_dir = tmp_path / "locks"
+    with patch("src.main.job_lock.DEFAULT_LOCK_DIR", lock_dir), \
+         patch("src.main.run_meta_once") as fake_run_meta_once:
+        with job_lock.acquire("meta", lock_dir=lock_dir):
+            _check_league_start_mode(fake_scheduler, cfg, publisher, today=date(2026, 8, 1))
+            # the lock is still held after the check -- reschedule didn't
+            # release it, touch it, or try to run the job itself
+            assert job_lock.read_lock("meta", lock_dir=lock_dir) is not None
+        fake_run_meta_once.assert_not_called()
+
+    fake_scheduler.reschedule_job.assert_called_once()
 
 
 class _FakeStorageClient:

@@ -16,3 +16,17 @@ def _reset_shared_rate_limiter():
     main_module._shared_rate_limiter = None
     yield
     main_module._shared_rate_limiter = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_league_start_mode_state():
+    """src.main._league_start_mode_active (2026-07-19, spec 9) tracks
+    whether the automatic date-based meta cadence switch is currently
+    active, so _check_league_start_mode only reschedules on an actual
+    state change -- reset between tests for the same reason as the rate
+    limiter above."""
+    import src.main as main_module
+
+    main_module._league_start_mode_active = None
+    yield
+    main_module._league_start_mode_active = None

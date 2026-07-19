@@ -16,11 +16,13 @@ import os
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.base import BaseTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -753,13 +755,103 @@ def _safe_run(fn, cfg: dict[str, Any], job_name: str) -> None:
         log.error("%s job crashed", job_name, exc_info=True)
 
 
+def _compute_meta_trigger(schedule_cfg: dict[str, Any], today: Optional[date] = None) -> tuple[BaseTrigger, bool]:
+    """Returns (trigger, is_league_start_active) for the meta job's cadence
+    right now. `today` defaults to the current Asia/Bangkok calendar date
+    when not passed -- an explicit parameter purely so tests can pin it
+    without mocking `datetime.now` globally (same pattern
+    `_check_stats_cache_stale` already uses instead of a time-mocking
+    dependency).
+
+    `schedule.league_start_mode` (start_date/end_date/meta_runs_per_day,
+    spec 9) overrides the manual `meta_runs_per_day_league_start` knob
+    whenever today falls within [start_date, end_date] (both inclusive,
+    Asia/Bangkok calendar dates -- explicit on purpose, see the
+    `momentTimezone` lesson in `src/fetchers/news.py`: never assume a bare
+    date means what the reader's own locale assumes). Outside that window,
+    or if the block is missing/malformed, falls back to the existing
+    manual-knob logic unchanged -- that knob stays available as an escape
+    hatch for an unplanned/delayed league. A malformed block is a genuine
+    misconfiguration (logged at ERROR, loud on purpose) but never crashes
+    the scheduler over a config typo."""
+    if today is None:
+        today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
+
+    league_start_cfg = schedule_cfg.get("league_start_mode")
+    if league_start_cfg:
+        try:
+            start = date.fromisoformat(league_start_cfg["start_date"])
+            end = date.fromisoformat(league_start_cfg["end_date"])
+            runs_per_day = league_start_cfg["meta_runs_per_day"]
+            if start > end:
+                raise ValueError(f"start_date {start} is after end_date {end}")
+        except (KeyError, ValueError, TypeError) as e:
+            log.error(
+                "scheduler: malformed schedule.league_start_mode (%s) -- falling back to meta_runs_per_day_league_start",
+                e,
+            )
+        else:
+            if start <= today <= end:
+                return IntervalTrigger(hours=24 / runs_per_day), True
+
+    meta_runs_per_day = schedule_cfg.get("meta_runs_per_day_league_start", 1)
+    meta_hour = schedule_cfg.get("meta_cron_hour_thailand", 2)
+    if meta_runs_per_day <= 1:
+        return CronTrigger(hour=meta_hour, minute=0, timezone="Asia/Bangkok"), False
+    return IntervalTrigger(hours=24 / meta_runs_per_day), False
+
+
+# Tracks whether league_start_mode is currently active, so
+# _check_league_start_mode only reschedules the meta job (and rewrites
+# status.json) on an actual state change, not every hourly check. Same
+# module-level-singleton style as _shared_rate_limiter.
+_league_start_mode_active: Optional[bool] = None
+
+
+def _update_league_start_mode_status(publisher: PricesPublisher, active: bool) -> None:
+    status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
+    status["league_start_mode"] = "active" if active else "inactive"
+    publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+
+
+def _check_league_start_mode(
+    scheduler: BlockingScheduler, cfg: dict[str, Any], publisher: PricesPublisher, today: Optional[date] = None,
+) -> None:
+    """Runs hourly, independent of the meta job's own cadence on purpose:
+    checking only "when the meta job is about to run" would leave up to a
+    full day of detection lag while still on the once-daily cron leading up
+    to a league (it wouldn't re-fire until the next day's 2am slot),
+    defeating the point of an automatic same-day switch. Rescheduling a
+    running APScheduler job only changes its *next* fire-time computation --
+    it never affects an in-flight invocation, and `_run_meta_once_locked`'s
+    job_lock already prevents any overlap regardless (CLAUDE.md's
+    2026-07-15 incident). `today` is a passthrough to `_compute_meta_trigger`,
+    same test-only purpose."""
+    global _league_start_mode_active
+    trigger, active = _compute_meta_trigger(cfg.get("schedule", {}), today=today)
+
+    if active != _league_start_mode_active:
+        scheduler.reschedule_job("meta", trigger=trigger)
+        log.info(
+            "scheduler: league_start_mode %s -> %s, meta job rescheduled to %s",
+            "active" if _league_start_mode_active else "inactive",
+            "active" if active else "inactive",
+            trigger,
+        )
+        _league_start_mode_active = active
+        _update_league_start_mode_status(publisher, active)
+
+
 def run_scheduler(cfg: dict[str, Any]) -> None:
     """Persistent scheduler process (spec 9): prices every N minutes, meta on
-    a Thailand-time cron (or several evenly-spaced runs/day if
-    `meta_runs_per_day_league_start` > 1), cleanup daily. Jobs run
+    a Thailand-time cron (or several evenly-spaced runs/day during
+    `league_start_mode`'s configured date range, or via the manual
+    `meta_runs_per_day_league_start` escape hatch), cleanup daily. Jobs run
     independently -- a slow meta run never blocks the prices job."""
     schedule_cfg = cfg.get("schedule", {})
     scheduler = BlockingScheduler(timezone="UTC")
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
 
     prices_interval = schedule_cfg.get("prices_interval_minutes", 20)
     scheduler.add_job(
@@ -767,16 +859,13 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
         id="prices", max_instances=1, misfire_grace_time=300,
     )
 
-    meta_runs_per_day = schedule_cfg.get("meta_runs_per_day_league_start", 1)
-    meta_hour = schedule_cfg.get("meta_cron_hour_thailand", 2)
-    if meta_runs_per_day <= 1:
-        meta_trigger = CronTrigger(hour=meta_hour, minute=0, timezone="Asia/Bangkok")
-    else:
-        meta_trigger = IntervalTrigger(hours=24 / meta_runs_per_day)
+    global _league_start_mode_active
+    meta_trigger, _league_start_mode_active = _compute_meta_trigger(schedule_cfg)
     scheduler.add_job(
         _safe_run, meta_trigger, args=[run_meta_once, cfg, "meta"],
         id="meta", max_instances=1, misfire_grace_time=3600,
     )
+    _update_league_start_mode_status(publisher, _league_start_mode_active)
 
     cleanup_hour = schedule_cfg.get("cleanup_hour_thailand", 4)
     scheduler.add_job(
@@ -790,9 +879,17 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
         id="news", max_instances=1, misfire_grace_time=120,
     )
 
+    # No healthcheck ping for this one -- it's scheduler bookkeeping, not a
+    # data-fetching job; heartbeat.yml's existing META_MAX_AGE_HOURS=26
+    # tolerance already covers the meta job itself at any active frequency.
+    scheduler.add_job(
+        _check_league_start_mode, IntervalTrigger(hours=1), args=[scheduler, cfg, publisher],
+        id="league_start_mode_check", max_instances=1, misfire_grace_time=1800,
+    )
+
     log.info(
-        "scheduler: starting (prices every %dmin, meta %s, cleanup daily %02d:00 ICT, news every %dmin)",
-        prices_interval, meta_trigger, cleanup_hour, news_interval,
+        "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s], cleanup daily %02d:00 ICT, news every %dmin)",
+        prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", cleanup_hour, news_interval,
     )
     scheduler.start()
 

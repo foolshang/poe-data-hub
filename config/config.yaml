@@ -46,10 +46,21 @@ http:
 schedule:
   prices_interval_minutes: 20
   meta_cron_hour_thailand: 2
-  # 1 = single run/day at meta_cron_hour_thailand (normal operation).
-  # >1 = that many evenly-spaced runs/day instead (bump this and restart the
-  # service during the first few days of a new league, per spec section 9).
+  # Manual escape hatch (spec section 9) -- kept for an unplanned/delayed
+  # league that league_start_mode's date range below doesn't cover. Bump
+  # this and restart if you ever need to force multi-run mode outside the
+  # configured window. 1 = single run/day at meta_cron_hour_thailand.
   meta_runs_per_day_league_start: 1
+  # Automatic date-based switch (spec section 9) -- when today (Asia/Bangkok
+  # calendar date) falls within [start_date, end_date] (both inclusive),
+  # the scheduler switches the meta job to meta_runs_per_day evenly-spaced
+  # runs/day on its own, no restart needed, and switches back automatically
+  # once end_date passes. To set up the next league: just edit these two
+  # dates, nothing else.
+  league_start_mode:
+    start_date: "2026-07-25"
+    end_date: "2026-08-15"
+    meta_runs_per_day: 4
   cleanup_hour_thailand: 4
   news_interval_minutes: 5
 
