@@ -382,13 +382,15 @@ the entry source itself. One entry per thread on the configured listing(s);
   used a bare Steam `gid` with no prefix -- see "required deploy order"
   below, this must not reach production ahead of every consumer's own
   migration.
-- `category` — `"news"` | `"patch"` | `"mtx"`. Threads scraped from PoE2's
-  dedicated Patch Notes forum (`2212`) are unconditionally `"patch"`
-  (`FORCED_PATCH_LISTING_URLS`) regardless of title wording -- a bare
-  "Hotfix 2" title wouldn't otherwise match the title heuristic. Every
-  other thread falls back to the original title-keyword heuristic
-  (`categorize()`, unchanged since phase 8): version-number-prefixed or
-  contains "patch" -> patch; contains a sale keyword -> mtx; else news.
+- `category` — `"news"` | `"patch"` | `"mtx"`. Threads scraped from either
+  game's dedicated Patch Notes forum (PoE2 `2212`, PoE1 `patch-notes`) are
+  unconditionally `"patch"` (`FORCED_PATCH_LISTING_URLS`) regardless of
+  title wording -- a bare "Hotfix 2" title wouldn't otherwise match the
+  title heuristic. Every other thread (including `poe-press` and
+  `dev-manifesto`, see "Listing coverage" below) falls back to the original
+  title-keyword heuristic (`categorize()`, unchanged since phase 8):
+  version-number-prefixed or contains "patch" -> patch; contains a sale
+  keyword -> mtx; else news.
 - `link` — **always `www.pathofexile.com`, never rewritten to `th.`**
   (unchanged from phase 8: that's a display concern for whoever renders the
   link). There is no more `link_is_ggg` field -- every entry is inherently
@@ -416,6 +418,55 @@ the entry source itself. One entry per thread on the configured listing(s);
   displayed post_date using the timezone name scraped from that same page
   (see "Timezone correctness" below) -- not a copy of Steam's timestamp,
   which no longer exists in this pipeline.
+
+#### Listing coverage (`GGG_LISTING_URLS`, updated 2026-07-19)
+
+- **PoE2**: `2211` (Announcements), `2212` (Patch Notes).
+- **PoE1**: `news`, `patch-notes`, `poe-press`, `dev-manifesto`.
+
+The PoE1 set started as just `news` at the 2026-07-18 redesign and was
+found incomplete the very next day: GGG posts PoE1's 3.29.0 patch notes to
+a dedicated `patch-notes` forum, separate from `news` -- a blind spot the
+old Steam feed never had, since Steam merged everything into one stream
+regardless of which forum category GGG posted to. Root-caused by an actual
+missed real-world patch note, then closed by auditing **every** category
+on both games' live forum index (not just the obviously news-shaped ones)
+rather than fixing the one gap found and moving on:
+
+- `poe-press` — genuinely first-party GGG content despite the "press" name
+  (confirmed by reading actual thread content, not just the category
+  title) -- real gap, real news missed (a league-launch announcement was
+  sitting there uncovered).
+- `dev-manifesto` — legitimate first-party content, very low frequency
+  (gaps of many months between posts), added anyway since a quiet category
+  costs nothing extra and the content that does appear is high-signal.
+- Deliberately **not** added: `ps4-patch-notes` / `xbox-patch-notes`
+  (console-specific mirrors of the same PC patch notes, redundant for this
+  feed) and every trade/PvP/guild/bug-report/discussion forum on both
+  games (confirmed non-news by title, not assumed).
+- PoE2's forum-index cluster of numeric ids adjacent to `2211`/`2212`
+  (`2213`-`2220`, `2304`, `2381`) was audited too and confirmed to be
+  entirely non-news (Feedback, Bug Reports, Builds, Trading, Jobs) --
+  `2211`/`2212` remain the only PoE2 news categories.
+
+`poe-press`/`dev-manifesto` are **not** in `FORCED_PATCH_LISTING_URLS` --
+their titles already read naturally via the default `categorize()`
+heuristic (e.g. a league-launch press release correctly falls to `"news"`,
+not `"patch"`).
+
+Thai counterparts (`TH_GGG_LISTING_URLS`), confirmed live 2026-07-19:
+`patch-notes` is the same URL slug on `th.` (like `news` already was,
+genuinely translated -- confirmed via a real pair, EN thread 3985332 the
+3.29.0 patch notes vs TH thread 3985358, posted the same second on both).
+`dev-manifesto`'s Thai counterpart is **not** the same slug -- it's forum
+id `1010` ("แถลงการณ์จากทีมพัฒนา"), found by browsing th.'s own forum index
+and confirmed by comparing thread titles/dates against the English
+versions (e.g. EN 3292308 "Character Balance in Path of Exile: Lake of
+Kalandra" vs TH 3292313, 24 seconds apart). `poe-press` has **no** Thai
+counterpart at all -- checked the full th. forum nav menu, no press-release
+category exists there; `link_th` simply never resolves for those entries,
+the same graceful "no match = no field" behavior as any other unmatched
+entry, nothing special needed in code for this case.
 
 #### Timezone correctness (`published`, 2026-07-18)
 
@@ -698,30 +749,34 @@ real data this phase: league detection, league dates (including the actual
 end-of-league post), and the full builds→chars→normalize→aggregate→publish
 pipeline end-to-end (see the Status entry below).
 
-#### Job cadence (phase 8, updated 2026-07-18 for the GGG-forum redesign)
+#### Job cadence (phase 8, updated 2026-07-19 for the GGG-forum redesign + listing-coverage fix)
 
 News + mtx run as **one job** (`run_news_once`, `schedule.news_interval_minutes`,
 default **5 minutes** -- approved cadence) since both are cheap, time-sensitive,
-and share no fetch cost worth separating: per game, up to 2 English GGG
-forum-listing scrapes + up to 2 Thai forum-listing scrapes (`link_th`,
-unchanged since phase 11 -- `src/fetchers/news.py`), **plus one
-thread-detail-page fetch per genuinely new thread** (2026-07-18: content is
-now scraped from each thread's own page rather than coming from Steam).
-Steam's own API call is gone entirely. Steady-state this is 0-2 new threads
-per game per 5-minute cycle in practice, so the added cost is 0-4s at the
-`www.pathofexile.com` rate limit (2s/request) -- negligible. **One-time
-exception**: the very first run after this redesign deploys has no
-`previous_entries` in the new `forum-*` id space yet, so every thread
-currently on page 1 of each listing looks "new" and gets its content
-scraped -- bounded, one-time only. **Confirmed live on the 2026-07-18
-deploy**: actual first-cycle burst was 90 thread-detail fetches combined
-(60 poe2 across both listings + 30 poe1), larger than an earlier ~40
-estimate -- real listing pages held more threads per page than the
-spot-check that produced that number. At ~2s/thread this took a few
-minutes for that one job run (still well inside the 5-minute cadence, just
-a longer single cycle), and the very next cycle dropped to 0 new fetches
-as designed. Plus one `pathofexile.com` homepage scrape for deals
-(`src/fetchers/deals.py`).
+and share no fetch cost worth separating: per game, up to 4 English GGG
+forum-listing scrapes (poe1: `news`/`patch-notes`/`poe-press`/`dev-manifesto`;
+poe2: `2211`/`2212`) + up to 3 Thai forum-listing scrapes (`link_th`; poe1:
+`news`/`patch-notes`/`1010`; poe2: `2282`/`2283` -- see "Listing coverage"
+above), **plus one thread-detail-page fetch per genuinely new thread**
+(2026-07-18: content is now scraped from each thread's own page rather than
+coming from Steam). Steam's own API call is gone entirely. Steady-state
+this is 0-2 new threads per game per 5-minute cycle in practice, so the
+added cost is 0-4s at the `www.pathofexile.com` rate limit (2s/request) --
+negligible. **One-time exception**: the very first run after a *new
+listing URL* is added has no `previous_entries` for that category's ids
+yet, so every thread currently on that listing's page 1 looks "new" and
+gets its content scraped -- bounded, one-time only per category added, not
+recurring. **Confirmed live**: the 2026-07-18 redesign's first-cycle burst
+was 90 thread-detail fetches combined (60 poe2 across both listings + 30
+poe1), larger than an earlier ~40 estimate -- real listing pages held more
+threads per page than the spot-check that produced that number. At
+~2s/thread this took a few minutes for that one job run (still well inside
+the 5-minute cadence, just a longer single cycle), and the very next cycle
+dropped to 0 new fetches as designed. The 2026-07-19 listing-coverage fix
+(adding `patch-notes`/`poe-press`/`dev-manifesto` for poe1) triggers the
+same one-time burst pattern again for poe1 specifically on its own next
+deploy -- expected, not a regression. Plus one `pathofexile.com` homepage
+scrape for deals (`src/fetchers/deals.py`).
 Hosts already covered by existing `rate_limits` entries
 (`www.pathofexile.com`, `th.pathofexile.com` -- `th.` is a distinct
 rate-limit bucket from `www.`, added phase 11) -- negligible next to the
@@ -1052,3 +1107,36 @@ follow-up if poe.ninja 429s are ever observed during that window.
       listing scrape and the next -- not a bug, just a real source-data
       characteristic to be aware of if a consumer ever diffs `published`
       across snapshots expecting it to be perfectly stable.
+- [x] Phase 13: PoE1 listing-coverage gap found and closed (8.4's "Listing
+      coverage" subsection), one day after phase 12 shipped -- 3.29.0's
+      patch notes never reached the feed because GGG posts PoE1 patch notes
+      to a dedicated `patch-notes` forum, separate from `news`, and PoE1
+      only had `news` configured (PoE2 already covered both its
+      announcements and patch-notes forums, `2211`+`2212` -- an asymmetry
+      the Steam-era feed never exposed, since Steam merged every category
+      into one stream). Root-caused from an actual missed real-world patch
+      note, then closed by auditing every category on both games' live
+      forum index rather than stopping at the one gap found -- also added
+      `poe-press` (genuinely first-party GGG content despite the name; a
+      live league-launch announcement was sitting there uncovered) and
+      `dev-manifesto` (legitimate first-party, very low frequency, added
+      since a quiet category costs nothing extra). Deliberately skipped
+      console-specific patch-notes forums (redundant PC-content mirrors)
+      and confirmed every other category on both games (trade/PvP/guild/
+      bug-reports/discussion, and PoE2's `2213`-`2220`/`2304`/`2381`
+      cluster) is genuinely non-news, not just assumed. PoE1's `patch-notes`
+      forced-category treatment mirrors PoE2's `2212`; `poe-press`/
+      `dev-manifesto` are not forced, their titles already read correctly
+      via the default heuristic. Thai counterparts added where they exist:
+      `patch-notes` is the same slug on `th.` (confirmed via a real pair,
+      EN 3985332 vs TH 3985358, posted the same second); `dev-manifesto`'s
+      Thai counterpart is a *different* forum id (`1010`,
+      "แถลงการณ์จากทีมพัฒนา", found by browsing th.'s own nav and confirmed
+      by real title/date matching, 24s apart); `poe-press` has no Thai
+      counterpart at all (checked the full th. nav, doesn't exist) --
+      `link_th` simply never resolves for those entries, no special-casing
+      needed. 38/38 `test_news.py` tests passing (3 new cases covering all
+      4 poe1 categories combined, forced-category behavior, and both real
+      confirmed `link_th` pairs), 259/260 project-wide (the one failure is
+      the same pre-existing `test_rate_limiter.py` timing flake noted in
+      phase 12, still unrelated to this change).

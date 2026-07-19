@@ -63,17 +63,38 @@ from src.utils.http_client import HttpClient
 log = logging.getLogger(__name__)
 
 GGG_LISTING_URLS: dict[str, list[str]] = {
-    "poe1": ["https://www.pathofexile.com/forum/view-forum/news"],
+    # 2026-07-19: audited every category on both games' live forum index
+    # (not just news-adjacent ones) after PoE1's 3.29.0 patch notes were
+    # found missing -- GGG posts PoE1 patch notes to their own dedicated
+    # "patch-notes" forum, separate from "news", unlike the old Steam feed
+    # which merged everything into one stream regardless of forum category.
+    # poe-press and dev-manifesto are both genuine first-party GGG content
+    # (not third-party press despite the "press" name -- confirmed by
+    # reading actual thread content) that were never covered either.
+    # Deliberately NOT added: ps4-patch-notes/xbox-patch-notes (console-
+    # specific mirrors of the same PC patch notes, redundant for this feed)
+    # and every trade/PvP/guild/bug-report/discussion forum (not news).
+    "poe1": [
+        "https://www.pathofexile.com/forum/view-forum/news",
+        "https://www.pathofexile.com/forum/view-forum/patch-notes",
+        "https://www.pathofexile.com/forum/view-forum/poe-press",
+        "https://www.pathofexile.com/forum/view-forum/dev-manifesto",
+    ],
     "poe2": [
         "https://www.pathofexile.com/forum/view-forum/2211",  # announcements
         "https://www.pathofexile.com/forum/view-forum/2212",  # patch notes
     ],
 }
 GGG_WWW_DOMAIN = "https://www.pathofexile.com"
-# 2212 is GGG's dedicated Patch Notes forum -- threads scraped from it are
-# unambiguously "patch" regardless of title wording (e.g. a bare "Hotfix 2"
-# title wouldn't otherwise match categorize()'s title heuristic).
-FORCED_PATCH_LISTING_URLS = {"https://www.pathofexile.com/forum/view-forum/2212"}
+# PoE2's 2212 and PoE1's "patch-notes" are GGG's dedicated Patch Notes
+# forums -- threads scraped from either are unambiguously "patch" regardless
+# of title wording (e.g. a bare "Hotfix 2" title wouldn't otherwise match
+# categorize()'s title heuristic). poe-press/dev-manifesto are NOT forced --
+# their titles already read naturally as "news" via the default heuristic.
+FORCED_PATCH_LISTING_URLS = {
+    "https://www.pathofexile.com/forum/view-forum/2212",
+    "https://www.pathofexile.com/forum/view-forum/patch-notes",
+}
 
 # Captures (href, title, "<postBy post_date span content>") in one pass --
 # the post_date is the thread's *own* creation time (from its "postBy" line,
@@ -97,10 +118,23 @@ GGG_HEADERS = {
 # Thai forum categories are NOT the same forum ids as English -- th. on
 # English PoE2's 2211/2212 returns English content verbatim (just Thai UI
 # chrome), not translations. Real Thai PoE2 categories: 2282 = "Early
-# Access Announcements", 2283 = "Patch Details". PoE1's "news" category
-# *is* the same URL path on th. (genuinely translated there).
+# Access Announcements", 2283 = "Patch Details". PoE1's "news" and
+# "patch-notes" categories *are* the same URL path/slug on th. (genuinely
+# translated there, confirmed live 2026-07-19 -- e.g. thread 3985358 is the
+# real Thai 3.29.0 patch notes, found via th.pathofexile.com's own patch-
+# notes listing). PoE1's dev-manifesto has a real Thai counterpart too, but
+# NOT at the same slug -- it's forum id 1010 ("แถลงการณ์จากทีมพัฒนา",
+# confirmed by comparing thread titles/dates against the English versions).
+# poe-press has no Thai counterpart at all (checked the full th. forum nav
+# menu) -- link_th simply never resolves for those entries, same graceful
+# "no match = no field" behavior as any other unmatched entry, nothing
+# special needed here.
 TH_GGG_LISTING_URLS: dict[str, list[str]] = {
-    "poe1": ["https://th.pathofexile.com/forum/view-forum/news"],
+    "poe1": [
+        "https://th.pathofexile.com/forum/view-forum/news",
+        "https://th.pathofexile.com/forum/view-forum/patch-notes",
+        "https://th.pathofexile.com/forum/view-forum/1010",  # dev-manifesto
+    ],
     "poe2": [
         "https://th.pathofexile.com/forum/view-forum/2282",
         "https://th.pathofexile.com/forum/view-forum/2283",

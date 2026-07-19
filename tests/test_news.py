@@ -328,6 +328,79 @@ def test_fetch_forum_news_th_scrape_failure_leaves_link_th_absent():
     assert all("link_th" not in e for e in entries)
 
 
+# ── 2026-07-19: PoE1 patch-notes/poe-press/dev-manifesto categories ────────
+# (audit found PoE1 3.29.0 patch notes missing entirely -- GGG posts PoE1
+# patch notes to a dedicated "patch-notes" forum, separate from "news",
+# unlike the old Steam feed which merged everything into one stream.)
+
+def _poe1_full_listing_http(extra_text_by_fragment=None):
+    text_by_fragment = {
+        "th.pathofexile.com/forum/view-forum/news": (SAMPLES / "th_forum_poe1_news.html").read_text(encoding="utf-8"),
+        "www.pathofexile.com/forum/view-forum/news": (SAMPLES / "ggg_forum_poe1_news.html").read_text(encoding="utf-8"),
+        "www.pathofexile.com/forum/view-forum/patch-notes": (SAMPLES / "ggg_forum_poe1_patch-notes.html").read_text(encoding="utf-8"),
+        "th.pathofexile.com/forum/view-forum/patch-notes": (SAMPLES / "th_forum_poe1_patch-notes.html").read_text(encoding="utf-8"),
+        "www.pathofexile.com/forum/view-forum/poe-press": (SAMPLES / "ggg_forum_poe1_poe-press.html").read_text(encoding="utf-8"),
+        "www.pathofexile.com/forum/view-forum/dev-manifesto": (SAMPLES / "ggg_forum_poe1_dev-manifesto.html").read_text(encoding="utf-8"),
+        "th.pathofexile.com/forum/view-forum/1010": (SAMPLES / "th_forum_poe1_dev-manifesto.html").read_text(encoding="utf-8"),
+    }
+    if extra_text_by_fragment:
+        text_by_fragment.update(extra_text_by_fragment)
+    return text_by_fragment
+
+
+_POE1_EN_SAMPLE_FILES = (
+    "ggg_forum_poe1_news.html",
+    "ggg_forum_poe1_patch-notes.html",
+    "ggg_forum_poe1_poe-press.html",
+    "ggg_forum_poe1_dev-manifesto.html",
+)
+
+
+def _poe1_all_threads_known() -> list[dict]:
+    """previous_entries marking every thread across all 4 EN listing
+    samples as already-known, so a fetch_forum_news test can exercise
+    listing/category/link_th logic without a thread-detail-page mock for
+    every single thread."""
+    previous_entries = []
+    for fname in _POE1_EN_SAMPLE_FILES:
+        html_text = (SAMPLES / fname).read_text(encoding="utf-8")
+        entries, _tz = _scrape_ggg_listing(_FakeHttpClient({"x": html_text}), "https://www.pathofexile.com/forum/view-forum/x")
+        previous_entries += [{"id": f"forum-{_extract_thread_id(link)}", "content": "c"} for link, _t, _d in entries]
+    return previous_entries
+
+
+def test_fetch_forum_news_poe1_includes_all_four_categories():
+    http = _CountingHttpClient(_poe1_full_listing_http())
+    entries = fetch_forum_news(http, "poe1", previous_entries=_poe1_all_threads_known())
+    ids = {e["id"] for e in entries}
+    assert "forum-3985332" in ids  # 3.29.0 patch notes, patch-notes forum
+    assert "forum-3985355" in ids  # poe-press announcement
+    assert "forum-3292308" in ids  # dev-manifesto (old but real)
+    assert not any(http.thread_fetches)  # every thread pre-marked known
+
+
+def test_fetch_forum_news_poe1_forces_patch_category_for_patch_notes_forum():
+    http = _CountingHttpClient(_poe1_full_listing_http())
+    entries = fetch_forum_news(http, "poe1", previous_entries=_poe1_all_threads_known())
+    by_id = {e["id"]: e for e in entries}
+    assert by_id["forum-3985332"]["category"] == "patch"  # forced, regardless of title
+    # poe-press/dev-manifesto are NOT forced -- default title heuristic applies
+    assert by_id["forum-3985355"]["category"] == "news"
+    assert by_id["forum-3292308"]["category"] == "news"
+
+
+def test_fetch_forum_news_poe1_link_th_resolves_for_patch_notes_and_dev_manifesto():
+    http = _CountingHttpClient(_poe1_full_listing_http())
+    entries = fetch_forum_news(http, "poe1", previous_entries=_poe1_all_threads_known())
+    by_id = {e["id"]: e for e in entries}
+    # real confirmed pair: EN 3985332 (3.29.0 patch notes) <-> TH 3985358, 0s apart
+    assert by_id["forum-3985332"]["link_th"] == "https://th.pathofexile.com/forum/view-thread/3985358"
+    # real confirmed pair: EN 3292308 (dev-manifesto) <-> TH 3292313, 24s apart
+    assert by_id["forum-3292308"]["link_th"] == "https://th.pathofexile.com/forum/view-thread/3292313"
+    # poe-press has no configured Thai counterpart category at all
+    assert "link_th" not in by_id["forum-3985355"]
+
+
 def test_fetch_forum_news_poe2_forces_patch_category_for_2212():
     listing_2211 = (SAMPLES / "ggg_forum_poe2_2211.html").read_text(encoding="utf-8")
     listing_2212 = (SAMPLES / "ggg_forum_poe2_2212.html").read_text(encoding="utf-8")
@@ -359,5 +432,8 @@ def test_fetch_forum_news_poe2_forces_patch_category_for_2212():
         assert by_id[f"forum-{thread_id}"]["category"] == "patch"
 
 
-def test_forced_patch_listing_urls_is_poe2_patch_notes_forum():
-    assert FORCED_PATCH_LISTING_URLS == {"https://www.pathofexile.com/forum/view-forum/2212"}
+def test_forced_patch_listing_urls_includes_both_games_patch_notes_forums():
+    assert FORCED_PATCH_LISTING_URLS == {
+        "https://www.pathofexile.com/forum/view-forum/2212",
+        "https://www.pathofexile.com/forum/view-forum/patch-notes",
+    }
