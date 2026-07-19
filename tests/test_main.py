@@ -4,8 +4,10 @@ healthchecks.io dead-man-switch ping helper, and (phase 7) the multi-game /
 multi-league prices job (run_prices_once, _update_status)."""
 from __future__ import annotations
 
+import json
 import time
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.fetchers.league_detector import LeagueResult
@@ -573,17 +575,43 @@ def test_run_scheduler_switches_to_evenly_spaced_runs_for_league_start(tmp_path)
     assert trigger.interval.total_seconds() == 6 * 3600  # 24h / 4 runs
 
 
-# ── league_start_mode: automatic date-based switch (spec 9, 2026-07-19) ────
+# ── league_start_mode: per-game manual/auto date switch (spec 9, 2026-07-19/20) ──
 
 _LEAGUE_START_CFG = {
     "meta_cron_hour_thailand": 2,
     "meta_runs_per_day_league_start": 1,
-    "league_start_mode": {"start_date": "2026-07-25", "end_date": "2026-08-15", "meta_runs_per_day": 4},
+    "league_start_mode": {
+        "meta_runs_per_day": 4,
+        "poe1": {"start_date": "2026-07-25", "end_date": "2026-08-15"},
+    },
 }
+_GAME_VERSIONS_CFG = {"game_versions": ["poe1", "poe2"]}
+SAMPLES_ROOT = Path(__file__).resolve().parents[1] / "data" / "samples"
+
+
+class _FakeSteamHttp:
+    """Minimal HttpClient stand-in for league_start_mode tests --
+    returns empty Steam news (no upcoming-launch match, i.e. auto mode
+    resolves to "auto-not-found") for any game not given an explicit
+    payload."""
+
+    def __init__(self, payload_by_appid: dict | None = None):
+        self._payload_by_appid = payload_by_appid or {}
+
+    def get_json(self, url, headers=None):
+        for appid, payload in self._payload_by_appid.items():
+            if f"appid={appid}" in url:
+                return payload
+        return {"appnews": {"newsitems": []}}
+
+
+_POE1_APPID = 238960
+_POE2_APPID = 2694490
 
 
 def test_compute_meta_trigger_before_range_falls_back_to_cron():
-    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 7, 24))
+    cfg = {**_GAME_VERSIONS_CFG}
+    trigger, active, _detail = _compute_meta_trigger(_LEAGUE_START_CFG, cfg, _FakeSteamHttp(), today=date(2026, 7, 24))
     from apscheduler.triggers.cron import CronTrigger
 
     assert active is False
@@ -593,21 +621,27 @@ def test_compute_meta_trigger_before_range_falls_back_to_cron():
 def test_compute_meta_trigger_on_start_date_is_active():
     from apscheduler.triggers.interval import IntervalTrigger
 
-    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 7, 25))
+    cfg = {**_GAME_VERSIONS_CFG}
+    trigger, active, detail = _compute_meta_trigger(_LEAGUE_START_CFG, cfg, _FakeSteamHttp(), today=date(2026, 7, 25))
     assert active is True
     assert isinstance(trigger, IntervalTrigger)
     assert trigger.interval.total_seconds() == 6 * 3600  # 24h / 4 runs
+    assert detail["poe1"] == {"source": "manual", "start_date": "2026-07-25", "end_date": "2026-08-15", "in_range": True}
+    assert detail["poe2"]["source"] == "auto-not-found"
+    assert detail["poe2"]["in_range"] is False
 
 
 def test_compute_meta_trigger_on_end_date_is_still_active():
-    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 8, 15))
+    cfg = {**_GAME_VERSIONS_CFG}
+    _trigger, active, _detail = _compute_meta_trigger(_LEAGUE_START_CFG, cfg, _FakeSteamHttp(), today=date(2026, 8, 15))
     assert active is True
 
 
 def test_compute_meta_trigger_after_range_falls_back_to_cron():
     from apscheduler.triggers.cron import CronTrigger
 
-    trigger, active = _compute_meta_trigger(_LEAGUE_START_CFG, today=date(2026, 8, 16))
+    cfg = {**_GAME_VERSIONS_CFG}
+    trigger, active, _detail = _compute_meta_trigger(_LEAGUE_START_CFG, cfg, _FakeSteamHttp(), today=date(2026, 8, 16))
     assert active is False
     assert isinstance(trigger, CronTrigger)
 
@@ -618,31 +652,83 @@ def test_compute_meta_trigger_no_league_start_mode_uses_manual_knob():
     before this feature existed."""
     from apscheduler.triggers.interval import IntervalTrigger
 
-    cfg = {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 4}
-    trigger, active = _compute_meta_trigger(cfg, today=date(2026, 7, 25))
+    schedule_cfg = {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 4}
+    trigger, active, detail = _compute_meta_trigger(schedule_cfg, _GAME_VERSIONS_CFG, _FakeSteamHttp(), today=date(2026, 7, 25))
     assert active is False
     assert isinstance(trigger, IntervalTrigger)
     assert trigger.interval.total_seconds() == 6 * 3600
+    assert detail["poe1"]["source"] == "auto-not-found"
+    assert detail["poe2"]["source"] == "auto-not-found"
 
 
-def test_compute_meta_trigger_malformed_start_after_end_falls_back(caplog):
-    cfg = {
+def test_compute_meta_trigger_manual_wins_over_auto_even_when_auto_would_also_resolve(tmp_path):
+    """poe1 is manually configured; even feeding it Steam data that WOULD
+    auto-resolve to something must not override the manual entry."""
+    payload = json.loads((SAMPLES_ROOT / "steam_news_poe1_wide.json").read_text(encoding="utf-8"))
+    http = _FakeSteamHttp({_POE1_APPID: payload})
+    cfg = {**_GAME_VERSIONS_CFG, "game_versions": ["poe1"]}
+
+    _trigger, _active, detail = _compute_meta_trigger(_LEAGUE_START_CFG, cfg, http, today=date(2026, 8, 1))
+    assert detail["poe1"]["source"] == "manual"
+    assert detail["poe1"]["start_date"] == "2026-07-25"  # the manual date, not the auto-detected July 24
+
+
+def test_compute_meta_trigger_union_active_if_either_game_in_range():
+    """poe1's manual window doesn't cover today, but poe2 auto-detects a
+    currently-in-range window from real sample data -- overall must still
+    be active (union across games, same precedent the manual knob already
+    established: one meta invocation benefits both games)."""
+    payload = json.loads((SAMPLES_ROOT / "steam_news_poe2.json").read_text(encoding="utf-8"))
+    http = _FakeSteamHttp({_POE2_APPID: payload})
+    cfg = {**_GAME_VERSIONS_CFG}
+
+    # poe2's real sample data auto-detects a launch on 2026-05-29; pick a
+    # today inside that derived window but outside poe1's manual window.
+    _trigger, active, detail = _compute_meta_trigger(_LEAGUE_START_CFG, cfg, http, today=date(2026, 6, 5))
+    assert detail["poe1"]["in_range"] is False
+    assert detail["poe2"]["source"] == "auto"
+    assert detail["poe2"]["in_range"] is True
+    assert active is True
+
+
+def test_compute_meta_trigger_auto_stale_detection_does_not_activate():
+    """poe2's real sample data's most recent 'launch on <date>' match is
+    long past its derived window by 2026-08-01 -- must resolve to
+    auto-stale (not plain "auto") and never activate."""
+    payload = json.loads((SAMPLES_ROOT / "steam_news_poe2.json").read_text(encoding="utf-8"))
+    http = _FakeSteamHttp({_POE2_APPID: payload})
+    cfg = {**_GAME_VERSIONS_CFG, "game_versions": ["poe2"]}
+
+    _trigger, active, detail = _compute_meta_trigger({"league_start_mode": {"meta_runs_per_day": 4}}, cfg, http, today=date(2026, 8, 1))
+    assert detail["poe2"]["source"] == "auto-stale"
+    assert detail["poe2"]["in_range"] is False
+    assert active is False
+
+
+def test_compute_meta_trigger_malformed_manual_falls_back_to_auto_for_that_game(caplog):
+    schedule_cfg = {
         "meta_cron_hour_thailand": 2,
-        "league_start_mode": {"start_date": "2026-08-15", "end_date": "2026-07-25", "meta_runs_per_day": 4},
+        "league_start_mode": {
+            "meta_runs_per_day": 4,
+            "poe1": {"start_date": "2026-08-15", "end_date": "2026-07-25"},  # start after end
+        },
     }
     from apscheduler.triggers.cron import CronTrigger
 
-    trigger, active = _compute_meta_trigger(cfg, today=date(2026, 8, 1))
+    cfg = {**_GAME_VERSIONS_CFG, "game_versions": ["poe1"]}
+    trigger, active, detail = _compute_meta_trigger(schedule_cfg, cfg, _FakeSteamHttp(), today=date(2026, 8, 1))
     assert active is False
     assert isinstance(trigger, CronTrigger)
+    assert detail["poe1"]["source"] == "auto-not-found"  # fell back, no Steam data supplied here
     assert "malformed" in caplog.text.lower()
 
 
 def test_compute_meta_trigger_malformed_missing_key_falls_back(caplog):
-    cfg = {"league_start_mode": {"start_date": "2026-07-25"}}  # missing end_date/meta_runs_per_day
+    schedule_cfg = {"league_start_mode": {"poe1": {"start_date": "2026-07-25"}}}  # missing end_date
     from apscheduler.triggers.cron import CronTrigger
 
-    trigger, active = _compute_meta_trigger(cfg, today=date(2026, 8, 1))
+    cfg = {**_GAME_VERSIONS_CFG, "game_versions": ["poe1"]}
+    trigger, active, _detail = _compute_meta_trigger(schedule_cfg, cfg, _FakeSteamHttp(), today=date(2026, 8, 1))
     assert active is False
     assert isinstance(trigger, CronTrigger)
     assert "malformed" in caplog.text.lower()
@@ -651,10 +737,11 @@ def test_compute_meta_trigger_malformed_missing_key_falls_back(caplog):
 def test_run_scheduler_uses_league_start_mode_when_today_in_range(tmp_path):
     from apscheduler.triggers.interval import IntervalTrigger
 
-    cfg = {"firebase": {"bucket": "test-bucket"}, "schedule": _LEAGUE_START_CFG}
+    cfg = {"firebase": {"bucket": "test-bucket"}, "schedule": _LEAGUE_START_CFG, "game_versions": ["poe1"]}
     fake_scheduler = MagicMock()
     with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
          patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()), \
          patch("src.main.datetime") as mock_datetime:
         import datetime as real_datetime_module
         mock_datetime.now.return_value = real_datetime_module.datetime(2026, 8, 1, 12, 0)
@@ -672,14 +759,16 @@ def test_run_scheduler_uses_league_start_mode_when_today_in_range(tmp_path):
 
 def test_run_scheduler_writes_league_start_mode_status_on_startup(tmp_path):
     created: list = []
-    cfg = {"firebase": {"bucket": "test-bucket"}, "schedule": _LEAGUE_START_CFG}
+    cfg = {"firebase": {"bucket": "test-bucket"}, "schedule": _LEAGUE_START_CFG, "game_versions": ["poe1"]}
     fake_scheduler = MagicMock()
     with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
-         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)):
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)), \
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
         run_scheduler(cfg)  # real "today" -- before 2026-07-25 as of this test suite's writing
 
     status = created[-1].fetch_previous("status.json")
     assert status["league_start_mode"] == "inactive"
+    assert status["league_start_mode_detail"]["poe1"]["source"] == "manual"
 
 
 def test_check_league_start_mode_reschedules_and_updates_status_on_state_change(tmp_path):
@@ -689,13 +778,15 @@ def test_check_league_start_mode_reschedules_and_updates_status_on_state_change(
     fake_scheduler = MagicMock()
     publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
     publisher._client = _FakeStorageClient()
-    cfg = {"schedule": _LEAGUE_START_CFG}
+    cfg = {"schedule": _LEAGUE_START_CFG, "game_versions": ["poe1"]}
 
-    _check_league_start_mode(fake_scheduler, cfg, publisher, today=date(2026, 8, 1))
+    _check_league_start_mode(fake_scheduler, cfg, _FakeSteamHttp(), publisher, today=date(2026, 8, 1))
 
     fake_scheduler.reschedule_job.assert_called_once()
     assert fake_scheduler.reschedule_job.call_args.args[0] == "meta"
-    assert publisher.fetch_previous("status.json")["league_start_mode"] == "active"
+    status = publisher.fetch_previous("status.json")
+    assert status["league_start_mode"] == "active"
+    assert status["league_start_mode_detail"]["poe1"]["source"] == "manual"
     assert main_module._league_start_mode_active is True
 
 
@@ -706,9 +797,9 @@ def test_check_league_start_mode_no_reschedule_when_state_unchanged(tmp_path):
     fake_scheduler = MagicMock()
     publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
     publisher._client = _FakeStorageClient()
-    cfg = {"schedule": _LEAGUE_START_CFG}
+    cfg = {"schedule": _LEAGUE_START_CFG, "game_versions": ["poe1"]}
 
-    _check_league_start_mode(fake_scheduler, cfg, publisher, today=date(2026, 8, 2))  # still in range
+    _check_league_start_mode(fake_scheduler, cfg, _FakeSteamHttp(), publisher, today=date(2026, 8, 2))  # still in range
 
     fake_scheduler.reschedule_job.assert_not_called()
 
@@ -725,13 +816,13 @@ def test_check_league_start_mode_does_not_touch_job_lock_or_run_meta(tmp_path):
     fake_scheduler = MagicMock()
     publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
     publisher._client = _FakeStorageClient()
-    cfg = {"schedule": _LEAGUE_START_CFG}
+    cfg = {"schedule": _LEAGUE_START_CFG, "game_versions": ["poe1"]}
 
     lock_dir = tmp_path / "locks"
     with patch("src.main.job_lock.DEFAULT_LOCK_DIR", lock_dir), \
          patch("src.main.run_meta_once") as fake_run_meta_once:
         with job_lock.acquire("meta", lock_dir=lock_dir):
-            _check_league_start_mode(fake_scheduler, cfg, publisher, today=date(2026, 8, 1))
+            _check_league_start_mode(fake_scheduler, cfg, _FakeSteamHttp(), publisher, today=date(2026, 8, 1))
             # the lock is still held after the check -- reschedule didn't
             # release it, touch it, or try to run the job itself
             assert job_lock.read_lock("meta", lock_dir=lock_dir) is not None

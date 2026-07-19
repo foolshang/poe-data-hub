@@ -751,28 +751,83 @@ real data this phase: league detection, league dates (including the actual
 end-of-league post), and the full builds→chars→normalize→aggregate→publish
 pipeline end-to-end (see the Status entry below).
 
-#### Automatic league-start mode (`schedule.league_start_mode`, 2026-07-19)
+#### Automatic league-start mode (`schedule.league_start_mode`, 2026-07-19, per-game auto-detection 2026-07-20)
 
 The manual knob above required someone to edit `config.yaml` and restart
 the service right when a league launches, then remember to revert it a few
-weeks later. `league_start_mode` automates both ends:
+weeks later. `league_start_mode` automates both ends -- and as of
+2026-07-20, can derive the date itself per game from GGG's own Steam News
+announcements, so most leagues need zero manual config at all:
 
 ```yaml
 schedule:
   league_start_mode:
-    start_date: "2026-07-25"   # inclusive, Asia/Bangkok calendar date
-    end_date: "2026-08-15"     # inclusive
     meta_runs_per_day: 4
+    auto_end_date_offset_days: 21   # derived end_date = detected launch + this
+    poe1:
+      start_date: "2026-07-25"      # manual -- always wins over auto
+      end_date: "2026-08-15"
+    poe2: "auto"                    # or omit the poe2 key entirely -- same thing
 ```
 
-**To set up the next league: edit these two dates, nothing else.** No
-restart needed for the switch itself to take effect (see below); a restart
-is only needed to change the *dates* (`config.yaml` is loaded once at
-process startup, same as every other config value).
+**Per-game, manual always wins over auto.** Each game's value under
+`league_start_mode` is either a manual `{start_date, end_date}` dict or the
+string `"auto"` (equivalent to omitting the game's key entirely).
+`_resolve_league_window` (`src/main.py`) resolves each one independently;
+iterates `cfg["game_versions"]`, not a hardcoded poe1/poe2 pair, so a
+future third game gets auto-detection for free with zero code changes.
+league_start_mode is **active if any configured game's window contains
+today** -- union, not per-game gating of the meta job itself, same
+precedent the original manual knob established (one meta invocation
+covers all games, so a league-start bump for either speeds up everyone's
+data collection together).
 
-- **Global, not per-game** -- same precedent as the manual knob above (one
-  meta job invocation covers both games; a per-game date range would need
-  per-game trigger scheduling, a bigger change nothing here currently needs).
+**Auto-detection**: `LeagueDatesFetcher.find_upcoming_launch()`
+(`src/fetchers/league_dates.py`) -- distinct from that class's existing
+`fetch()`/`_find_start`, which only matches a "now available" post for an
+*already-known* league name (i.e. only detects a launch retroactively, on
+or after the day it happens). `find_upcoming_launch` instead searches
+every official Steam post's title *and* body for a
+`(?:launch(?:es|ing)?|releases?)\s+on\s+<Month Day>` phrase (case
+insensitive) -- validated live 2026-07-19/20 against real historical posts
+spanning multiple past league launches for both games:
+- PoE1's real title: `"Path of Exile: Curse of the Allflame Releases on
+  July 24 PDT"` -- date in the title.
+- PoE2's real body: `"...Return of the Ancients officially launches on
+  May 29 (PDT)..."` -- that post's own title, `"Return of the Ancients
+  Launches Soon"`, has no date at all, confirming body search is required,
+  not just title.
+- Confirmed to correctly **exclude** real look-alike false positives that
+  don't use the verb phrase: `"Play the Return of the Ancestors Event on
+  June 25th PDT"`, `"Zizaran's Class Gauntlet Event Starts on April 8th"`,
+  `"More ExileCon Tickets Available On May 17th PDT"`, `"Watch GGG Live on
+  May 7th PDT"` -- none of these matched during validation, no denylist
+  needed on top of the verb-phrase specificity.
+
+Only keeps candidates where the parsed date is on/after the post's own
+date (a genuinely forward-looking announcement, not a retrospective
+mention), and picks the single most recent qualifying post -- self-corrects
+if a later post restates/corrects the date, and naturally resolves to
+whichever league most recently launched or is about to when the feed spans
+multiple league cycles (confirmed against real multi-cycle sample data,
+not just the latest one).
+
+`status.json.league_start_mode_detail.{game}.source` reports which of five
+states each game resolved to: `"manual"`, `"manual-malformed"` (bad manual
+config, fell through to auto for that game, logged at ERROR),
+`"auto"` (a current, still-relevant detection), `"auto-stale"` (Steam news
+still has an old "launch on <date>" post, but its entire derived window --
+including the offset buffer -- has already passed; functionally identical
+to not-found, kept as a distinct label purely so a human reading
+`status.json` doesn't mistake stale history for a fresh detection), or
+`"auto-not-found"` (no qualifying post at all right now -- the normal state
+for most of a league's life). **Checked 2026-07-19: PoE2 has not yet
+announced its next league** (Steam feed had only patch notes/build
+showcases), so `poe2` currently resolves to `"auto-not-found"` in
+production -- this ships the detection capability itself, which will
+resolve to `"auto"` automatically the moment GGG posts the announcement,
+no deploy needed.
+
 - **Asia/Bangkok, explicit on purpose** -- `start_date`/`end_date` are
   compared against `datetime.now(ZoneInfo("Asia/Bangkok")).date()`, never
   server-local or UTC. Learned from the `momentTimezone` drift lesson (8.4):
@@ -787,26 +842,36 @@ process startup, same as every other config value).
   once-daily 2am cron leading up to a league (it wouldn't re-fire until the
   next day's slot). Also checked once directly at scheduler startup, so
   `status.json` reflects the correct state immediately on boot rather than
-  waiting up to an hour.
+  waiting up to an hour. `LeagueDatesFetcher`'s existing 12h TTL cache
+  (unchanged, reused as-is) keeps the hourly check from hitting Steam News
+  more than twice a day per game regardless.
 - **Live reschedule, no restart**: `scheduler.reschedule_job("meta", ...)`
   changes the running APScheduler job's trigger in place. This only affects
   the *next* fire-time computation -- it cannot touch an in-flight
   invocation, and `_run_meta_once_locked`'s existing job_lock (9's
   concurrency-safety fix) already prevents any overlap regardless of when a
   reschedule happens to land relative to a running cycle.
-- **Falls back gracefully, never crashes the scheduler**: outside the
-  configured window, or if the block is missing entirely, falls back to
-  `meta_runs_per_day_league_start`/`meta_cron_hour_thailand` unchanged. A
-  malformed block (bad date string, `start_date` after `end_date`, missing
+- **Falls back gracefully, never crashes the scheduler**: a malformed
+  manual block (bad date string, `start_date` after `end_date`, missing
   key) logs an ERROR (loud, not silent -- a config typo should be noticed)
-  and falls back the same way.
-- **Visible**: every actual switch logs INFO with the old/new state and the
-  new trigger; top-level `status.json.league_start_mode` is `"active"` or
-  `"inactive"` at all times, updated on every state change and once at
-  startup. No `heartbeat.yml` change needed -- it's scheduler bookkeeping,
-  not a data-fetching job, and the existing `META_MAX_AGE_HOURS = 26`
-  tolerance (spec 9's Layer-2 check) already covers the meta job itself at
-  any active frequency.
+  and falls back to auto-detection for that specific game; a failed
+  auto-detection attempt (network error, unexpected Steam response shape)
+  logs a WARNING and resolves to `"auto-not-found"` for that game rather
+  than raising. Either way the scheduler itself never crashes over this.
+- **Visible, and a wrong auto-detection is bounded and noticeable by
+  design**: every actual switch logs INFO with the old/new state, the new
+  trigger, and the full per-game detail; top-level `status.json.league_start_mode`
+  is `"active"`/`"inactive"` at all times (updated on every state change
+  and once at startup), and `status.json.league_start_mode_detail` gives a
+  human something concrete to check against if the mode is ever active
+  when it shouldn't be. Per the project owner's explicit acceptance: if
+  Steam-based date detection is ever wrong, the only real-world consequence
+  is the meta job running more frequently than needed in the wrong window
+  -- never wrong *data* -- and that's exactly the failure mode this
+  visibility is meant to surface quickly. No `heartbeat.yml` change needed
+  -- it's scheduler bookkeeping, not a data-fetching job, and the existing
+  `META_MAX_AGE_HOURS = 26` tolerance (spec 9's Layer-2 check) already
+  covers the meta job itself at any active frequency.
 - **Day-1-of-league data gap**: confirmed by reading the code, not assumed
   -- a brand-new league can have zero characters indexed on poe.ninja yet
   for the first few hours, and this does *not* crash the meta job.
@@ -1241,3 +1306,45 @@ follow-up if poe.ninja 429s are ever observed during that window.
       job-lock non-interference) plus one in `test_aggregator.py` for the
       zero-sample guard -- 272/273 project-wide (same pre-existing
       unrelated timing flake).
+- [x] Phase 15: `league_start_mode` extended to per-game auto-detection
+      (8.4's "Automatic league-start mode" subsection) -- one day after
+      phase 14 shipped requiring manual dates, closing the gap for PoE2 and
+      every future league on either game without further code changes.
+      `LeagueDatesFetcher.find_upcoming_launch()` (`src/fetchers/league_dates.py`)
+      is new: unlike that class's existing `_find_start` (only matches a
+      "now available" post for an *already-known* league name, i.e. only
+      detects retroactively, on or after launch day), it searches every
+      official Steam post's title+body for a
+      `launch(es/ing)?|release(s)? on <date>` phrase, needing no advance
+      knowledge of the league's name. The regex and its "keep only
+      forward-looking matches, most-recent-post wins" selection logic were
+      validated against real historical posts spanning multiple past
+      league launches for both games (not synthetic examples) -- found the
+      real title-vs-body split (PoE1 states the date in the title, PoE2
+      only in the body -- "Return of the Ancients Launches Soon" itself
+      has no date at all) and four real look-alike false positives
+      (event/gauntlet/ticket/livestream posts using similar "on `<date>`"
+      phrasing) that the verb-phrase requirement correctly excludes without
+      needing a denylist. `_resolve_league_window`/`_compute_meta_trigger`
+      (`src/main.py`) now resolve a window **per game** (iterating
+      `cfg["game_versions"]`, not hardcoded) instead of one global window;
+      manual config always wins over auto for that game; active if **any**
+      game's window contains today (union, same precedent phase 14's
+      manual knob already established). Added a fifth resolution state,
+      `"auto-stale"`, distinct from plain `"auto"` -- Steam news can still
+      surface an old "launch on `<date>`" post whose entire derived window
+      has already passed; functionally identical to not-found
+      (`in_range` is always false) but labeled separately in
+      `status.json.league_start_mode_detail` so a human doesn't mistake
+      stale history for a fresh detection. Checked live 2026-07-19: PoE2
+      has not yet announced its next league, so this ships the detection
+      capability itself (resolves to `"auto-not-found"` in production
+      today) rather than a manually-entered date -- it'll self-populate
+      the moment GGG posts the announcement. 6 new tests in
+      `test_league_dates.py` for `find_upcoming_launch`'s title/body
+      matches, all four real false positives, retrospective-mention
+      exclusion, and most-recent-wins selection; phase 14's `test_main.py`
+      `league_start_mode` suite rewritten/extended for per-game resolution,
+      manual-wins-over-auto, union-active semantics, the `auto-stale`
+      distinction, and malformed-manual-falls-back-to-auto-for-that-game --
+      281/282 project-wide (same pre-existing unrelated timing flake).

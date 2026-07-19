@@ -82,6 +82,37 @@ _END_DATE_RE = re.compile(
     r"ends? on ([A-Za-z]+ \d{1,2})(?:st|nd|rd|th)?", re.IGNORECASE
 )
 
+# Matches "Releases on <Month> <Day>" (PoE1's real title phrasing, e.g.
+# "Curse of the Allflame Releases on July 24 PDT") and "launch(es|ing) on
+# <Month> <Day>" (PoE2's real body phrasing, e.g. "...officially launches
+# on May 29 (PDT)..." -- that post's own title, "Return of the Ancients
+# Launches Soon", has no date at all, hence searching body text too).
+# Validated live 2026-07-19 against real historical posts spanning
+# multiple past league launches for both games, and confirmed to correctly
+# exclude real look-alike false positives that don't use this verb phrase:
+# "Play the Return of the Ancestors Event on June 25th PDT", "Zizaran's
+# Class Gauntlet Event Starts on April 8th", "More ExileCon Tickets
+# Available On May 17th PDT", "Watch GGG Live on May 7th PDT" -- none of
+# these match "launch(es/ing) on"/"release(s) on", all correctly excluded.
+_UPCOMING_LAUNCH_RE = re.compile(
+    r"(?:launch(?:es|ing)?|releases?)\s+on\s+([A-Za-z]+\.?\s+\d{1,2})(?:st|nd|rd|th)?",
+    re.IGNORECASE,
+)
+
+
+def _parse_date_relative_to_post(text: str, post_dt: datetime) -> Optional[datetime]:
+    """Parses a bare "Month Day" fragment using post_dt's year as a
+    default, rolling forward to the next year if the parsed month is
+    earlier than the post's own month (e.g. a post made in November
+    mentioning a January date means next January, not last January)."""
+    try:
+        parsed = dateutil_parser.parse(text, default=post_dt)
+    except (ValueError, OverflowError):
+        return None
+    if parsed.month < post_dt.month:
+        parsed = parsed.replace(year=post_dt.year + 1)
+    return parsed.replace(tzinfo=timezone.utc)
+
 
 @dataclass(frozen=True)
 class LeagueDates:
@@ -165,14 +196,48 @@ class LeagueDatesFetcher:
             log.warning("league_dates: found an 'ends' post for %r but couldn't parse a date from it", league_name)
             return None
         post_dt = datetime.fromtimestamp(post["date"], tz=timezone.utc)
-        try:
-            parsed = dateutil_parser.parse(match.group(1), default=post_dt)
-        except (ValueError, OverflowError):
+        parsed = _parse_date_relative_to_post(match.group(1), post_dt)
+        if parsed is None:
             log.warning("league_dates: unparseable end date %r for %r", match.group(1), league_name)
+        return parsed
+
+    def find_upcoming_launch(self) -> Optional[datetime]:
+        """Detects an upcoming league/expansion launch date from Steam news
+        *without* needing to already know the league's name -- unlike
+        `fetch()`'s `_find_start` (which only matches a "now available"
+        post for an already-known league name, i.e. only detects a launch
+        retroactively, on or after the day it happens). Used to
+        auto-populate `schedule.league_start_mode` (spec 9) ahead of a
+        league launching, so nobody has to manually enter dates.
+
+        Searches every official post's title+body for `_UPCOMING_LAUNCH_RE`
+        (see its own comment for the real posts this was validated
+        against, including real false positives it correctly excludes).
+        Keeps only matches where the parsed date is on/after the post's own
+        date (a genuinely forward-looking announcement, not a retrospective
+        mention), and returns the one from the single most recent
+        qualifying post -- self-corrects if a later post restates/corrects
+        the date, and naturally resolves to whichever league most recently
+        launched or is about to when the feed spans multiple league
+        cycles (confirmed against real multi-league-cycle sample data).
+
+        Best-effort like `fetch()`'s other lookups: returns `None` (no
+        warning logged -- "not found yet" is the normal state for most of
+        a league's life) rather than raising."""
+        items = self._official_news_items()
+        candidates: list[tuple[int, datetime]] = []
+        for it in items:
+            text = f"{it.get('title', '')} {it.get('contents', '')}"
+            match = _UPCOMING_LAUNCH_RE.search(text)
+            if not match:
+                continue
+            post_dt = datetime.fromtimestamp(it["date"], tz=timezone.utc)
+            parsed = _parse_date_relative_to_post(match.group(1), post_dt)
+            if parsed is not None and parsed.date() >= post_dt.date():
+                candidates.append((it["date"], parsed))
+        if not candidates:
             return None
-        if parsed.month < post_dt.month:
-            parsed = parsed.replace(year=post_dt.year + 1)
-        return parsed.replace(tzinfo=timezone.utc)
+        return max(candidates, key=lambda c: c[0])[1]
 
     def _dump_failed_response(self, data: Any, url: str) -> None:
         import json

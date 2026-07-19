@@ -51,16 +51,25 @@ schedule:
   # this and restart if you ever need to force multi-run mode outside the
   # configured window. 1 = single run/day at meta_cron_hour_thailand.
   meta_runs_per_day_league_start: 1
-  # Automatic date-based switch (spec section 9) -- when today (Asia/Bangkok
-  # calendar date) falls within [start_date, end_date] (both inclusive),
-  # the scheduler switches the meta job to meta_runs_per_day evenly-spaced
-  # runs/day on its own, no restart needed, and switches back automatically
-  # once end_date passes. To set up the next league: just edit these two
-  # dates, nothing else.
+  # Automatic per-game date-based switch (spec section 9) -- when today
+  # (Asia/Bangkok calendar date) falls within ANY configured game's
+  # [start_date, end_date] (both inclusive), the scheduler switches the
+  # meta job to meta_runs_per_day evenly-spaced runs/day on its own, no
+  # restart needed, and switches back automatically once every game's
+  # window has passed. Each game's value is either a manual
+  # {start_date, end_date} (always wins over auto) or "auto"/omitted, in
+  # which case the scheduler derives it itself from GGG's Steam News
+  # announcements (LeagueDatesFetcher.find_upcoming_launch) -- for a game
+  # left on auto, there's normally nothing to do here at all; only add a
+  # manual entry if auto-detection ever needs correcting. See status.json's
+  # league_start_mode_detail to check what each game currently resolved to.
   league_start_mode:
-    start_date: "2026-07-25"
-    end_date: "2026-08-15"
     meta_runs_per_day: 4
+    auto_end_date_offset_days: 21   # derived end_date = detected launch + this
+    poe1:
+      start_date: "2026-07-25"
+      end_date: "2026-08-15"
+    poe2: "auto"
   cleanup_hour_thailand: 4
   news_interval_minutes: 5
 

@@ -16,7 +16,7 @@ import os
 import sys
 import threading
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -755,50 +755,128 @@ def _safe_run(fn, cfg: dict[str, Any], job_name: str) -> None:
         log.error("%s job crashed", job_name, exc_info=True)
 
 
-def _compute_meta_trigger(schedule_cfg: dict[str, Any], today: Optional[date] = None) -> tuple[BaseTrigger, bool]:
-    """Returns (trigger, is_league_start_active) for the meta job's cadence
-    right now. `today` defaults to the current Asia/Bangkok calendar date
-    when not passed -- an explicit parameter purely so tests can pin it
-    without mocking `datetime.now` globally (same pattern
-    `_check_stats_cache_stale` already uses instead of a time-mocking
-    dependency).
+DEFAULT_AUTO_END_DATE_OFFSET_DAYS = 21
 
-    `schedule.league_start_mode` (start_date/end_date/meta_runs_per_day,
-    spec 9) overrides the manual `meta_runs_per_day_league_start` knob
-    whenever today falls within [start_date, end_date] (both inclusive,
-    Asia/Bangkok calendar dates -- explicit on purpose, see the
-    `momentTimezone` lesson in `src/fetchers/news.py`: never assume a bare
-    date means what the reader's own locale assumes). Outside that window,
-    or if the block is missing/malformed, falls back to the existing
-    manual-knob logic unchanged -- that knob stays available as an escape
-    hatch for an unplanned/delayed league. A malformed block is a genuine
-    misconfiguration (logged at ERROR, loud on purpose) but never crashes
-    the scheduler over a config typo."""
-    if today is None:
-        today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
 
-    league_start_cfg = schedule_cfg.get("league_start_mode")
-    if league_start_cfg:
+def _resolve_league_window(
+    game_league_cfg: Any, http: HttpClient, game: str, auto_offset_days: int, today: date,
+) -> tuple[Optional[date], Optional[date], str]:
+    """Resolves one game's league-start window from its
+    `schedule.league_start_mode.{game}` config value. Returns
+    `(start_date, end_date, source)` where `source` is one of:
+
+    - `"manual"` -- `game_league_cfg` is a `{start_date, end_date}` dict and
+      both parsed cleanly with `start_date <= end_date`. Manual always wins
+      over auto; this is never overridden.
+    - `"manual-malformed"` -- was a dict, but a date failed to parse or
+      `start_date` is after `end_date`. Logged at ERROR (a config typo
+      should be noticed), falls through to auto for this game rather than
+      crashing the scheduler.
+    - `"auto"` -- `game_league_cfg` is the string `"auto"`, absent, or
+      manual parsing failed, and `LeagueDatesFetcher(game).find_upcoming_launch()`
+      found a real announcement whose derived window (launch date +
+      `auto_offset_days`) hasn't fully lapsed yet.
+    - `"auto-stale"` -- same as `"auto"`, but Steam news still had an old
+      announcement whose entire derived window (including the offset
+      buffer) is already in the past -- e.g. the currently most-recent
+      "launch on <date>" post in the feed is from a league that already
+      launched and finished its league_start_mode window months ago, and
+      nothing newer has been posted since. Functionally identical to
+      `"auto-not-found"` (`in_range` is always `False`), kept as a
+      distinct label purely so a human reading `status.json` doesn't
+      mistake stale historical detection for a fresh one.
+    - `"auto-not-found"` -- auto mode, no "launch on <date>"-shaped
+      announcement anywhere in Steam news at all right now (the normal
+      state for most of a league's life) -- `start_date`/`end_date` are
+      both `None`."""
+    if isinstance(game_league_cfg, dict):
         try:
-            start = date.fromisoformat(league_start_cfg["start_date"])
-            end = date.fromisoformat(league_start_cfg["end_date"])
-            runs_per_day = league_start_cfg["meta_runs_per_day"]
+            start = date.fromisoformat(game_league_cfg["start_date"])
+            end = date.fromisoformat(game_league_cfg["end_date"])
             if start > end:
                 raise ValueError(f"start_date {start} is after end_date {end}")
         except (KeyError, ValueError, TypeError) as e:
             log.error(
-                "scheduler: malformed schedule.league_start_mode (%s) -- falling back to meta_runs_per_day_league_start",
-                e,
+                "scheduler: malformed schedule.league_start_mode.%s (%s) -- falling back to auto-detection",
+                game, e,
             )
         else:
-            if start <= today <= end:
-                return IntervalTrigger(hours=24 / runs_per_day), True
+            return start, end, "manual"
+
+    try:
+        detected = LeagueDatesFetcher(http, game=game).find_upcoming_launch()
+    except Exception:
+        log.warning("scheduler: auto-detection failed for %s league_start_mode", game, exc_info=True)
+        detected = None
+    if detected is None:
+        return None, None, "auto-not-found"
+
+    start = detected.date()
+    end = start + timedelta(days=auto_offset_days)
+    if end < today:
+        return start, end, "auto-stale"
+    log.info("scheduler: auto-detected upcoming %s launch on %s -- league_start_mode window %s..%s", game, start, start, end)
+    return start, end, "auto"
+
+
+def _compute_meta_trigger(
+    schedule_cfg: dict[str, Any], cfg: dict[str, Any], http: HttpClient, today: Optional[date] = None,
+) -> tuple[BaseTrigger, bool, dict[str, dict[str, Any]]]:
+    """Returns (trigger, is_league_start_active, per_game_detail) for the
+    meta job's cadence right now. `today` defaults to the current
+    Asia/Bangkok calendar date when not passed -- an explicit parameter
+    purely so tests can pin it without mocking `datetime.now` globally
+    (same pattern `_check_stats_cache_stale` already uses instead of a
+    time-mocking dependency).
+
+    `schedule.league_start_mode` (spec 9) resolves a window **per game**
+    (`cfg["game_versions"]`, not a hardcoded poe1/poe2 pair -- a future
+    third game gets this for free) via `_resolve_league_window`, each
+    either manually configured or auto-detected from
+    `LeagueDatesFetcher.find_upcoming_launch()`. league_start_mode is
+    active -- overriding the manual `meta_runs_per_day_league_start` knob
+    -- if **any** game's window contains today (both inclusive, explicit
+    Asia/Bangkok calendar dates -- see the `momentTimezone` lesson in
+    `src/fetchers/news.py`: never assume a bare date means what the
+    reader's own locale assumes; the same union-across-games precedent the
+    manual knob already established, since one meta invocation covers both
+    games). `per_game_detail` (for `status.json`) is
+    `{game: {"source", "start_date", "end_date", "in_range"}}` --
+    `source` is one of `"manual"` / `"manual-malformed"` / `"auto"` /
+    `"auto-stale"` / `"auto-not-found"`, see `_resolve_league_window`.
+
+    Falls back to the existing manual-knob cron-or-interval logic
+    unchanged when nothing is active -- that knob stays available as an
+    escape hatch for an unplanned/delayed league."""
+    if today is None:
+        today = datetime.now(ZoneInfo("Asia/Bangkok")).date()
+
+    league_start_root = schedule_cfg.get("league_start_mode") or {}
+    auto_offset_days = league_start_root.get("auto_end_date_offset_days", DEFAULT_AUTO_END_DATE_OFFSET_DAYS)
+
+    per_game_detail: dict[str, dict[str, Any]] = {}
+    any_active = False
+    for game in cfg.get("game_versions", ["poe2"]):
+        game_league_cfg = league_start_root.get(game)
+        start, end, source = _resolve_league_window(game_league_cfg, http, game, auto_offset_days, today)
+        in_range = start is not None and end is not None and start <= today <= end
+        any_active = any_active or in_range
+        per_game_detail[game] = {
+            "source": source,
+            "start_date": start.isoformat() if start else None,
+            "end_date": end.isoformat() if end else None,
+            "in_range": in_range,
+        }
+
+    if any_active:
+        runs_per_day = league_start_root.get("meta_runs_per_day", 4)
+        return IntervalTrigger(hours=24 / runs_per_day), True, per_game_detail
 
     meta_runs_per_day = schedule_cfg.get("meta_runs_per_day_league_start", 1)
     meta_hour = schedule_cfg.get("meta_cron_hour_thailand", 2)
     if meta_runs_per_day <= 1:
-        return CronTrigger(hour=meta_hour, minute=0, timezone="Asia/Bangkok"), False
-    return IntervalTrigger(hours=24 / meta_runs_per_day), False
+        return CronTrigger(hour=meta_hour, minute=0, timezone="Asia/Bangkok"), False, per_game_detail
+    return IntervalTrigger(hours=24 / meta_runs_per_day), False, per_game_detail
 
 
 # Tracks whether league_start_mode is currently active, so
@@ -808,14 +886,18 @@ def _compute_meta_trigger(schedule_cfg: dict[str, Any], today: Optional[date] = 
 _league_start_mode_active: Optional[bool] = None
 
 
-def _update_league_start_mode_status(publisher: PricesPublisher, active: bool) -> None:
+def _update_league_start_mode_status(
+    publisher: PricesPublisher, active: bool, per_game_detail: dict[str, dict[str, Any]],
+) -> None:
     status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
     status["league_start_mode"] = "active" if active else "inactive"
+    status["league_start_mode_detail"] = per_game_detail
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
 
 
 def _check_league_start_mode(
-    scheduler: BlockingScheduler, cfg: dict[str, Any], publisher: PricesPublisher, today: Optional[date] = None,
+    scheduler: BlockingScheduler, cfg: dict[str, Any], http: HttpClient, publisher: PricesPublisher,
+    today: Optional[date] = None,
 ) -> None:
     """Runs hourly, independent of the meta job's own cadence on purpose:
     checking only "when the meta job is about to run" would leave up to a
@@ -826,20 +908,25 @@ def _check_league_start_mode(
     it never affects an in-flight invocation, and `_run_meta_once_locked`'s
     job_lock already prevents any overlap regardless (CLAUDE.md's
     2026-07-15 incident). `today` is a passthrough to `_compute_meta_trigger`,
-    same test-only purpose."""
+    same test-only purpose. `status.json`'s `league_start_mode_detail` is
+    refreshed on every state change (not every hourly tick) -- good enough
+    for the "notice if it's active when it shouldn't be" safety net a
+    wrong auto-detection needs (spec 9): a bad detection can only ever cost
+    extra meta-job frequency in the wrong window, never wrong data, and
+    that mistake is visible in status.json the moment it starts."""
     global _league_start_mode_active
-    trigger, active = _compute_meta_trigger(cfg.get("schedule", {}), today=today)
+    trigger, active, per_game_detail = _compute_meta_trigger(cfg.get("schedule", {}), cfg, http, today=today)
 
     if active != _league_start_mode_active:
         scheduler.reschedule_job("meta", trigger=trigger)
         log.info(
-            "scheduler: league_start_mode %s -> %s, meta job rescheduled to %s",
+            "scheduler: league_start_mode %s -> %s, meta job rescheduled to %s (%s)",
             "active" if _league_start_mode_active else "inactive",
             "active" if active else "inactive",
-            trigger,
+            trigger, per_game_detail,
         )
         _league_start_mode_active = active
-        _update_league_start_mode_status(publisher, active)
+        _update_league_start_mode_status(publisher, active, per_game_detail)
 
 
 def run_scheduler(cfg: dict[str, Any]) -> None:
@@ -852,6 +939,7 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     scheduler = BlockingScheduler(timezone="UTC")
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    http = _build_http_client(cfg)
 
     prices_interval = schedule_cfg.get("prices_interval_minutes", 20)
     scheduler.add_job(
@@ -860,12 +948,12 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     )
 
     global _league_start_mode_active
-    meta_trigger, _league_start_mode_active = _compute_meta_trigger(schedule_cfg)
+    meta_trigger, _league_start_mode_active, per_game_detail = _compute_meta_trigger(schedule_cfg, cfg, http)
     scheduler.add_job(
         _safe_run, meta_trigger, args=[run_meta_once, cfg, "meta"],
         id="meta", max_instances=1, misfire_grace_time=3600,
     )
-    _update_league_start_mode_status(publisher, _league_start_mode_active)
+    _update_league_start_mode_status(publisher, _league_start_mode_active, per_game_detail)
 
     cleanup_hour = schedule_cfg.get("cleanup_hour_thailand", 4)
     scheduler.add_job(
@@ -883,13 +971,13 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     # data-fetching job; heartbeat.yml's existing META_MAX_AGE_HOURS=26
     # tolerance already covers the meta job itself at any active frequency.
     scheduler.add_job(
-        _check_league_start_mode, IntervalTrigger(hours=1), args=[scheduler, cfg, publisher],
+        _check_league_start_mode, IntervalTrigger(hours=1), args=[scheduler, cfg, http, publisher],
         id="league_start_mode_check", max_instances=1, misfire_grace_time=1800,
     )
 
     log.info(
-        "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s], cleanup daily %02d:00 ICT, news every %dmin)",
-        prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", cleanup_hour, news_interval,
+        "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s: %s], cleanup daily %02d:00 ICT, news every %dmin)",
+        prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", per_game_detail, cleanup_hour, news_interval,
     )
     scheduler.start()
 
