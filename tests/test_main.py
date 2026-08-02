@@ -763,8 +763,18 @@ def test_run_scheduler_writes_league_start_mode_status_on_startup(tmp_path):
     fake_scheduler = MagicMock()
     with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
          patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)), \
-         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
-        run_scheduler(cfg)  # real "today" -- before 2026-07-25 as of this test suite's writing
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()), \
+         patch("src.main.datetime") as mock_datetime:
+        # pinned before poe1's manual window (2026-07-25 - 2026-08-15, see
+        # _LEAGUE_START_CFG) -- was relying on the real calendar date
+        # (comment used to say "before 2026-07-25 as of this test suite's
+        # writing") which broke once that date actually passed; same
+        # datetime.now-mocking pattern as
+        # test_run_scheduler_uses_league_start_mode_when_today_in_range
+        # above, since run_scheduler itself has no injectable `today` param.
+        import datetime as real_datetime_module
+        mock_datetime.now.return_value = real_datetime_module.datetime(2026, 7, 1, 12, 0)
+        run_scheduler(cfg)
 
     status = created[-1].fetch_previous("status.json")
     assert status["league_start_mode"] == "inactive"
