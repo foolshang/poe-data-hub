@@ -76,10 +76,14 @@ INDEX_URLS = {
 }
 STATUS_URL = "https://storage.googleapis.com/poe-data-hub/status.json"
 
-PRICES_MAX_AGE_MINUTES = 45
+# prices publish every 180 minutes (config.yaml schedule.prices_interval_minutes) x 2 as a
+# retry buffer -- not read from config.yaml (this script is deliberately independent of the
+# rest of the repo, see module docstring), so bump this by hand if that interval changes.
+PRICES_MAX_AGE_MINUTES = 360
 META_MAX_AGE_HOURS = 26
 # news job runs every 5 minutes (schedule.news_interval_minutes) -- same
-# ~2-3x buffer-over-interval ratio as prices (45min over a 20min interval).
+# by-hand-bump caveat as above; kept at a ~3x buffer (vs. prices' 2x) since
+# news freshness matters more.
 NEWS_MAX_AGE_MINUTES = 15
 
 

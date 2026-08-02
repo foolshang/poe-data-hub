@@ -941,7 +941,7 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
     http = _build_http_client(cfg)
 
-    prices_interval = schedule_cfg.get("prices_interval_minutes", 20)
+    prices_interval = schedule_cfg.get("prices_interval_minutes", 180)
     scheduler.add_job(
         _safe_run, IntervalTrigger(minutes=prices_interval), args=[run_prices_once, cfg, "prices"],
         id="prices", max_instances=1, misfire_grace_time=300,
