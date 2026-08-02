@@ -44,7 +44,14 @@ http:
   timeout_seconds: 15
 
 schedule:
-  prices_interval_minutes: 20
+  # Bumped 20 -> 180 (2026-08-02): poe1/prices/latest.json alone is ~14MB and
+  # was publishing every 20min from us-central1 to the asia-southeast1
+  # bucket, driving most of a "Network Inter Region Data Transfer" GCP
+  # billing line item (~1.5GB/day). Hash-skip-if-unchanged was considered
+  # and rejected -- generated_at + live market movement means the payload
+  # almost never matches previous cycle anyway, so it wouldn't have helped.
+  # news kept at 5min (small files, freshness matters more there).
+  prices_interval_minutes: 180
   meta_cron_hour_thailand: 2
   # Manual escape hatch (spec section 9) -- kept for an unplanned/delayed
   # league that league_start_mode's date range below doesn't cover. Bump
