@@ -79,6 +79,11 @@ schedule:
     poe2: "auto"
   cleanup_hour_thailand: 4
   news_interval_minutes: 5
+  # Republishes {game}/gems.json from the internal/ staging copy that
+  # refresh-stats.yml's GitHub Actions job writes weekly (see
+  # tools/refresh_gems.py, src/main.py's run_gems_once). Cheap
+  # Firebase-to-Firebase copy, no external API calls -- daily is plenty.
+  gems_cron_hour_thailand: 3
 
 meta:
   sample_per_slot: 100 # NOTE: poe.ninja's builds-search endpoint has no known

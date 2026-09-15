@@ -886,3 +886,87 @@ class _FakeBlob:
 
     def upload_from_string(self, payload, content_type=None):
         self._blobs[self._path] = payload
+
+
+def test_run_gems_once_republishes_staged_copy_for_each_game(tmp_path):
+    from src.main import run_gems_once
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2", "poe1"]}
+
+    created_publishers: list = []
+    factory = _fake_prices_publisher_factory(tmp_path, created_publishers)
+    seed = factory(bucket_name="test-bucket")
+    seed.publish(
+        {"schema_version": 1, "generated_at": "2026-09-15T00:00:00Z", "gems": [{"id": "Fireball"}]},
+        "internal/gems_normalized_poe2.json",
+        cache_control="no-cache",
+    )
+    seed.publish(
+        {"schema_version": 1, "generated_at": "2026-09-15T00:00:00Z", "gems": [{"id": "Fireball"}, {"id": "IceNova"}]},
+        "internal/gems_normalized_poe1.json",
+        cache_control="no-cache",
+    )
+
+    with patch("src.main.PricesPublisher", new=factory):
+        result = run_gems_once(cfg)
+
+    assert result["ok"] is True
+    assert result["games"]["poe2"] == {"ok": True, "count": 1, "generated_at": "2026-09-15T00:00:00Z"}
+    assert result["games"]["poe1"] == {"ok": True, "count": 2, "generated_at": "2026-09-15T00:00:00Z"}
+
+    publisher = created_publishers[-1]
+    poe2_gems = publisher.fetch_previous("poe2/gems.json")
+    assert poe2_gems["gems"] == [{"id": "Fireball"}]
+    poe1_gems = publisher.fetch_previous("poe1/gems.json")
+    assert poe1_gems["gems"] == [{"id": "Fireball"}, {"id": "IceNova"}]
+
+
+def test_run_gems_once_skips_game_with_no_staged_copy_yet(tmp_path):
+    from src.main import run_gems_once
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2"]}
+
+    created_publishers: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)):
+        result = run_gems_once(cfg)
+
+    assert result["ok"] is False
+    assert result["games"]["poe2"] == {"ok": False, "reason": "no staged data"}
+    publisher = created_publishers[-1]
+    assert publisher.fetch_previous("poe2/gems.json") is None  # nothing published, not a blank file
+
+
+def test_run_gems_once_does_not_touch_previous_public_copy_when_staging_missing(tmp_path):
+    """A game that already has a public gems.json from a prior cycle must
+    keep it untouched if this cycle's staging copy is (temporarily) gone --
+    stale-while-error at the whole-file level, same as refresh_stats.py."""
+    from src.main import run_gems_once
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2"]}
+
+    created_publishers: list = []
+    factory = _fake_prices_publisher_factory(tmp_path, created_publishers)
+    seed = factory(bucket_name="test-bucket")
+    seed.publish(
+        {"schema_version": 1, "generated_at": "2026-09-14T00:00:00Z", "gems": [{"id": "Fireball"}]},
+        "internal/gems_normalized_poe2.json",
+        cache_control="no-cache",
+    )
+    with patch("src.main.PricesPublisher", new=factory):
+        run_gems_once(cfg)  # first cycle: publishes poe2/gems.json
+
+    # Second cycle: staging copy has vanished (e.g. a bad GitHub Actions run
+    # that itself declined to publish) -- previous public copy stays. Must
+    # clear both the fake-Firebase blob AND fetch_previous's on-disk cache
+    # fallback (tmp_path is shared across publisher instances here, same as
+    # production sharing one VM's data/cache/ dir) to simulate genuinely
+    # missing data rather than a Firebase-specific blip.
+    shared_client = seed._client
+    del shared_client._blobs["internal/gems_normalized_poe2.json"]
+    (tmp_path / "gems_normalized_poe2.json").unlink(missing_ok=True)
+    with patch("src.main.PricesPublisher", new=factory):
+        result = run_gems_once(cfg)
+
+    assert result["ok"] is False
+    publisher = created_publishers[-1]
+    assert publisher.fetch_previous("poe2/gems.json")["gems"] == [{"id": "Fireball"}]

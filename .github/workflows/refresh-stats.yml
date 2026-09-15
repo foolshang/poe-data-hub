@@ -14,10 +14,22 @@ name: Refresh mod-stats cache (PoE1 + PoE2)
 # paths stay under internal/, which is all the scoped service account below
 # has IAM permission to touch (CLAUDE.md) -- no permission changes needed.
 #
+# Skill-meta phase 1: also refreshes {game}/gems.json (tools/refresh_gems.py)
+# -- the skill-gem name/metadata table used to normalize main-skill names
+# before counting mod/passive meta per skill. Confirmed live 2026-09-15 that
+# trade(2)/data/items is blocked from GCP IPs the same way trade(2)/data/stats
+# is (200 from a dev machine, would 403 from the VM), so it needs this same
+# GitHub Actions route -- even though its OTHER source, the RePoE fork on
+# raw.githubusercontent.com, is not GGG-blocked and would work fine from the
+# VM directly. Kept in this one job anyway so gem-table assembly (which needs
+# both sources together, see refresh_gems.py) lives in one place. Independent
+# step/script from the stats-cache refresh above -- a failure in one must
+# never block or corrupt the other.
+#
 # A failed run just shows red here -- no extra alerting -- because
 # ModNormalizer falls back to a stale on-disk/Firebase copy on failure
 # (spec: staleness is a status.json warning humans check periodically, not
-# a paging incident).
+# a paging incident). Same stale-while-error reasoning applies to gems.json.
 on:
   schedule:
     - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC (10:00 ICT)
@@ -45,6 +57,12 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/stats-refresh-key.json
         run: python -m tools.refresh_stats
+
+      - name: Refresh gems table
+        if: always()
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/stats-refresh-key.json
+        run: python -m tools.refresh_gems
 
       - name: Clean up key file
         if: always()

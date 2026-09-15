@@ -4,6 +4,7 @@
     python -m src.main --run-meta-once
     python -m src.main --run-cleanup-once
     python -m src.main --run-news-once
+    python -m src.main --run-gems-once
     python -m src.main --serve      # persistent scheduler (systemd uses this)
 """
 from __future__ import annotations
@@ -61,6 +62,17 @@ META_STATS_CACHE_BLOB_PATH_BY_GAME = {
     "poe2": "internal/stats_cache.json",
     "poe1": "internal/stats_cache_poe1.json",
 }
+# Must match tools/refresh_gems.py's TARGETS blob_paths exactly -- that's
+# what actually stages these files (skill-meta phase 1). run_gems_once below
+# republishes each one to _gems_blob_path(game), the real public path.
+GEMS_STAGED_BLOB_PATH_BY_GAME = {
+    "poe2": "internal/gems_normalized_poe2.json",
+    "poe1": "internal/gems_normalized_poe1.json",
+}
+
+
+def _gems_blob_path(game: str) -> str:
+    return f"{game}/gems.json"
 
 
 def _meta_blob_path(game: str) -> str:
@@ -356,6 +368,63 @@ def run_news_once(cfg: dict[str, Any]) -> dict[str, Any]:
     _ping_healthcheck(http, cfg.get("healthchecks", {}).get("news_ping_url"), "news")
 
     return {"games": per_game, "mtx": {"ok": deals_ok, "generated_at": mtx_data["generated_at"], "count": len(mtx_data["deals"])}, "ok": overall_ok}
+
+
+def run_gems_once(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Republishes `{game}/gems.json` (skill/support gem name+metadata
+    table) from the `internal/gems_normalized_{game}.json` staging copy that
+    `refresh-stats.yml`'s GitHub Actions job writes weekly via
+    `tools/refresh_gems.py`.
+
+    Two-hop publish, same reason `internal/stats_cache.json` exists (SPEC.md
+    8.3): building gems.json needs `trade(2)/data/items`, which GGG blocks
+    from GCP IPs -- so GitHub Actions (using its own `internal/`-scoped
+    `stats-refresh` service account, CLAUDE.md) does the fetch+normalize and
+    stages the *already-normalized, already-filtered* result. This job just
+    copies that staged file to the real public path using the VM's
+    full-access credentials, which the scoped GitHub Actions service account
+    deliberately cannot write to directly. The staged file is already small
+    (PoE1's ~41MB raw RePoE response is parsed down to a lean gem list on
+    GitHub's runner, never here -- see the VM RAM budget note in CLAUDE.md),
+    so this hop is a cheap Firebase-to-Firebase copy, no external API calls.
+
+    Skips a game (stale-while-error at the whole-file level, same as
+    refresh_stats.py) if its staging copy hasn't been populated yet -- e.g.
+    before refresh-stats.yml has run even once since a game was added (same
+    "Deploy gotcha" class of issue as 8.3): logs a warning rather than
+    failing the job, and the previously-published public copy (if any) is
+    left untouched."""
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+
+    per_game: dict[str, dict[str, Any]] = {}
+    overall_ok = True
+    for game in cfg.get("game_versions", ["poe2"]):
+        staged_path = GEMS_STAGED_BLOB_PATH_BY_GAME.get(game)
+        if staged_path is None:
+            continue
+        public_path = _gems_blob_path(game)
+
+        staged = publisher.fetch_previous(staged_path)
+        if staged is None:
+            overall_ok = False
+            log.warning("gems job(%s): staging copy not found yet (%s) -- skipping this cycle", game, staged_path)
+            per_game[game] = {"ok": False, "reason": "no staged data"}
+            continue
+
+        try:
+            publisher.publish(staged, public_path, cache_control="public, max-age=3600")
+        except Exception as e:
+            overall_ok = False
+            log.error("gems job(%s): publish failed: %s", game, e, exc_info=True)
+            per_game[game] = {"ok": False, "reason": str(e)}
+            continue
+
+        count = len(staged.get("gems", []))
+        log.info("gems job(%s): republished %d gems -> %s", game, count, public_path)
+        per_game[game] = {"ok": True, "count": count, "generated_at": staged.get("generated_at")}
+
+    return {"ok": overall_ok, "games": per_game}
 
 
 def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str) -> dict[str, Any]:
@@ -943,8 +1012,13 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
 
     prices_interval = schedule_cfg.get("prices_interval_minutes", 180)
     scheduler.add_job(
+        # next_run_time forces one run right at startup instead of waiting a
+        # full interval -- matters now that prices_interval is a full day
+        # (2026-09-10): without it, a deploy/restart leaves prices unpublished
+        # for ~24h and trips both monitoring layers on a healthy process.
         _safe_run, IntervalTrigger(minutes=prices_interval), args=[run_prices_once, cfg, "prices"],
         id="prices", max_instances=1, misfire_grace_time=300,
+        next_run_time=datetime.now(timezone.utc),
     )
 
     global _league_start_mode_active
@@ -967,6 +1041,18 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
         id="news", max_instances=1, misfire_grace_time=120,
     )
 
+    # Cheap Firebase-to-Firebase copy (no external API calls) -- daily is
+    # plenty since the source (refresh-stats.yml) only refreshes weekly.
+    # Between meta (02:00) and cleanup (04:00 default) so a same-day gems
+    # refresh lands before cleanup's retention sweep, not that it matters
+    # much here (gems.json is a "latest.json"-style file, never aged out).
+    gems_hour = schedule_cfg.get("gems_cron_hour_thailand", 3)
+    scheduler.add_job(
+        _safe_run, CronTrigger(hour=gems_hour, minute=0, timezone="Asia/Bangkok"),
+        args=[run_gems_once, cfg, "gems"], id="gems", max_instances=1, misfire_grace_time=3600,
+        next_run_time=datetime.now(timezone.utc),
+    )
+
     # No healthcheck ping for this one -- it's scheduler bookkeeping, not a
     # data-fetching job; heartbeat.yml's existing META_MAX_AGE_HOURS=26
     # tolerance already covers the meta job itself at any active frequency.
@@ -976,8 +1062,10 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     )
 
     log.info(
-        "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s: %s], cleanup daily %02d:00 ICT, news every %dmin)",
-        prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", per_game_detail, cleanup_hour, news_interval,
+        "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s: %s], cleanup daily %02d:00 ICT, "
+        "news every %dmin, gems daily %02d:00 ICT)",
+        prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", per_game_detail,
+        cleanup_hour, news_interval, gems_hour,
     )
     scheduler.start()
 
@@ -988,7 +1076,8 @@ def main() -> None:
     parser.add_argument("--run-meta-once", action="store_true")
     parser.add_argument("--run-cleanup-once", action="store_true")
     parser.add_argument("--run-news-once", action="store_true")
-    parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup+news)")
+    parser.add_argument("--run-gems-once", action="store_true")
+    parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup+news+gems)")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -1002,6 +1091,8 @@ def main() -> None:
         run_cleanup_once(cfg)
     elif args.run_news_once:
         run_news_once(cfg)
+    elif args.run_gems_once:
+        run_gems_once(cfg)
     elif args.serve:
         run_scheduler(cfg)
     else:
