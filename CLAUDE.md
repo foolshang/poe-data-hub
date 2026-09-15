@@ -12,13 +12,20 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
 - All outbound HTTP goes through `src/utils/http_client.py` — never call
   `requests` directly from a fetcher. This is what enforces rate limiting,
   retry/backoff, and the structured request log (`data/fetch.log`).
-- GGG's API is touched in exactly one place: the trade2 `data/stats` table
-  (cached, refreshed weekly). Everything else — prices, character detail,
-  league list — comes from poe.ninja / PoE2 Scout. `pathofexile.com/api/leagues`
-  was investigated for league start/end dates but does not support PoE2
-  (ignores the `realm` param entirely) — league start/end dates instead come
-  from the Steam news API (`src/fetchers/league_dates.py`), which is not GGG
-  and doesn't touch this rule.
+- GGG's API is touched in exactly two places, both cached/refreshed weekly
+  via `refresh-stats.yml`: the trade(2) `data/stats` table, and (skill-meta
+  phase 1) the trade(2) `data/items` "Gems" list, used only as a
+  `verified_tradeable` cross-check for `{game}/gems.json` (see below).
+  Everything else — prices, character detail, league list — comes from
+  poe.ninja / PoE2 Scout. `pathofexile.com/api/leagues` was investigated for
+  league start/end dates but does not support PoE2 (ignores the `realm`
+  param entirely) — league start/end dates instead come from the Steam news
+  API (`src/fetchers/league_dates.py`), which is not GGG and doesn't touch
+  this rule. RePoE fork data (`raw.githubusercontent.com/repoe-fork/*`,
+  used for `{game}/gems.json`'s primary source, and separately by
+  PoE_Price-Trade_Checker's `build_mod_meta.py`) is community-maintained
+  datamine, not a GGG endpoint — not subject to this rule or to the GCP-IP
+  block below.
 - Every published JSON file must match its schema in the spec exactly
   (`schema_version` field bumps on any breaking change). Additive optional
   fields are fine without a bump.
@@ -65,6 +72,34 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   "it's already populated" — verify the actual blob exists on Firebase
   before trusting a new game's meta job to succeed on the VM.
 
+- **`{game}/gems.json` (skill-meta phase 1, added 2026-09-15) needed a
+  second `internal/`-staged two-hop publish, same shape as
+  `internal/stats_cache*.json` above, for the same IAM reason** — its
+  GGG-sourced input (`trade(2)/data/items`) is blocked from GCP IPs, so
+  building it has to run in `refresh-stats.yml` via `tools/refresh_gems.py`,
+  using the `stats-refresh` service account. That account is
+  IAM-restricted to `internal/` only (see above) — it **cannot** write the
+  real public `poe2/gems.json` / `poe1/gems.json` paths directly, so
+  `refresh_gems.py` stages the finished result at
+  `internal/gems_normalized_{game}.json` and `src/main.py`'s
+  `run_gems_once` job (VM, full-access credentials, daily,
+  `schedule.gems_cron_hour_thailand`) copies it to the public path. Caught
+  during implementation, before ever deploying — would otherwise have been
+  a silent, permanent, every-single-run publish failure only visible as
+  "gems.json never updates" days later, not a loud error.
+  Two other things confirmed live the same day, worth keeping in mind if
+  this pipeline is touched again:
+  - **`trade(2)/data/items`'s "Gems" category does not list transfigured
+    gem names at all** (0/217 PoE1 transfigured display names from RePoE
+    matched, e.g. no "Ice Nova of Frostbolts") — it's fine as a
+    `verified_tradeable` flag, but must never be used to *filter* RePoE's
+    gem list, or every transfigured gem would silently vanish.
+  - PoE1's raw RePoE `gems.json` is ~**41MB** (full per-level progression
+    data) — too large to commit as a test fixture and, more importantly,
+    too large to ever hand to the VM (see the VM RAM budget note below):
+    `refresh_gems.py` normalizes down to a lean per-gem record *on GitHub's
+    runner* and stages only that; `run_gems_once` on the VM only ever does
+    a small Firebase-to-Firebase copy, no parsing of the raw file at all.
 - **The meta job must never run twice concurrently — enforced by a
   filesystem lock, not just discipline** (learned the hard way 2026-07-15):
   a manually launched `--run-meta-once` retry collided with the already-
@@ -118,6 +153,18 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   dedicated system user `deploy/README.md` describes setting up — the real
   deployed setup diverged from that doc at some point; don't assume
   `sudo -u poe-data-hub` works.
+- **VM RAM budget (measured 2026-09-10, steady state)**: `poe-bot-vm` is an
+  **e2-micro (~955MB RAM + 2GB swap)** running *both* the Discord bot and
+  poe-data-hub. `free -m`: used ~605MB, available ~349MB, swap already
+  ~180MB in use. poe-data-hub baseline RSS ~239MB, peaks to VmHWM ~322MB
+  during the prices job's poe1 fetch (~80MB transient spike, the largest
+  single-job cost currently). No OOM risk at current load, but **no
+  headroom for another heavy long-lived process or a big one-off parse** —
+  before adding any memory-heavy code path, check `free -m`
+  /`systemctl status poe-data-hub` on the VM first, and prefer
+  streaming/chunked processing or (as with `{game}/gems.json`'s ~41MB raw
+  PoE1 RePoE source, above) doing the heavy parse somewhere else entirely
+  (GitHub Actions) and only ever handing the VM an already-small result.
 - **GGG forum's `window.momentTimezone` (used to correctly localize
   `post_date` to UTC in `src/fetchers/news.py`, see SPEC.md 8.4) drifts
   over time on the same source, not just by requester geography** (found

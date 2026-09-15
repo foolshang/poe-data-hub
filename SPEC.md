@@ -611,7 +611,112 @@ API), so there's no poe2 side to split.
   previous publish's `deals` (including their original `first_seen_at`) are
   reused verbatim.
 
-### 8.6 ตำแหน่งไฟล์บน Firebase Storage
+### 8.6 `{game}/gems.json` (`{game}` = `poe1` | `poe2`, skill-meta phase 1)
+
+Skill/support gem name + metadata table, used to normalize a character's
+main-skill name before counting mod/passive meta per skill (skill-centric
+meta work, phase 2+). Two sources per game, combined by
+`tools/refresh_gems.py`:
+
+- **RePoE fork** (`raw.githubusercontent.com/repoe-fork/{poe1,poe2}` --
+  the same community datamine `PoE_Price-Trade_Checker/tools/build_mod_meta.py`
+  already pulls `base_items.json`/`mods.json` from; `skill_gems.json` for
+  poe2, `gems.json` for poe1 are the two gem-specific files neither project
+  had touched before this). Primary source: display name, tags,
+  is_support/gem_type, and (poe1 only) the `discriminator` field
+  (`alt_x`/`alt_y`) that identifies transfigured variants, e.g. `IceNovaAltX`
+  -> "Ice Nova of Frostbolts". **PoE2's RePoE data has zero entries with a
+  `discriminator` field** -- confirmed empirically 2026-09-15, not missing
+  data: PoE2 has no transfigured-gem mechanic in the current game.
+- **GGG's own `trade(2)/data/items` "Gems" category** -- name-only list
+  (`{"result": [{"label": "Gems", "entries": [{"type": "<name>"}, ...]}]}`),
+  used *only* as a `verified_tradeable` cross-check flag, never as a filter.
+  Confirmed live 2026-09-15 that this list does **not** expose transfigured
+  gem names at all (0/217 PoE1 transfigured display names from RePoE
+  matched) -- treating absence here as "drop it" would silently delete
+  every transfigured gem PoE1 has, so every RePoE-reported gem is kept
+  regardless of this flag's value.
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-15T03:00:00Z",
+  "gems": [
+    {
+      "id": "IceNovaAltX",
+      "display_name": "Ice Nova of Frostbolts",
+      "is_support": false,
+      "gem_type": null,
+      "tags": ["cold", "spell", "area"],
+      "transfigured_of": "Ice Nova",
+      "is_lineage": false,
+      "verified_tradeable": false
+    }
+  ]
+}
+```
+
+- `id`: the RePoE dict key (stable identifier, not always equal to
+  `display_name` -- e.g. transfigured variants).
+- `is_support`: `true`/`false` both games (derived from `gem_type ==
+  "support"` on poe2, RePoE's own `is_support` on poe1).
+- `gem_type`: poe2 only (`"active"` | `"support"` | `"spirit"`); always
+  `null` for poe1 (RePoE's poe1 data has no equivalent field).
+- `transfigured_of`: poe1 only -- the base skill's `display_name` when this
+  entry is a transfigured variant (`discriminator` set), else `null`.
+  Always `null` for poe2 (no transfigured mechanic yet).
+- `is_lineage`: poe2 only -- RePoE's `is_lineage` flag, confirmed to match
+  the same gems the hub's `scout_prices` fetcher already publishes under
+  the `LineageGem`/`SkillGem` price category (spot-checked against
+  "Amanamu's Tithe" 2026-09-15) -- lets a consumer join gem metadata here
+  against price data already in `{game}/prices/latest.json` by name.
+  Always `false` for poe1 (no Lineage-gem mechanic there).
+- `verified_tradeable`: `true`/`false` when the trade-items cross-check
+  ran this cycle, `null` when it failed/was unavailable (non-fatal, spec
+  10.1b) -- **never used to drop a gem**, see above.
+- Filtered out before publish: `[DNT]`/`[DNT-UNUSED]`-prefixed placeholder
+  entries (both games), poe1's `*Royale` key duplicates (defunct PvP mode,
+  confirmed zero equivalent in poe2), and any entry with no display name at
+  all in either RePoE field (internal-only triggered/secondary gems never
+  obtainable as a real item, e.g. poe1's `SupportCurseOnHitCurse`).
+  Deliberately **excluded**: RePoE's per-gem `per_level`/`stat_conversions`/
+  tooltip bulk (poe1's raw `gems.json` is ~41MB with it) -- out of scope for
+  skill/gear/jewel meta normalization, and republishing that much data
+  weekly would reproduce the exact Firebase egress cost problem prices
+  already hit once (see `config.yaml`'s `schedule.prices_interval_minutes`
+  comment).
+
+**Two-hop publish** (same reason `internal/stats_cache.json` exists, 8.3
+below): `trade(2)/data/items` is blocked from GCP IPs the same way
+`trade(2)/data/stats` is (confirmed live 2026-09-15: 200 from a dev
+machine, would 403 from the deploy VM), so `tools/refresh_gems.py` runs
+from `refresh-stats.yml`'s GitHub Actions job, using the same
+`internal/`-IAM-scoped `stats-refresh` service account (CLAUDE.md) -- which
+therefore *cannot* write the public `{game}/gems.json` path directly. It
+stages the finished, already-filtered, already-small result at
+`internal/gems_normalized_{game}.json` instead (mirrors
+`internal/stats_cache*.json`'s pattern exactly); `src/main.py`'s
+`run_gems_once` job, running on the VM with full-access credentials, copies
+that staged file to the public path on its own daily schedule
+(`schedule.gems_cron_hour_thailand`, default 03:00 ICT). Staging the
+*normalized* result rather than the raw RePoE response also means this
+VM-side hop never has to download/parse poe1's ~41MB raw file -- all the
+heavy lifting happens on GitHub's runner, not the RAM-constrained VM (see
+CLAUDE.md's VM RAM budget note). `Cache-Control`: `no-cache` on the
+internal staging copy, `max-age=3600` on the public file (same as meta).
+
+Same stale-while-error posture as the rest of the pipeline, at the
+whole-file level: if a game's RePoE fetch fails or its filtered gem count
+drops below the sanity floor (`MIN_GEMS`, `tools/refresh_gems.py`), that
+game's staging copy is left unchanged and `run_gems_once` skips
+republishing rather than overwriting a good public copy with nothing. If
+the staging copy has never been populated at all yet for a game (e.g.
+before `refresh-stats.yml` has run once since this feature merged --
+**same "Deploy gotcha" class of issue as 8.3**: manually trigger `gh
+workflow run refresh-stats.yml` after deploying, don't wait for the weekly
+cron), `run_gems_once` logs a warning and skips that game for the cycle.
+
+### 8.7 ตำแหน่งไฟล์บน Firebase Storage
 
 ```
 poe-data-hub/
@@ -622,6 +727,7 @@ poe-data-hub/
 ├── poe2/meta/latest.json
 ├── poe2/meta/2026-07-08.json
 ├── poe2/news/latest.json
+├── poe2/gems.json                                (skill-meta phase 1, 8.6)
 ├── poe1/prices/latest.json
 ├── poe1/prices/index.json
 ├── poe1/prices/events/{sanitized-league}.json   (0..n)
@@ -629,14 +735,18 @@ poe-data-hub/
 ├── poe1/meta/latest.json                        (phase 10)
 ├── poe1/meta/2026-07-15.json                    (phase 10)
 ├── poe1/news/latest.json
+├── poe1/gems.json                                (skill-meta phase 1, 8.6)
 ├── mtx/latest.json
 ├── internal/stats_cache.json                    (PoE2 trade2 stats, weekly refresh)
 ├── internal/stats_cache_poe1.json                (PoE1 trade stats, weekly refresh, phase 10)
+├── internal/gems_normalized_poe2.json            (skill-meta phase 1, staging copy, weekly refresh)
+├── internal/gems_normalized_poe1.json            (skill-meta phase 1, staging copy, weekly refresh)
 └── status.json
 ```
 
 `Cache-Control`: `max-age=300` สำหรับ prices/index/events, `max-age=3600`
-สำหรับ meta, `max-age=120` สำหรับ news/mtx.
+สำหรับ meta และ gems, `max-age=120` สำหรับ news/mtx, `no-cache` สำหรับไฟล์
+ใต้ `internal/`.
 
 #### Job cadence (phase 10: PoE1 meta added to the same nightly slot)
 
@@ -716,7 +826,7 @@ plus additions to `tests/test_http_client.py` and `tests/test_main.py`):
 Also added: `status.json`'s new `running_jobs.{job_name}` field (pid +
 `started_at`), so a human can check what's currently running before
 launching a manual CLI retry instead of guessing from `ps`/journalctl --
-additive, no `schema_version` bump (this file has never had one; see 8.6).
+additive, no `schema_version` bump (this file has never had one; see 8.7).
 
 #### Readiness for PoE1's next league launch (phase 10)
 
@@ -917,6 +1027,19 @@ Hosts already covered by existing `rate_limits` entries
 rate-limit bucket from `www.`, added phase 11) -- negligible next to the
 prices job's own budget (see the rate-limit subsection above), no separate
 analysis needed.
+
+**Prices cadence** (`schedule.prices_interval_minutes`): 20 min originally,
+bumped to 180 (2026-08-02) then to **1440 = once/day** (2026-09-10), both
+times to cut the asia-southeast1 inter-region egress from republishing the
+~14MB `poe1/prices/latest.json` (and, at 1440, to drop the ~80MB
+prices-poe1 memory spike on the 955MB e2-micro from 8x/day to once/day --
+see the config comment). The
+rate-limit headroom analysis below (written when the cycle was 20 min) only
+gets more comfortable at a daily cadence. The scheduler passes
+`next_run_time` on the prices job so a deploy/restart publishes immediately
+rather than waiting a full day. Layer-2 `PRICES_MAX_AGE_MINUTES` in
+`tools/heartbeat_check.py` and the healthchecks.io Period/Grace for
+`prices_ping_url` must both be widened in lockstep with this value.
 
 One Layer-1 healthchecks.io ping per job run (`healthchecks.news_ping_url`),
 same semantics as prices/meta. Layer 2 (`tools/heartbeat_check.py`) checks
