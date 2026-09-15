@@ -92,6 +92,28 @@ meta:
                        # here per spec; see src/fetchers/ninja_builds.py.
   min_mod_count: 5
 
+# Skill-meta phase 2: a second, orthogonal (slot, main_skill, level_bracket,
+# stat_id) counting dimension alongside the archetype-based one above --
+# covers gear and jewels, stored in SQLite's skill_mod_counts table (kept
+# forever, same as mod_counts). See src/processing/aggregator.py and
+# src/main.py's run_reprocess_char_items.
+skill_meta:
+  # [lo, hi] pairs, half-open [lo, hi) except the last which is closed so a
+  # level-100 character always lands somewhere. A level below the first
+  # bracket's lo (e.g. a fresh character) matches none and is skipped for
+  # this dimension only -- it still counts normally in the existing
+  # archetype-based mod_counts pipeline.
+  level_brackets:
+    - [28, 65]
+    - [65, 75]
+    - [75, 90]
+    - [90, 100]
+  # A (slot, main_skill, level_bracket) cell below this population is
+  # considered too thin to publish on its own -- not yet wired to an actual
+  # publish step (that's a later phase), but query_skill_mod_counts' 4-tier
+  # fallback already uses it to decide when to widen to a coarser tier.
+  min_population_publish: 20
+
 retention:
   char_items_days: 90
   meta_files_days: 30

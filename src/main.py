@@ -31,11 +31,20 @@ from src.fetchers import deals, news, ninja_prices, scout_prices
 from src.fetchers.league_dates import LeagueDatesFetcher
 from src.fetchers.league_detector import LeagueDetector
 from src.fetchers.ninja_builds import NinjaBuildsFetcher
-from src.fetchers.ninja_chars import DedupedCharacterCache, NinjaCharsFetcher
+from src.fetchers.ninja_chars import DedupedCharacterCache, NinjaCharsFetcher, item_detail_from_dict
 from src.fetchers.ninja_prices import NinjaPricesFetcher
 from src.fetchers.scout_prices import ScoutPricesFetcher
-from src.processing.aggregator import aggregate_jewels, aggregate_slot, compute_archetype_distribution
+from src.processing.aggregator import (
+    aggregate_jewels,
+    aggregate_jewels_by_skill,
+    aggregate_slot,
+    aggregate_slot_by_skill,
+    compute_archetype_distribution,
+    compute_skill_bracket_population,
+    reprocess_chars_to_skill_mod_counts,
+)
 from src.processing.archetyper import Archetyper
+from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
 from src.storage.local_db import LocalDb
 from src.storage.publisher import (
@@ -73,6 +82,22 @@ GEMS_STAGED_BLOB_PATH_BY_GAME = {
 
 def _gems_blob_path(game: str) -> str:
     return f"{game}/gems.json"
+
+
+# Skill-meta phase 2 (item 6): config-overridable, kept small here as the
+# fallback when config.yaml's skill_meta.level_brackets is absent.
+DEFAULT_LEVEL_BRACKETS: list[tuple[int, int]] = [(28, 65), (65, 75), (75, 90), (90, 100)]
+
+
+def _level_brackets(cfg: dict[str, Any]) -> list[tuple[int, int]]:
+    raw = cfg.get("skill_meta", {}).get("level_brackets")
+    if not raw:
+        return DEFAULT_LEVEL_BRACKETS
+    return [tuple(b) for b in raw]
+
+
+def _gems_url(cfg: dict[str, Any], game: str) -> str:
+    return f"https://storage.googleapis.com/{cfg['firebase']['bucket']}/{_gems_blob_path(game)}"
 
 
 def _meta_blob_path(game: str) -> str:
@@ -427,6 +452,75 @@ def run_gems_once(cfg: dict[str, Any]) -> dict[str, Any]:
     return {"ok": overall_ok, "games": per_game}
 
 
+def run_reprocess_char_items(cfg: dict[str, Any]) -> dict[str, Any]:
+    """`--reprocess-char-items` (skill-meta phase 2, item 13): recomputes
+    `skill_mod_counts` from already-stored `char_items` rows, entirely
+    offline -- no poe.ninja calls. Exists so a change to `{game}/gems.json`'s
+    normalization, or to `skill_meta.level_brackets`, can be applied
+    retroactively across the whole 90-day `char_items` retention window
+    without re-fetching anything (item 5's "ไม่ต้องยิง ninja เพิ่ม").
+
+    Only rows with `main_skill` populated are usable -- that column didn't
+    exist before this feature shipped, so historical rows from earlier than
+    this deploy have no raw skill name to recover (see CLAUDE.md; accepted
+    as a known gap rather than attempting an inaccurate re-fetch-based
+    backfill, which would silently mislabel respecced characters).
+
+    Idempotent per snapshot: each affected snapshot's existing
+    `skill_mod_counts` rows are deleted and replaced, not accumulated, so
+    running this again (e.g. after a further gems.json fix) never
+    double-counts."""
+    firebase_cfg = cfg["firebase"]
+    http = _build_http_client(cfg)
+    archetyper = Archetyper()
+    level_brackets = _level_brackets(cfg)
+
+    per_game: dict[str, Any] = {}
+    db = LocalDb()
+    try:
+        for game in cfg.get("game_versions", ["poe2"]):
+            normalizer = ModNormalizer(
+                http, game=game,
+                cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
+                firebase_stats_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+            )
+            normalizer.load()
+            skill_normalizer = SkillNormalizer(http, game=game, gems_url=_gems_url(cfg, game))
+            skill_normalizer.load()
+
+            rows = db.iter_char_items_with_main_skill(game)
+            by_snapshot: dict[int, list[tuple[Optional[str], int, Any]]] = {}
+            for _char_item_id, snapshot_id, main_skill, level, items_raw in rows:
+                by_snapshot.setdefault(snapshot_id, []).append(
+                    (main_skill, level, [item_detail_from_dict(i) for i in items_raw])
+                )
+
+            total_rows_written = 0
+            for snapshot_id, chars in by_snapshot.items():
+                skill_counts = reprocess_chars_to_skill_mod_counts(
+                    chars, normalizer=normalizer, skill_normalizer=skill_normalizer,
+                    archetyper=archetyper, level_brackets=level_brackets,
+                )
+                db.delete_skill_mod_counts_for_snapshot(snapshot_id)
+                days_since_league_start = db.get_snapshot_days_since_league_start(snapshot_id)
+                db.insert_skill_mod_counts(
+                    snapshot_id, game, days_since_league_start, [dataclasses.asdict(m) for m in skill_counts]
+                )
+                total_rows_written += len(skill_counts)
+
+            per_game[game] = {
+                "char_items_rows": len(rows),
+                "snapshots_reprocessed": len(by_snapshot),
+                "skill_mod_counts_rows_written": total_rows_written,
+                "unmapped_skill_names": dict(skill_normalizer.unmapped_names),
+            }
+    finally:
+        db.close()
+
+    log.info("reprocess_char_items: %s", per_game)
+    return per_game
+
+
 def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str) -> dict[str, Any]:
     job_start = time.monotonic()
 
@@ -464,6 +558,13 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     log.info("meta job(%s): stats loaded from %s (fetched_at=%s)", game, normalizer.stats_source, normalizer.stats_fetched_at)
     archetyper = Archetyper()
 
+    skill_normalizer = SkillNormalizer(http, game=game, gems_url=_gems_url(cfg, game))
+    skill_normalizer.load()
+    log.info(
+        "meta job(%s): skill normalizer loaded=%s gems=%d", game, skill_normalizer.available, skill_normalizer.loaded_count,
+    )
+    level_brackets = _level_brackets(cfg)
+
     chars_fetcher = NinjaCharsFetcher(http, game=game)
     cache = DedupedCharacterCache(chars_fetcher, snapshot)
 
@@ -471,18 +572,28 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
         return cache.get(account, name)
 
     all_mod_counts = []
+    all_skill_mod_counts = []
     per_slot_sample: dict[str, int] = {}
     for slot, char_refs in by_slot.items():
         if slot == "jewel":
             jewel_counts, denom_by_base = aggregate_jewels(char_refs, get_detail, archetyper, normalizer)
             all_mod_counts.extend(jewel_counts)
             per_slot_sample.update(denom_by_base)
+            all_skill_mod_counts.extend(
+                aggregate_jewels_by_skill(char_refs, get_detail, normalizer, skill_normalizer, archetyper, level_brackets)
+            )
         else:
             all_mod_counts.extend(aggregate_slot(slot, char_refs, get_detail, archetyper, normalizer))
             per_slot_sample[slot] = len(char_refs)
+            all_skill_mod_counts.extend(
+                aggregate_slot_by_skill(slot, char_refs, get_detail, normalizer, skill_normalizer, archetyper, level_brackets)
+            )
 
     unique_refs_by_key = {(r.account, r.name): r for refs in by_slot.values() for r in refs}
     archetype_distribution = compute_archetype_distribution(list(unique_refs_by_key.values()), get_detail, archetyper)
+    skill_bracket_population = compute_skill_bracket_population(
+        list(unique_refs_by_key.values()), get_detail, skill_normalizer, level_brackets
+    )
 
     db = LocalDb()
     try:
@@ -504,8 +615,12 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             db.insert_char_item(
                 snapshot_id, account, name, detail.level, detail.char_class, archetype,
                 [dataclasses.asdict(i) for i in detail.items],
+                main_skill=detail.main_skill,
             )
         db.insert_mod_counts(snapshot_id, [dataclasses.asdict(m) for m in all_mod_counts])
+        db.insert_skill_mod_counts(
+            snapshot_id, game, days_since_league_start, [dataclasses.asdict(m) for m in all_skill_mod_counts]
+        )
         db.commit()
     finally:
         db.close()
@@ -534,6 +649,22 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     peak_rss_mb = _peak_memory_mb()
     log.info("meta job(%s): peak RSS = %s MB", game, peak_rss_mb if peak_rss_mb is not None else "unknown (non-Unix)")
 
+    top_skills = sorted(
+        {skill for skill, _bracket in skill_bracket_population if skill != "unknown"},
+        key=lambda s: sum(pop for (sk, _b), pop in skill_bracket_population.items() if sk == s),
+        reverse=True,
+    )[:20]
+    thin_brackets = sorted(
+        f"{skill}/{bracket} ({pop})"
+        for (skill, bracket), pop in skill_bracket_population.items()
+        if skill != "unknown" and pop < cfg.get("skill_meta", {}).get("min_population_publish", 20)
+    )
+    log.info(
+        "meta job(%s): skill dimension -- %d rows, top skills=%s, %d thin bracket(s) below publish threshold, "
+        "%d unmapped skill name(s)",
+        game, len(all_skill_mod_counts), top_skills[:5], len(thin_brackets), len(skill_normalizer.unmapped_names),
+    )
+
     return {
         "data": data,
         "end_at": league_dates.end_at,
@@ -548,6 +679,13 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             "peak_rss_mb": peak_rss_mb,
             "stats_source": normalizer.stats_source,
             "stats_cache_fetched_at": normalizer.stats_fetched_at,
+            "skill_gems_loaded": skill_normalizer.loaded_count,
+            "skill_gems_available": skill_normalizer.available,
+            "unmapped_skill_names": dict(skill_normalizer.unmapped_names),
+            "skill_bracket_population": {f"{s}/{b}": p for (s, b), p in skill_bracket_population.items()},
+            "top_20_skills_by_population": top_skills,
+            "thin_brackets_below_publish_threshold": thin_brackets,
+            "skill_mod_counts_rows": len(all_skill_mod_counts),
         },
     }
 
@@ -1077,6 +1215,7 @@ def main() -> None:
     parser.add_argument("--run-cleanup-once", action="store_true")
     parser.add_argument("--run-news-once", action="store_true")
     parser.add_argument("--run-gems-once", action="store_true")
+    parser.add_argument("--reprocess-char-items", action="store_true", help="Recompute skill_mod_counts from stored char_items, offline (skill-meta phase 2)")
     parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup+news+gems)")
     args = parser.parse_args()
 
@@ -1093,6 +1232,8 @@ def main() -> None:
         run_news_once(cfg)
     elif args.run_gems_once:
         run_gems_once(cfg)
+    elif args.reprocess_char_items:
+        run_reprocess_char_items(cfg)
     elif args.serve:
         run_scheduler(cfg)
     else:

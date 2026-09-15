@@ -124,6 +124,26 @@ class CharacterDetail:
     items: list[ItemDetail]
 
 
+def item_detail_from_dict(d: dict[str, Any]) -> ItemDetail:
+    """Reconstructs an `ItemDetail` from `dataclasses.asdict(item)`'s shape
+    (what `char_items.items_json` actually stores) -- used by
+    `--reprocess-char-items` (skill-meta phase 2, item 13) to recompute
+    skill-dimension mod counts from already-stored raw data without
+    re-fetching from poe.ninja."""
+    mods = d.get("mods") or {}
+    return ItemDetail(
+        slot=d["slot"],
+        base_type=d.get("base_type", ""),
+        name=d.get("name", ""),
+        frame_type_id=d.get("frame_type_id", ""),
+        mods=ItemMods(
+            implicit=list(mods.get("implicit", [])),
+            explicit=list(mods.get("explicit", [])),
+            fractured=list(mods.get("fractured", [])),
+        ),
+    )
+
+
 class NinjaCharsFetcher:
     def __init__(self, http_client: HttpClient, game: str = "poe2", failed_responses_dir: Path = DEFAULT_FAILED_RESPONSES_DIR):
         if game not in KNOWN_GAMES:

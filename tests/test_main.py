@@ -21,8 +21,10 @@ from src.main import (
     _update_status,
     run_meta_once,
     run_prices_once,
+    run_reprocess_char_items,
     run_scheduler,
 )
+from src.storage.local_db import LocalDb
 from src.storage.publisher import PricesPublisher
 from src.utils import job_lock
 
@@ -970,3 +972,102 @@ def test_run_gems_once_does_not_touch_previous_public_copy_when_staging_missing(
     assert result["ok"] is False
     publisher = created_publishers[-1]
     assert publisher.fetch_previous("poe2/gems.json")["gems"] == [{"id": "Fireball"}]
+
+
+def _http_dispatch(url_to_payload):
+    """Fake HttpClient whose get_json dispatches on URL -- for
+    run_reprocess_char_items, which needs SkillNormalizer's gems.json fetch
+    and ModNormalizer's Firebase stats-cache fetch to return different,
+    real-shaped payloads from the same mocked HttpClient class."""
+    mock_client = MagicMock()
+
+    def get_json(url):
+        for prefix, payload in url_to_payload.items():
+            if url.startswith(prefix):
+                return payload
+        raise AssertionError(f"unexpected URL fetched: {url}")
+
+    mock_client.get_json.side_effect = get_json
+    return mock_client
+
+
+def test_run_reprocess_char_items_recomputes_from_stored_char_items(tmp_path):
+    db_path = tmp_path / "reprocess_test.sqlite3"
+    db = LocalDb(db_path)
+    snap_id = db.insert_snapshot(game="poe2", league="Runes of Aldur", days_since_league_start=5,
+                                  sample_total=2, unique_characters_fetched=2, fetch_failed=0)
+    db.insert_char_item(
+        snap_id, "a", "A", 95, "Titan", "attack-melee",
+        [{"slot": "ring", "base_type": "Ring", "name": "x", "frame_type_id": "Rare",
+          "mods": {"implicit": [], "explicit": ["+87 to maximum Life"], "fractured": []}}],
+        main_skill="Fireball",
+    )
+    db.insert_char_item(  # legacy row, pre-dates main_skill -- must be skipped, not guessed
+        snap_id, "b", "B", 96, "Titan", "attack-melee",
+        [{"slot": "ring", "base_type": "Ring", "name": "y", "frame_type_id": "Rare",
+          "mods": {"implicit": [], "explicit": [], "fractured": []}}],
+    )
+    db.commit()
+    db.close()
+
+    cfg = {"firebase": {"bucket": "poe-data-hub"}, "game_versions": ["poe2"], "rate_limits": {}, "http": {}, "ggg": {}}
+
+    gems_payload = {"gems": [{"id": "Fireball", "display_name": "Fireball", "is_support": False}]}
+    stats_envelope = {
+        "fetched_at": 1234567890.0,
+        "data": {"result": [{"id": "explicit", "entries": [{"id": "explicit.stat_3299347043", "text": "+# to maximum Life"}]}]},
+    }
+
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)), \
+         patch("src.main.HttpClient", return_value=_http_dispatch({
+             "https://storage.googleapis.com/poe-data-hub/poe2/gems.json": gems_payload,
+             "https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json": stats_envelope,
+         })):
+        result = run_reprocess_char_items(cfg)
+
+    assert result["poe2"]["char_items_rows"] == 1  # legacy no-main_skill row excluded
+    assert result["poe2"]["snapshots_reprocessed"] == 1
+    assert result["poe2"]["skill_mod_counts_rows_written"] == 1
+
+    verify_db = LocalDb(db_path)
+    rows = verify_db._conn.execute(
+        "SELECT main_skill, level_bracket, slot, stat_id, count, population FROM skill_mod_counts WHERE snapshot_id=?",
+        (snap_id,),
+    ).fetchall()
+    assert rows == [("Fireball", "90-100", "ring", "explicit.stat_3299347043", 1, 1)]
+    verify_db.close()
+
+
+def test_run_reprocess_char_items_is_idempotent_on_rerun(tmp_path):
+    db_path = tmp_path / "reprocess_test2.sqlite3"
+    db = LocalDb(db_path)
+    snap_id = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5,
+                                  sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_char_item(
+        snap_id, "a", "A", 95, "Titan", "attack-melee",
+        [{"slot": "ring", "base_type": "Ring", "name": "x", "frame_type_id": "Rare",
+          "mods": {"implicit": [], "explicit": ["+87 to maximum Life"], "fractured": []}}],
+        main_skill="Fireball",
+    )
+    db.commit()
+    db.close()
+
+    cfg = {"firebase": {"bucket": "poe-data-hub"}, "game_versions": ["poe2"], "rate_limits": {}, "http": {}, "ggg": {}}
+    gems_payload = {"gems": [{"id": "Fireball", "display_name": "Fireball", "is_support": False}]}
+    stats_envelope = {
+        "fetched_at": 1234567890.0,
+        "data": {"result": [{"id": "explicit", "entries": [{"id": "explicit.stat_3299347043", "text": "+# to maximum Life"}]}]},
+    }
+
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)), \
+         patch("src.main.HttpClient", return_value=_http_dispatch({
+             "https://storage.googleapis.com/poe-data-hub/poe2/gems.json": gems_payload,
+             "https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json": stats_envelope,
+         })):
+        run_reprocess_char_items(cfg)
+        run_reprocess_char_items(cfg)  # re-run: must replace, not accumulate
+
+    verify_db = LocalDb(db_path)
+    count = verify_db._conn.execute("SELECT count(*) FROM skill_mod_counts WHERE snapshot_id=?", (snap_id,)).fetchone()[0]
+    assert count == 1
+    verify_db.close()

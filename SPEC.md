@@ -1471,3 +1471,85 @@ follow-up if poe.ninja 429s are ever observed during that window.
       manual-wins-over-auto, union-active semantics, the `auto-stale`
       distinction, and malformed-manual-falls-back-to-auto-for-that-game --
       281/282 project-wide (same pre-existing unrelated timing flake).
+- [x] Phase 16 (skill-meta phase 1): `{game}/gems.json` (8.6) -- skill/support
+      gem name+metadata table, combining RePoE fork data (primary,
+      `raw.githubusercontent.com`, not GGG, not IP-blocked) with GGG's
+      `trade(2)/data/items` "Gems" list (`verified_tradeable` cross-check
+      only -- confirmed live it has zero transfigured names, so it's never a
+      filter). Two-hop publish (`tools/refresh_gems.py` stages
+      `internal/gems_normalized_{game}.json` via `refresh-stats.yml`'s
+      `internal/`-IAM-scoped service account, `src/main.py`'s new
+      `run_gems_once` VM job republishes to the public path daily) -- caught
+      and fixed *before* first deploy that the scoped service account
+      can't write outside `internal/` (see CLAUDE.md). Live-verified
+      2026-09-15 after full deploy: `poe2/gems.json` 414KB/1120 gems (0
+      transfigured -- correct, PoE2 has no transfigured mechanic yet, 80
+      `is_lineage`), `poe1/gems.json` 343KB/915 gems (214 transfigured
+      confirmed incl. "Ice Nova of Frostbolts", 0 `is_lineage` -- correct,
+      no such mechanic in PoE1), both served 200 OK with correct
+      `Cache-Control`. Neither monitoring layer flagged anything; VM RAM
+      unaffected (86.5MB/peak 90MB right after restart, well inside budget
+      -- see CLAUDE.md's VM RAM budget note). 20 new tests
+      (`test_refresh_gems.py`) + 3 (`test_main.py`'s `run_gems_once` suite),
+      325/325 passing pre-deploy.
+- [x] Phase 17 (skill-meta phase 2): a second, orthogonal SQLite counting
+      dimension -- `skill_mod_counts` (`game, slot, main_skill,
+      level_bracket, archetype, stat_id`), covering gear and jewels,
+      alongside (not replacing) `mod_counts`' archetype-only one. Kept
+      forever, same policy as `mod_counts`. `archetype` is denormalized onto
+      every row (not purely a function of `main_skill` -- `Archetyper`'s
+      weapon-attack fallback depends on the character's actual weapon, so
+      the same skill can land in different archetypes for different
+      characters) so the 4-tier fallback (skill+bracket -> skill ->
+      archetype -> all, `LocalDb.query_skill_mod_counts`) is a plain
+      aggregation over this one table, no join back to `mod_counts` needed.
+      Skill names normalized against `{game}/gems.json` (phase 16) via the
+      new `src/processing/skill_normalizer.py` -- exact-string match only
+      (confirmed live that poe.ninja's names match RePoE `display_name`
+      byte-for-byte), transfigured variants kept distinct automatically (own
+      `display_name`), unmapped -> `"unknown"` and logged, never dropped. A
+      matched *support*-gem name is also treated as unmapped (a "main skill"
+      can never legitimately be one -- signals the upstream socket-group
+      pick was wrong for that character, not real data). Level brackets
+      configurable (`skill_meta.level_brackets`, default 28-65/65-75/75-90/
+      90-100, half-open except the last); a level below the first bracket is
+      excluded from this dimension only (still counted normally in the
+      existing archetype pipeline). Population = "everyone already in the
+      per-slot poe.ninja samples matching this skill+bracket" (gear:
+      per-character; jewels: per-gem-instance, spec 6.4) -- explicitly not a
+      separately-fetched "true" population (poe.ninja's builds-search has no
+      such query), per item 5/7 of the driving conversation.
+
+      **Historical backfill gap, accepted, not fixed** (see CLAUDE.md):
+      `char_items.main_skill` was never persisted before this phase even
+      though `CharacterDetail.main_skill` was already fetched every run --
+      only used transiently for the old archetype bucket, then discarded.
+      Every `char_items` row from before this deploy has no recoverable
+      skill name (re-fetching now would return characters' *current* skill,
+      not what they ran historically -- respec makes that actively
+      misleading, not just imprecise), so the skill dimension starts
+      accumulating from this deploy forward only, decided explicitly rather
+      than attempting an inaccurate re-fetch-based backfill. `char_items`
+      itself is unaffected and still holds gear/level data back to the
+      start of PoE1's current league (90-day retention) for the *existing*
+      archetype-based `mod_counts` dimension.
+
+      `--reprocess-char-items` (`src/main.py`'s `run_reprocess_char_items`)
+      recomputes `skill_mod_counts` from already-stored `char_items` rows
+      entirely offline (no poe.ninja calls, item 5) -- for when gems.json
+      normalization or `level_brackets` changes and needs reapplying
+      retroactively across the retention window; only acts on rows with
+      `main_skill` populated (silently skips pre-migration rows by design,
+      not an oversight). Idempotent per snapshot (deletes + replaces that
+      snapshot's rows, never accumulates on repeat runs).
+
+      Deliberately NOT done in this phase: no new public Firebase JSON is
+      published yet (`min_population_publish` config exists and is already
+      used by `query_skill_mod_counts`'s fallback-tier decision, but nothing
+      calls that from a publish step) -- consolidating this into a
+      consumer-facing view is skill-meta phase 4's job ("รวมเป็นภาพเดียวต่อ
+      skill"), once passives (phase 3) exist too.
+
+      37 new tests: 19 in `test_aggregator.py`, 8 in `test_skill_normalizer.py`
+      (new file), 8 in `test_local_db.py`, 2 in `test_main.py`
+      (`run_reprocess_char_items`'s recompute + idempotent-rerun behavior).

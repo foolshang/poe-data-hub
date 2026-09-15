@@ -72,6 +72,31 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   "it's already populated" — verify the actual blob exists on Firebase
   before trusting a new game's meta job to succeed on the VM.
 
+- **`char_items.main_skill` was never persisted before skill-meta phase 2
+  (added 2026-09-15), even though `CharacterDetail.main_skill` was already
+  being fetched and used every meta run** — `_run_meta_for_game` used it
+  transiently to compute the coarse `archetype` bucket
+  (`Archetyper.classify`), then discarded it; `items_json` only stores
+  gear/jewel mods, not the character's skill. Found while designing the new
+  `(game, slot, main_skill, level_bracket, stat_id)` counting dimension,
+  which needs the *exact* skill name, not just its archetype bucket.
+  **Consequence: the raw skill name for every `char_items` row inserted
+  before this migration is permanently unrecoverable** — re-fetching a
+  historical character from poe.ninja now would only return their *current*
+  skill, not what they were running when that historical row was captured
+  (players respec), so it would silently mislabel old data rather than
+  legitimately backfill it. Decided (explicitly, with the project owner) to
+  accept the gap rather than attempt that: the skill dimension starts
+  accumulating from this deploy forward only, even though `char_items`
+  itself is still fully populated back to the start of PoE1's current
+  league (90-day retention). `--reprocess-char-items`
+  (`src/main.py`'s `run_reprocess_char_items`) recomputes `skill_mod_counts`
+  from stored `char_items` entirely offline (no poe.ninja calls) whenever
+  gems.json normalization or `skill_meta.level_brackets` changes, but it can
+  only ever act on rows that have `main_skill` populated -- rows from
+  before this deploy are silently skipped by design (`LocalDb.
+  iter_char_items_with_main_skill` filters `WHERE main_skill IS NOT NULL`),
+  not an oversight.
 - **`{game}/gems.json` (skill-meta phase 1, added 2026-09-15) needed a
   second `internal/`-staged two-hop publish, same shape as
   `internal/stats_cache*.json` above, for the same IAM reason** — its

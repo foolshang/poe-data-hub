@@ -28,8 +28,10 @@ from src.fetchers.ninja_builds import CharacterRef
 from src.fetchers.ninja_chars import CharacterDetail, ItemDetail
 from src.processing.archetyper import Archetyper
 from src.processing.normalizer import ModNormalizer
+from src.processing.skill_normalizer import SkillNormalizer
 
 GetDetail = Callable[[str, str], Optional[CharacterDetail]]
+LevelBracket = tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,225 @@ def _finalize(slot: str, denom: int, counters: dict[str, dict[str, _StatBucket]]
                     value_min=bucket.value_min,
                     value_max=bucket.value_max,
                     rank_in_slot=rank,
+                )
+            )
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Skill-centric meta (skill-meta phase 2): a second, orthogonal counting
+# dimension -- (slot, main_skill, level_bracket, stat_id) -- covering both
+# gear and jewels, alongside (not replacing) the archetype-based counting
+# above. Population is "everyone in the already-sampled per-slot lists who
+# matches this skill+bracket", not a separately-fetched "true" population of
+# every player running that skill -- poe.ninja's builds-search endpoint has
+# no such query, and re-fetching more data than the archetype pipeline
+# already pulls is explicitly out of scope for this phase.
+# ---------------------------------------------------------------------------
+
+
+def bracket_for_level(level: Optional[int], brackets: list[LevelBracket]) -> Optional[str]:
+    """`brackets` is an ordered list of (lo, hi) tuples, e.g. [(28, 65), (65,
+    75), (75, 90), (90, 100)]. Each bracket is half-open [lo, hi) except the
+    last, which is closed [lo, hi] so a level-100 character lands somewhere
+    (there is no bracket starting at 100 to catch it otherwise). A level
+    below the first bracket's `lo` (e.g. a fresh level-1 character) matches
+    no bracket and returns `None` -- callers must skip that character for
+    the skill dimension entirely (they still count normally in the existing
+    archetype-based pipeline, untouched)."""
+    if level is None:
+        return None
+    for i, (lo, hi) in enumerate(brackets):
+        is_last = i == len(brackets) - 1
+        if lo <= level < hi or (is_last and level == hi):
+            return f"{lo}-{hi}"
+    return None
+
+
+@dataclass(frozen=True)
+class SkillModCount:
+    slot: str
+    main_skill: str
+    level_bracket: str
+    archetype: str
+    stat_id: str
+    mod_kind: str
+    count: int
+    population: int
+    usage_pct: float
+    value_min: Optional[float]
+    value_max: Optional[float]
+    rank_in_bracket: int = 0
+
+
+def aggregate_slot_by_skill(
+    slot: str,
+    char_refs: list[CharacterRef],
+    get_detail: GetDetail,
+    normalizer: ModNormalizer,
+    skill_normalizer: SkillNormalizer,
+    archetyper: Archetyper,
+    level_brackets: list[LevelBracket],
+) -> list[SkillModCount]:
+    """`archetype` is stored per row (not just skill/bracket) because it is
+    NOT a pure function of `main_skill` alone: `Archetyper.classify`'s
+    weapon-attack fallback path depends on the character's actual equipped
+    weapon, so two characters on the same skill can land in different
+    archetypes (e.g. a generic physical attack skill used with a bow vs a
+    sword). Storing it keeps every 4-tier fallback aggregation (item 12) a
+    plain SQL SUM/GROUP BY over disjoint partitions of this same table --
+    see local_db.py's `query_skill_mod_counts`."""
+    denom: dict[tuple[str, str, str, str], int] = defaultdict(int)
+    counters: dict[tuple[str, str, str, str], dict[str, _StatBucket]] = defaultdict(lambda: defaultdict(_StatBucket))
+
+    for ref in char_refs:
+        detail = get_detail(ref.account, ref.name)
+        if detail is None:
+            continue
+        bracket = bracket_for_level(detail.level, level_brackets)
+        if bracket is None:
+            continue
+        slot_items = [i for i in detail.items if i.slot == slot]
+        if not slot_items:
+            continue
+        skill = skill_normalizer.normalize(detail.main_skill)
+        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
+        key = (slot, skill, bracket, archetype)
+        denom[key] += 1
+        for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items(slot_items, normalizer).items():
+            counters[key][stat_id].add(mod_kind, v_min, v_max)
+
+    return _finalize_skill(denom, counters)
+
+
+def aggregate_jewels_by_skill(
+    char_refs: list[CharacterRef],
+    get_detail: GetDetail,
+    normalizer: ModNormalizer,
+    skill_normalizer: SkillNormalizer,
+    archetyper: Archetyper,
+    level_brackets: list[LevelBracket],
+) -> list[SkillModCount]:
+    """Per-gem-instance counting (spec 6.4), same as `aggregate_jewels`, now
+    additionally keyed by (normalized main_skill, level_bracket, archetype)."""
+    denom: dict[tuple[str, str, str, str], int] = defaultdict(int)
+    counters: dict[tuple[str, str, str, str], dict[str, _StatBucket]] = defaultdict(lambda: defaultdict(_StatBucket))
+
+    for ref in char_refs:
+        detail = get_detail(ref.account, ref.name)
+        if detail is None:
+            continue
+        bracket = bracket_for_level(detail.level, level_brackets)
+        if bracket is None:
+            continue
+        jewel_items = [i for i in detail.items if i.slot.startswith("jewel:")]
+        if not jewel_items:
+            continue
+        skill = skill_normalizer.normalize(detail.main_skill)
+        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
+        for jewel in jewel_items:
+            key = (jewel.slot, skill, bracket, archetype)
+            denom[key] += 1
+            for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items([jewel], normalizer).items():
+                counters[key][stat_id].add(mod_kind, v_min, v_max)
+
+    return _finalize_skill(denom, counters)
+
+
+def compute_skill_bracket_population(
+    unique_char_refs: list[CharacterRef],
+    get_detail: GetDetail,
+    skill_normalizer: SkillNormalizer,
+    level_brackets: list[LevelBracket],
+) -> dict[tuple[str, str], int]:
+    """(normalized main_skill, level_bracket) -> distinct character count,
+    across the deduped set of characters actually fetched this snapshot --
+    not per-slot, unlike the aggregate_*_by_skill population above. This is
+    what a "top 20 skills, how many per bracket" report reads (item 14),
+    and what decides which bracket is too thin to publish later."""
+    counts: dict[tuple[str, str], int] = defaultdict(int)
+    for ref in unique_char_refs:
+        detail = get_detail(ref.account, ref.name)
+        if detail is None:
+            continue
+        bracket = bracket_for_level(detail.level, level_brackets)
+        if bracket is None:
+            continue
+        skill = skill_normalizer.normalize(detail.main_skill)
+        counts[(skill, bracket)] += 1
+    return dict(counts)
+
+
+def reprocess_chars_to_skill_mod_counts(
+    chars: list[tuple[Optional[str], int, list[ItemDetail]]],
+    normalizer: ModNormalizer,
+    skill_normalizer: SkillNormalizer,
+    archetyper: Archetyper,
+    level_brackets: list[LevelBracket],
+) -> list[SkillModCount]:
+    """Recomputes one snapshot's skill-dimension mod counts directly from
+    already-stored item data (`src/main.py`'s `run_reprocess_char_items`,
+    item 13) -- `chars` is `[(raw_main_skill, level, items), ...]`, one entry
+    per `char_items` row. No `CharacterRef`/`get_detail` needed, unlike the
+    live `aggregate_slot_by_skill`/`aggregate_jewels_by_skill`, since every
+    character's full item list is already in hand; entirely offline, no
+    poe.ninja calls."""
+    denom: dict[tuple[str, str, str, str], int] = defaultdict(int)
+    counters: dict[tuple[str, str, str, str], dict[str, _StatBucket]] = defaultdict(lambda: defaultdict(_StatBucket))
+
+    for main_skill_raw, level, items in chars:
+        bracket = bracket_for_level(level, level_brackets)
+        if bracket is None:
+            continue
+        skill = skill_normalizer.normalize(main_skill_raw)
+        weapon_base = next((i.base_type for i in items if i.slot == "weapon"), None)
+        archetype = archetyper.classify(main_skill_raw, weapon_base)
+
+        by_slot: dict[str, list[ItemDetail]] = defaultdict(list)
+        for item in items:
+            by_slot[item.slot].append(item)
+
+        for slot, slot_items in by_slot.items():
+            key = (slot, skill, bracket, archetype)
+            if slot.startswith("jewel:"):
+                denom[key] += len(slot_items)  # per-gem-instance (spec 6.4)
+                for item in slot_items:
+                    for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items([item], normalizer).items():
+                        counters[key][stat_id].add(mod_kind, v_min, v_max)
+            else:
+                denom[key] += 1  # per-character
+                for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items(slot_items, normalizer).items():
+                    counters[key][stat_id].add(mod_kind, v_min, v_max)
+
+    return _finalize_skill(denom, counters)
+
+
+def _finalize_skill(
+    denom: dict[tuple[str, str, str, str], int],
+    counters: dict[tuple[str, str, str, str], dict[str, _StatBucket]],
+) -> list[SkillModCount]:
+    results: list[SkillModCount] = []
+    for key, stat_buckets in counters.items():
+        slot, skill, bracket, archetype = key
+        d = denom[key]
+        if d == 0:
+            continue
+        ranked = sorted(stat_buckets.items(), key=lambda kv: kv[1].count, reverse=True)
+        for rank, (stat_id, bucket) in enumerate(ranked, start=1):
+            results.append(
+                SkillModCount(
+                    slot=slot,
+                    main_skill=skill,
+                    level_bracket=bracket,
+                    archetype=archetype,
+                    stat_id=stat_id,
+                    mod_kind=bucket.mod_kind,
+                    count=bucket.count,
+                    population=d,
+                    usage_pct=round(bucket.count / d * 100, 2),
+                    value_min=bucket.value_min,
+                    value_max=bucket.value_max,
+                    rank_in_bracket=rank,
                 )
             )
     return results
