@@ -1553,3 +1553,35 @@ follow-up if poe.ninja 429s are ever observed during that window.
       37 new tests: 19 in `test_aggregator.py`, 8 in `test_skill_normalizer.py`
       (new file), 8 in `test_local_db.py`, 2 in `test_main.py`
       (`run_reprocess_char_items`'s recompute + idempotent-rerun behavior).
+
+      **Live deploy verification, 2026-09-15**: pulled + restarted cleanly,
+      `--run-meta-once` run manually right after. Both games returned **zero
+      characters from poe.ninja's builds-search** this cycle -- coincidental
+      timing, not caused by this change: both leagues are brand new
+      (poe2 "Forbidden Rites", inside its already-detected
+      `league_start_mode` window; poe1 "Allflame", which also means
+      `config.yaml`'s stale `poe1_override: "Mirage"` no longer matches any
+      active candidate -- a separate, pre-existing piece of league-rotation
+      maintenance, unrelated to skill-meta and not fixed here), and
+      poe.ninja's build index hadn't caught up to either yet (every
+      `ninja_builds` slot request failed the same
+      `missing expected valueList(s)` parse check for both games). Confirms
+      the new code path runs cleanly end-to-end against live production
+      with zero characters (no crash, `skill dimension -- 0 rows, top
+      skills=[], 0 thin bracket(s), 0 unmapped` logged correctly, matching
+      the same empty-population handling already covered by
+      `test_compute_archetype_distribution_empty_refs_returns_empty_list`),
+      `SkillNormalizer` loaded real `gems.json` for both games (poe2: 1055,
+      poe1: 911 -- both slightly different from phase 16's day-one 1120/915
+      since the weekly refresh had run again since; expected drift, not a
+      bug), and the SQLite file grew by ~12KB (two new near-empty snapshot
+      rows only) -- **but item 14's requested content** (top 20 skills per
+      game, population per bracket, thin-bracket list, a meaningful
+      duration/RSS delta against real per-character work) **could not be
+      produced this cycle, because that data does not exist anywhere yet**
+      -- not a gap in this implementation. Re-run `--run-meta-once` (or wait
+      for the next scheduled 02:00 ICT cron) once poe.ninja's index has
+      real characters for either league to get those numbers; correctness
+      in the meantime rests on the 37 passing unit tests against real
+      fixture data (RePoE `gems.json`, real GGG stat templates) rather than
+      a live content sample.
