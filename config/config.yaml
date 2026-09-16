@@ -50,8 +50,16 @@ schedule:
   # billing line item (~1.5GB/day). Hash-skip-if-unchanged was considered
   # and rejected -- generated_at + live market movement means the payload
   # almost never matches previous cycle anyway, so it wouldn't have helped.
-  # news kept at 5min (small files, freshness matters more there).
-  prices_interval_minutes: 180
+  # Bumped 180 -> 1440 (2026-09-10): one publish/day. Same egress reasoning
+  # taken to its conclusion (~8x less inter-region transfer), and it removes
+  # 7/8 of the daily ~80MB prices-poe1 memory spike on the 955MB e2-micro VM
+  # (baseline RSS ~239MB, VmHWM ~322MB during a poe1 run -- see PRICES_MAX_AGE
+  # in tools/heartbeat_check.py, bumped in lockstep). Tradeoff: published
+  # prices are now up to ~24h stale. Drop this back to 180 (or lower) if
+  # near-real-time pricing is needed again.
+  # news kept at 5min (small files ~fetch <100 entries, freshness matters
+  # more there, and it's not a memory factor -- see prices spike note above).
+  prices_interval_minutes: 1440
   meta_cron_hour_thailand: 2
   # Manual escape hatch (spec section 9) -- kept for an unplanned/delayed
   # league that league_start_mode's date range below doesn't cover. Bump

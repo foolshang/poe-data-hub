@@ -40,7 +40,8 @@
 One long-lived process (`python -m src.main --serve`) with three independent
 APScheduler jobs (see `run_scheduler` in `src/main.py`):
 
-- **prices** -- every `schedule.prices_interval_minutes` (default 20min)
+- **prices** -- every `schedule.prices_interval_minutes` (currently 1440 =
+  once/day; see the comment on that key in `config/config.yaml` for why)
 - **meta** -- `schedule.meta_cron_hour_thailand` (default 02:00 ICT); bump
   `schedule.meta_runs_per_day_league_start` above 1 in `config/config.yaml`
   and restart the service during the first few days of a new league for
