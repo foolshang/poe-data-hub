@@ -544,7 +544,8 @@ def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one(tmp_path):
     }
     fake_scheduler = MagicMock()
     with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
-         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])):
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
         run_scheduler(cfg)
 
     meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
