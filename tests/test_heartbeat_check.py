@@ -15,15 +15,15 @@ def test_check_prices_freshness_ok_when_recent():
 
 def test_check_prices_freshness_flags_when_stale():
     now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
-    generated_at = (now - timedelta(minutes=400)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated_at = (now - timedelta(minutes=3000)).strftime("%Y-%m-%dT%H:%M:%SZ")
     problem = heartbeat_check.check_prices_freshness(generated_at, now=now)
     assert problem is not None
-    assert "400 minutes old" in problem
+    assert "3000 minutes old" in problem
 
 
 def test_check_prices_freshness_boundary_not_flagged():
     now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
-    generated_at = (now - timedelta(minutes=359)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated_at = (now - timedelta(minutes=2879)).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert heartbeat_check.check_prices_freshness(generated_at, now=now) is None
 
 
@@ -55,7 +55,7 @@ def test_check_hardcore_freshness_ok_when_recent():
 
 def test_check_hardcore_freshness_flags_when_stale():
     now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
-    generated_at = (now - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated_at = (now - timedelta(hours=50)).strftime("%Y-%m-%dT%H:%M:%SZ")
     problem = heartbeat_check.check_hardcore_freshness(generated_at, now=now)
     assert problem is not None
     assert "hardcore/latest.json" in problem
@@ -160,7 +160,7 @@ def test_run_returns_0_when_both_fresh():
 def test_run_returns_1_when_poe2_prices_stale():
     now = datetime.now(timezone.utc)
     stale_resp = MagicMock()
-    stale_resp.json.return_value = {"generated_at": (now - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    stale_resp.json.return_value = {"generated_at": (now - timedelta(hours=50)).strftime("%Y-%m-%dT%H:%M:%SZ")}
     status_resp = _status_resp(now)
 
     sequence = [stale_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
@@ -171,7 +171,7 @@ def test_run_returns_1_when_poe2_prices_stale():
 def test_run_returns_1_when_poe1_prices_stale():
     now = datetime.now(timezone.utc)
     stale_resp = MagicMock()
-    stale_resp.json.return_value = {"generated_at": (now - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    stale_resp.json.return_value = {"generated_at": (now - timedelta(hours=50)).strftime("%Y-%m-%dT%H:%M:%SZ")}
     status_resp = _status_resp(now)
 
     sequence = [_fresh_prices_resp(now), stale_resp, _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
@@ -245,7 +245,7 @@ def test_run_returns_0_when_categories_all_ok():
 
 def test_run_returns_1_when_hardcore_stale():
     now = datetime.now(timezone.utc)
-    stale_hardcore = _index_resp(hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": (now - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    stale_hardcore = _index_resp(hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": (now - timedelta(hours=50)).strftime("%Y-%m-%dT%H:%M:%SZ")})
     status_resp = _status_resp(now)
 
     sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), stale_hardcore, _index_resp(), status_resp]
