@@ -1585,3 +1585,74 @@ follow-up if poe.ninja 429s are ever observed during that window.
       in the meantime rests on the 37 passing unit tests against real
       fixture data (RePoE `gems.json`, real GGG stat templates) rather than
       a live content sample.
+
+      **Correction, 2026-09-16**: the diagnosis above ("poe.ninja's build
+      index hasn't caught up yet") was wrong -- written from the error
+      message's own wording without re-curling the live endpoint to check.
+      The real cause, found the next day: poe.ninja replaced the entire
+      builds-search wire format around 2026-08-04 (`total` in the response
+      was a real nonzero population count the whole time; only the
+      character-row data was structurally absent -- a schema change, not an
+      empty result). See CLAUDE.md's "diagnose from the real endpoint, not
+      the error message" entry and Phase 18 below for the actual fix.
+
+- [x] Phase 18: `ninja_builds` full schema re-reverse-engineering
+      (`src/fetchers/ninja_builds.py`, `src/utils/ndic.py` new) after
+      poe.ninja's 2026-08-04 wire-format change went undiagnosed for ~43
+      days (Phase 17's "index hasn't caught up" note, corrected above).
+      Re-derived live via a real browser network capture cross-checked
+      byte-for-byte against a from-scratch protobuf field dump: search
+      response's valueList array moved from field 5 to field 12 (28 columns
+      now, up from 10 -- rate/crit/hit-chance/projectiles/forks/chains/
+      splits/pierces/aoe/duration added), each column now self-describes
+      which dictionary resolves its indices (field 11) instead of the
+      caller having to guess; the `/builds/dictionary/{hash}` endpoint
+      stopped being protobuf entirely, replaced by a custom "NDIC"-magic
+      binary format (length-prefixed string array after an unneeded
+      hash-bucket header region) -- see `src/utils/ndic.py`'s module
+      docstring for the full byte-level writeup. `items=` filter param
+      confirmed still functional server-side (a false start during this
+      same investigation briefly assumed otherwise from poe.ninja's own UI
+      not sending it from its default view, and had to be corrected before
+      shipping). Confirmed live: no bot/browser-fingerprint distinction on
+      either endpoint -- `curl` and a real browser get byte-identical
+      responses, so plain `requests`-based `HttpClient` calls work fine in
+      production, no browser automation needed at runtime.
+
+      Three hardening requirements from the project owner, all shipped:
+      1. **No silent empty result**: `_validate_search_response` now treats
+         "0 characters extracted but response `total` is nonzero" as a hard
+         `ValueError`, not a quiet empty list -- this exact combination is
+         precisely how the 43-day breakage presented. `ndic.decode` raises
+         immediately (with the actual magic bytes/version found) on a
+         magic-byte or version mismatch, never a silently-wrong dictionary.
+      2. **`buildLeagues[].indexed` is logged, never a query gate**:
+         checked whether it predicts character-data availability (it
+         doesn't -- PoE2's real main league "Forbidden Rites" reports
+         `indexed: false` yet returns a full 28-column response, identical
+         in shape to `indexed: true` leagues) before deciding how to use
+         it; logged purely for visibility since `buildLeagues` comes free
+         with the `snapshotVersions` response `resolve_snapshot` already
+         fetches (zero extra requests either way).
+      3. **Systematic last-known-good raw storage**: `_save_last_good` now
+         covers the search response (pre-existing), every dictionary name,
+         and the index-state JSON -- not just the search body as before --
+         so the *next* format change can be diffed from real bytes
+         immediately instead of starting from scratch, the same way
+         `last_good_builds_*.bin`'s existence made *this* diagnosis fast
+         once someone thought to look.
+      Etiquette (poe.ninja is a free community site): per-(snapshot,
+      item_filter) results are now cached for the fetcher instance's
+      lifetime (previously only dictionaries were); `User-Agent` already
+      self-identifies with a contact email (`http_client.py`, unchanged);
+      rate limiting unchanged (`rate_limits."poe.ninja": 2`, already shared
+      across jobs via `job_lock`/the shared `RateLimiter`).
+
+      Verified against real captured samples for both games
+      (`data/samples/ninja_{poe1,poe2}_{builds_search,dict_class,dict_gem,
+      index_state}_2026-09-16.{bin,json}`) -- PoE1's schema confirmed
+      identical in structure to PoE2's (not re-assumed this time), just
+      more dictionaries (15 vs 7 -- bandit/atlasskill/mastery/runegraft/
+      tattoo/vestigialmod/pantheon/secondascendancy, PoE1-only systems).
+      27 tests (`test_ninja_builds.py` rewritten, `test_ndic.py` new),
+      357/357 project-wide passing.

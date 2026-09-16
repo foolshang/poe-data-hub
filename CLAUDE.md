@@ -220,6 +220,28 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
     as a backup if healthchecks.io itself has an outage.
   - Ping/check failures in either layer must never fail the underlying job
     (Layer 1) or need secrets (Layer 2 reads public URLs only).
+- **An error message's own wording is not a diagnosis — hit the real
+  endpoint yourself before writing down a root cause** (learned 2026-09-16):
+  `ninja_builds`'s meta job started failing 100% of the time (every slot,
+  both games) starting around 2026-08-04 (`data/samples/last_good_builds_*.bin`'s
+  mtimes are the tell), surfacing as `_validate_search_response`'s "missing
+  expected valueList(s)" error. The 2026-09-15 phase-17 live-deploy note in
+  SPEC.md read that message, saw both leagues were brand new, and wrote down
+  "poe.ninja's build index hasn't caught up yet" as the cause — plausible,
+  matched the error's own wording ("possibly an empty filter result"), and
+  wrong. Actually curling the real endpoint the next day showed `total`
+  was a real nonzero count (poe.ninja *does* have the data) while the
+  valueList section was simply absent from the wire response — a genuine
+  upstream protobuf schema change (confirmed by diffing the raw bytes
+  against `last_good_builds_*.bin` field-by-field: old schema was
+  field1=total/field5=repeated valueList/field6=repeated dictRef; current
+  responses have no field 5 at all, and field 6 now holds something else
+  entirely, 7 short entries instead of 9 longer dictRefs). A day of SPEC.md
+  history had the wrong cause on record because nobody re-fetched the live
+  URL to check. Rule going forward: when a fetcher's validation starts
+  failing, curl/fetch the exact failing URL for real before writing any
+  "probably X" explanation into SPEC.md or a commit message, even when a
+  benign-sounding explanation is sitting right there in the error text.
 
 ## Layout
 
