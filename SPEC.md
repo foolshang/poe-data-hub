@@ -728,6 +728,7 @@ poe-data-hub/
 ├── poe2/meta/2026-07-08.json
 ├── poe2/news/latest.json
 ├── poe2/gems.json                                (skill-meta phase 1, 8.6)
+├── poe2/passives/latest.json                     (skill-meta phase 3 path A, 8.8)
 ├── poe1/prices/latest.json
 ├── poe1/prices/index.json
 ├── poe1/prices/events/{sanitized-league}.json   (0..n)
@@ -736,17 +737,20 @@ poe-data-hub/
 ├── poe1/meta/2026-07-15.json                    (phase 10)
 ├── poe1/news/latest.json
 ├── poe1/gems.json                                (skill-meta phase 1, 8.6)
+├── poe1/passives/latest.json                     (skill-meta phase 3 path A, 8.8)
 ├── mtx/latest.json
 ├── internal/stats_cache.json                    (PoE2 trade2 stats, weekly refresh)
 ├── internal/stats_cache_poe1.json                (PoE1 trade stats, weekly refresh, phase 10)
 ├── internal/gems_normalized_poe2.json            (skill-meta phase 1, staging copy, weekly refresh)
 ├── internal/gems_normalized_poe1.json            (skill-meta phase 1, staging copy, weekly refresh)
+├── archive/poe2-{league-slug}.json               (skill-meta phase 5, per-league, indented)
+├── archive/poe1-{league-slug}.json               (skill-meta phase 5, per-league, indented)
 └── status.json
 ```
 
 `Cache-Control`: `max-age=300` สำหรับ prices/index/events, `max-age=3600`
-สำหรับ meta และ gems, `max-age=120` สำหรับ news/mtx, `no-cache` สำหรับไฟล์
-ใต้ `internal/`.
+สำหรับ meta, gems, passives, และ archive, `max-age=120` สำหรับ news/mtx,
+`no-cache` สำหรับไฟล์ใต้ `internal/`.
 
 #### Job cadence (phase 10: PoE1 meta added to the same nightly slot)
 
@@ -1098,6 +1102,92 @@ shared rate limiter across concurrently-running jobs, a real architecture
 change, and is out of this phase's scope) -- noted so it's a known,
 documented characteristic rather than a silent gap, and worth its own
 follow-up if poe.ninja 429s are ever observed during that window.
+
+### 8.8 `data/archive/{game}-{league-slug}.json` (skill-meta phase 5)
+
+One file per league, kept on the VM (git-ignored) and best-effort copied to
+Firebase at `archive/{game}-{league-slug}.json` (indented, unlike the VM
+copy -- see 8.7's Cache-Control note and `src/processing/archive_export.py`'s
+module docstring for why). Never deleted, never overwritten by anything
+except a fresh export of the *same* league -- reads `mod_counts`/
+`skill_mod_counts`/`keypassive_counts` (all kept forever) rather than
+`char_items` (90-day retention), so an already-ended league can still be
+archived in full months later.
+
+```json
+{
+  "schema_version": 1,
+  "game": "poe2",
+  "league": "Runes of Aldur",
+  "league_slug": "runes-of-aldur",
+  "exported_at": "2026-09-17T04:34:46Z",
+  "age_buckets": ["1-21", "22-60", "61+", "unknown"],
+  "mod_counts": {"<slot>": {"<archetype>": {"<age_bucket>": [{"stat_id": "...", "mod_kind": "...", "count": 0, "value_min": null, "value_max": null}]}}},
+  "skill_mod_counts": {"<slot>": {"<main_skill>": {"<level_bracket>": {"<age_bucket>": [{"stat_id": "...", "mod_kind": "...", "count": 0, "population": 0, "usage_pct": 0.0, "value_min": null, "value_max": null}]}}}},
+  "passives": {"<main_skill>": {"<level_bracket>": {"<age_bucket>": [{"keypassive": "...", "count": 0, "population": 0, "usage_pct": 0.0}]}}}
+}
+```
+
+Only the *time* dimension collapses (into the four age buckets above, from
+`days_since_league_start`); skill/slot/level_bracket/stat_id/keypassive stay
+fully expanded on purpose -- answering a question next year that nobody
+thought to ask today needs the real dimensions, not a pre-aggregated top-N.
+`archetype` is intentionally **not** a top-level archive dimension for
+`skill_mod_counts`/`passives` (it's a fallback-tier field on those tables,
+not first-class -- see local_db.py); it still is for `mod_counts`, where
+it's the primary dimension. `mod_counts` rows carry no `population`/
+`usage_pct` at all (that table has no population column -- see
+archive_export.py). Measured live 2026-09-17 (both games, ~13 real
+productive snapshots combined): 1.5MB (poe2) / 2.8MB (poe1) after switching
+the VM copy to compact JSON -- see Phase 20/21 below for the full sizing
+investigation; not yet measured against a full-length league.
+
+### 8.9 `{game}/passives/latest.json` (skill-meta phase 3, path A)
+
+**Notable/keystone passives only -- not the full passive tree.**
+poe.ninja's builds-search "keypassives" column + dictionary (confirmed live
+2026-09-17) is a ~260-330-entry enumeration covering only notable/keystone-
+tier passives; the ~1000+ small stat nodes on the real tree are not in this
+data at all. A full-tree "path B" would need `passiveSelection` (real GGG
+tree node IDs, already captured verbatim into `char_items.
+passive_selection_json` at near-zero cost, unresolved) plus real external
+GGG tree data this project doesn't have yet -- see
+`src/fetchers/ninja_builds.py`'s module docstring and CLAUDE.md for the
+full investigation (including why `passiveSelection` and Path of Building's
+own node list disagree for the same character, and why poe.ninja's
+dictionary can't resolve `passiveSelection` at all -- different ID spaces).
+
+```json
+{
+  "schema_version": 2,
+  "generated_at": "2026-09-17T00:00:00Z",
+  "league": "Runes of Aldur",
+  "days_since_league_start": 5,
+  "source": "keypassives (notable/keystone tier only, not the full passive tree)",
+  "passives": [
+    {
+      "main_skill": "Fireball",
+      "level_bracket": "90-100",
+      "archetype": "spell-fire",
+      "keypassive": "Dance with Death",
+      "count": 8,
+      "population": 10,
+      "usage_pct": 80.0,
+      "rank_in_bracket": 1
+    }
+  ]
+}
+```
+
+Same counting rule as a regular slot's mods: counted once per character
+even if (defensively) the same keypassive appears twice in that
+character's list. Rows below `skill_meta.min_population_publish` (default
+20) are dropped from this file (never from the SQLite `keypassive_counts`
+table, which keeps every row forever the same as `skill_mod_counts` --
+publish-worthiness and storage are separate, same policy as the skill
+dimension). `(main_skill, level_bracket, archetype)` matches
+`skill_mod_counts`'s own dimension (minus `slot`, since passives aren't
+slot-specific) so the two can be joined/queried the same way.
 
 ## Binding conditions (from project owner, still in force)
 
@@ -1735,3 +1825,91 @@ follow-up if poe.ninja 429s are ever observed during that window.
       multi-week league). 17 new tests (`test_archive_export.py` new, plus
       `test_main.py` orchestration/scheduler-registration tests), 385/385
       project-wide passing.
+
+- [x] Phase 21: archive size fix + skill-meta phase 3 path A (notable/
+      keystone passives), both requested together after live-checking
+      Phase 20's real production archive size.
+
+      **Size investigation, 2026-09-17** -- the "3-5.5MB at 13 days -> could
+      hit 25-40MB by league end" worry turned out to rest on a wrong
+      premise: queried the real VM database and found poe2 "Forbidden
+      Rites" had 49 snapshots but only **3** ever produced real character
+      data (the schema was broken -- Phase 18 -- for this league's entire
+      life until the fix landed), and poe1 "Allflame" had 157 snapshots but
+      only **38** productive (35 from *before* the 2026-08-04 break under
+      the old schema, 3 from after the fix) -- so the archive's size
+      reflects a handful of real snapshots, not 13 (or 54, poe1's real
+      elapsed days) days of steady accumulation, and growth from here is
+      governed by the skill/stat state-space's cardinality, not wall-clock
+      time -- confirmed already sub-linear (poe2's 3 snapshots collapsed
+      22,433 raw skill_mod_counts rows to 8,006 distinct). Separately found
+      a real, unrelated inefficiency: `json.dumps(indent=2)` was ~49% of
+      the file, pure whitespace on a structure nested 4-5 dicts deep with
+      thousands of leaf rows. Fixed in `archive_export.py`'s own VM-copy
+      write only (`separators=(",", ":")`) -- deliberately did not touch
+      `PricesPublisher.publish` (the Firebase-copy path, and every other
+      published file project-wide), since that's a shared convention, not
+      an archive-specific call. Re-exported both real leagues after
+      deploying: poe2 2,952KB -> **1,494KB**, poe1 5,480KB -> **2,825KB**
+      (~49% reduction each, confirmed live, zero data difference).
+
+      **Passive-tree investigation, 2026-09-17** (real browser, real
+      endpoints -- see CLAUDE.md for the full trail): resolved the Phase
+      19 109-vs-155-node puzzle as far as possible without external tree
+      data. The live character page shows three genuinely separate
+      categories -- main tree, **Ascendancy** (its own 8-node sub-tree),
+      and **Quest Reward Choices** (non-tree bonuses entirely) --
+      confirmed via `passiveCounts: {"passives": 122, "ascendancy": 8,
+      "anoints": 1, "bonusPassives": 0}` on the same character-detail
+      response. Neither ninja number matches the other: `passiveSelection`
+      (109) isn't even equal to `passiveCounts.passives` (122) in the same
+      payload, and PoB's node count (155) exceeds the full official total
+      (122+8+1=131) by 24 more -- likely cluster-jewel/timeless-jewel-
+      generated or mastery-effect node IDs PoB's tree-state resolution
+      pulls in, not confirmable further without real GGG tree data. Tested
+      (not assumed) whether the builds-search "keypassive"/"skilltrait"
+      dictionaries could resolve `passiveSelection`'s node IDs: **no** --
+      proven with ground truth (the character's real keystone "Dance with
+      Death" resolves correctly through the *search* endpoint's own
+      "keypassives" column + its own small ordinal dictionary, index 59 of
+      264, but that dictionary's indices are poe.ninja's own internal
+      enumeration, a completely different ID space from `passiveSelection`/
+      PoB's real GGG tree node IDs in the thousands-to-hundred-thousands
+      range). Conclusion: two viable paths, not one --
+      - **Path A** (chosen for this phase): the builds-search "keypassives"
+        column, zero extra requests (already resolved onto `CharacterRef`
+        in `ninja_builds.py`). Notable/keystone tier only, ~260-330 names.
+      - **Path B** (deferred, real future work if small nodes are wanted):
+        `passiveSelection`'s real GGG node IDs, needs external tree data
+        (~1000+ node ID -> name pairs) this project doesn't have yet --
+        comparable in scope to RePoE for skill gems.
+
+      **Path A shipped**: `CharacterRef.keypassives` (new field, resolved
+      in `ninja_builds.py` exactly like `main_skill` already was, from the
+      same search response -- `_resolve_multi_dict_column` generalizes
+      `_main_skill` to return every index, not just the first). New
+      `aggregate_keypassives_by_skill` (aggregator.py) counts per
+      `(main_skill, level_bracket, archetype, keypassive)` -- same shape as
+      `skill_mod_counts` minus `slot` (passives aren't slot-specific) --
+      using `get_detail` only for level/skill/archetype (already being
+      fetched for the existing skill dimension; the keypassives themselves
+      cost nothing extra). New `keypassive_counts` SQLite table (kept
+      forever, same policy as `mod_counts`/`skill_mod_counts`). Published
+      to the archive's now-real `passives` field (8.8) and a new
+      `{game}/passives/latest.json` (8.9), both explicit in-file that this
+      is notable/keystone-only, never the full tree, so this doesn't get
+      mistaken for more than it is later.
+
+      Also stored (per project owner's request, near-zero marginal cost):
+      `passiveSelection` verbatim in a new `char_items.
+      passive_selection_json` column (`CharacterDetail.passive_selection`,
+      captured in `ninja_chars.py` alongside `main_skill`) -- unresolved,
+      unused by anything yet, purely so a future Path B has real historical
+      data instead of starting the clock over, same reasoning as why
+      `main_skill` itself was added ahead of skill-meta phase 2.
+
+      15 new tests across `test_ninja_builds.py` (incl. a ground-truth test
+      pinning the "Dance with Death" index-59 resolution so this doesn't
+      regress silently), `test_ninja_chars.py`, `test_local_db.py`,
+      `test_aggregator.py`, `test_archive_export.py`. 400/400 project-wide
+      passing.

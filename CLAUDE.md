@@ -254,6 +254,22 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   failing, curl/fetch the exact failing URL for real before writing any
   "probably X" explanation into SPEC.md or a commit message, even when a
   benign-sounding explanation is sitting right there in the error text.
+- **poe.ninja's builds-search response has (at least) two incompatible
+  "which passive is this" ID spaces — never resolve one dictionary against
+  the other's indices** (learned 2026-09-17, skill-meta phase 3
+  investigation): the search response's own "keypassives" column resolves
+  through its own small ordinal dictionary (poe.ninja's internal
+  enumeration, ~260-330 entries, index e.g. `59`) — completely different
+  numbers from `passiveSelection` (character-detail endpoint) or Path of
+  Building's own tree `nodes` list, both of which use the *real* GGG
+  passive-tree node IDs (thousands to hundred-thousands range, e.g.
+  `65091`). Proven with ground truth, not assumed: a character's real
+  keystone "Dance with Death" resolves correctly as `keypassive_dict[59]`
+  through the search endpoint's own data — but index `59` means nothing
+  against `passiveSelection`'s ID space. If a future phase needs to resolve
+  `passiveSelection`'s node IDs to names (skill-meta "path B", full tree
+  including small nodes), it needs real external GGG tree data — poe.ninja
+  never exposes a dictionary for that ID space anywhere in this schema.
 
 ## Layout
 
