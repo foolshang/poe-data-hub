@@ -112,6 +112,33 @@ CREATE TABLE IF NOT EXISTS skill_mod_counts (
 CREATE INDEX IF NOT EXISTS idx_skill_mod_counts_snapshot ON skill_mod_counts(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_skill_mod_counts_lookup
     ON skill_mod_counts(game, slot, main_skill, level_bracket);
+
+-- Skill-meta phase 3, path A: notable/keystone passives only (poe.ninja's
+-- builds-search "keypassives" column + dictionary -- confirmed live
+-- 2026-09-17 this is a ~260-330-entry enumeration, NOT the full passive
+-- tree's small stat nodes; see ninja_builds.py's module docstring and
+-- CLAUDE.md). Same shape as skill_mod_counts minus `slot` (passives aren't
+-- slot-specific) with `keypassive` in place of `stat_id`/`mod_kind`, kept
+-- forever for the same reason mod_counts/skill_mod_counts are. `archetype`
+-- is denormalized for the same 4-tier-fallback reason as skill_mod_counts.
+CREATE TABLE IF NOT EXISTS keypassive_counts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+    game TEXT NOT NULL,
+    main_skill TEXT NOT NULL,
+    level_bracket TEXT NOT NULL,
+    archetype TEXT NOT NULL,
+    keypassive TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    population INTEGER NOT NULL,
+    usage_pct REAL NOT NULL,
+    rank_in_bracket INTEGER NOT NULL,
+    days_since_league_start INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_keypassive_counts_snapshot ON keypassive_counts(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_keypassive_counts_lookup
+    ON keypassive_counts(game, main_skill, level_bracket);
 """
 
 
@@ -141,6 +168,13 @@ class LocalDb:
         char_items_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(char_items)")}
         if "main_skill" not in char_items_cols:
             self._conn.execute("ALTER TABLE char_items ADD COLUMN main_skill TEXT")
+
+        # Skill-meta phase 3, path A: raw passiveSelection (real GGG tree
+        # node IDs) stored verbatim starting now, same "can't retroactively
+        # recover pre-migration rows" situation as main_skill above -- rows
+        # inserted before this column exists backfill to NULL, not a guess.
+        if "passive_selection_json" not in char_items_cols:
+            self._conn.execute("ALTER TABLE char_items ADD COLUMN passive_selection_json TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -184,14 +218,18 @@ class LocalDb:
         archetype: str,
         items_raw: Any,
         main_skill: Optional[str] = None,
+        passive_selection: Optional[list[int]] = None,
     ) -> None:
         self._conn.execute(
             """INSERT INTO char_items
-               (snapshot_id, account, name, level, class, archetype, items_json, main_skill, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (snapshot_id, account, name, level, class, archetype, items_json, main_skill,
+                passive_selection_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_id, account, name, level, char_class, archetype,
-                json.dumps(items_raw, ensure_ascii=False), main_skill, _now_iso(),
+                json.dumps(items_raw, ensure_ascii=False), main_skill,
+                json.dumps(list(passive_selection), ensure_ascii=False) if passive_selection is not None else None,
+                _now_iso(),
             ),
         )
 
@@ -229,6 +267,38 @@ class LocalDb:
             "SELECT days_since_league_start FROM snapshots WHERE id = ?", (snapshot_id,)
         ).fetchone()
         return row[0] if row else None
+
+    def insert_keypassive_counts(
+        self, snapshot_id: int, game: str, days_since_league_start: Optional[int], rows: list[dict[str, Any]],
+    ) -> None:
+        self._conn.executemany(
+            """INSERT INTO keypassive_counts
+               (snapshot_id, game, main_skill, level_bracket, archetype, keypassive,
+                count, population, usage_pct, rank_in_bracket, days_since_league_start, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    snapshot_id, game, r["main_skill"], r["level_bracket"], r["archetype"], r["keypassive"],
+                    r["count"], r["population"], r["usage_pct"], r["rank_in_bracket"], days_since_league_start,
+                    _now_iso(),
+                )
+                for r in rows
+            ],
+        )
+        self._conn.commit()
+
+    def iter_keypassive_counts_for_league(self, game: str, league: str) -> list[tuple]:
+        """Every keypassive_counts row ever recorded for (game, league),
+        joined to its snapshot's days_since_league_start -- used by
+        src/processing/archive_export.py, same pattern as
+        iter_skill_mod_counts_for_league."""
+        return self._conn.execute(
+            """SELECT kpc.main_skill, kpc.level_bracket, kpc.archetype, kpc.keypassive,
+                      kpc.count, kpc.population, kpc.snapshot_id, kpc.days_since_league_start
+               FROM keypassive_counts kpc JOIN snapshots s ON s.id = kpc.snapshot_id
+               WHERE s.game = ? AND s.league = ?""",
+            (game, league),
+        ).fetchall()
 
     def query_skill_mod_counts(
         self,

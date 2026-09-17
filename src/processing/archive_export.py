@@ -29,9 +29,17 @@ therefore carry only `count`/`value_min`/`value_max`, deliberately no
 `usage_pct` -- computing one by summing counts across snapshots with no
 matching population would look precise while being wrong.
 
-`passives` is always `null` for now -- skill-meta phase 3 (passive tree)
-hasn't shipped yet. The field exists so phase 3 only has to fill it in,
-not bump schema_version.
+`passives` (skill-meta phase 3, path A, shipped 2026-09-17): notable/keystone
+passives only, from `keypassive_counts` (same population-dedup treatment as
+`skill_mod_counts`, `archetype` dropped as an archive dimension for the same
+reason). **Not the full passive tree** -- poe.ninja's own "keypassives"
+dictionary only covers notable/keystone-tier passives (confirmed live,
+~260-330 entries), not the ~1000+ small stat nodes; see
+`src/fetchers/ninja_builds.py`'s module docstring and CLAUDE.md for why a
+full-tree "path B" would need real GGG tree data this project doesn't have
+yet. For a league with no keypassive_counts rows at all (never reprocessed
+under phase 3, or genuinely empty), this is `{}`, not `null` -- `null` only
+ever meant "phase 3 doesn't exist yet", which is no longer true.
 """
 from __future__ import annotations
 
@@ -121,9 +129,38 @@ def _build_mod_archive(rows: list[tuple]) -> dict[str, Any]:
     return out
 
 
+def _build_passive_archive(rows: list[tuple]) -> dict[str, Any]:
+    seen_groups: set[tuple] = set()
+    population_by_key: dict[tuple, int] = defaultdict(int)
+    kp_by_key: dict[tuple, dict[str, dict[str, Any]]] = {}
+
+    for skill, bracket, archetype, keypassive, count, population, snapshot_id, days in rows:
+        bucket = _age_bucket(days)
+        key = (skill, bracket, bucket)
+        group_key = (snapshot_id, skill, bracket, archetype)
+        if group_key not in seen_groups:
+            seen_groups.add(group_key)
+            population_by_key[key] += population
+        entry = kp_by_key.setdefault(key, {}).setdefault(
+            keypassive, {"keypassive": keypassive, "count": 0},
+        )
+        entry["count"] += count
+
+    out: dict[str, Any] = {}
+    for (skill, bracket, bucket), kp_map in kp_by_key.items():
+        population = population_by_key[(skill, bracket, bucket)]
+        kp_rows = sorted(kp_map.values(), key=lambda r: r["count"], reverse=True)
+        for r in kp_rows:
+            r["population"] = population
+            r["usage_pct"] = round(r["count"] / population * 100, 2) if population else 0.0
+        out.setdefault(skill, {}).setdefault(bracket, {})[bucket] = kp_rows
+    return out
+
+
 def build_league_archive(db: LocalDb, game: str, league: str) -> dict[str, Any]:
     skill_rows = db.iter_skill_mod_counts_for_league(game, league)
     mod_rows = db.iter_mod_counts_for_league(game, league)
+    passive_rows = db.iter_keypassive_counts_for_league(game, league)
     return {
         "schema_version": SCHEMA_VERSION,
         "game": game,
@@ -133,7 +170,7 @@ def build_league_archive(db: LocalDb, game: str, league: str) -> dict[str, Any]:
         "age_buckets": ["1-21", "22-60", "61+", "unknown"],
         "mod_counts": _build_mod_archive(mod_rows),
         "skill_mod_counts": _build_skill_mod_archive(skill_rows),
-        "passives": None,
+        "passives": _build_passive_archive(passive_rows),
     }
 
 

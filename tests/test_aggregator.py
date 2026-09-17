@@ -10,6 +10,7 @@ from src.fetchers.ninja_chars import CharacterDetail, ItemDetail, ItemMods
 from src.processing.aggregator import (
     aggregate_jewels,
     aggregate_jewels_by_skill,
+    aggregate_keypassives_by_skill,
     aggregate_slot,
     aggregate_slot_by_skill,
     bracket_for_level,
@@ -301,6 +302,59 @@ def test_compute_skill_bracket_population(normalizer, archetyper, skill_normaliz
 
     pop = compute_skill_bracket_population(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, LEVEL_BRACKETS)
     assert pop == {("Fireball", "90-100"): 2, ("Fireball", "28-65"): 1}
+
+
+def test_aggregate_keypassives_by_skill_counts_per_character(normalizer, archetyper, skill_normalizer):
+    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
+    char_b = CharacterDetail(account="b", name="B", level=96, char_class="X", main_skill="Fireball", items=[])
+    refs = [
+        CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball", keypassives=("Dance with Death",)),
+        CharacterRef(name="B", account="b", level=96, char_class="X", main_skill="Fireball", keypassives=("Dance with Death", "Ancestral Bond")),
+    ]
+    lookup = {("a", "A"): char_a, ("b", "B"): char_b}
+
+    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
+
+    by_kp = {r.keypassive: r for r in results}
+    assert by_kp["Dance with Death"].count == 2
+    assert by_kp["Dance with Death"].population == 2
+    assert by_kp["Dance with Death"].usage_pct == 100.0
+    assert by_kp["Ancestral Bond"].count == 1
+    assert by_kp["Ancestral Bond"].usage_pct == 50.0
+    assert all(r.main_skill == "Fireball" and r.level_bracket == "90-100" for r in results)
+
+
+def test_aggregate_keypassives_by_skill_dedupes_repeated_keypassive_per_character(normalizer, archetyper, skill_normalizer):
+    """A character listing the same keypassive twice (shouldn't happen, but
+    defensively) must count once, same rule as a stat_id on regular slots."""
+    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
+    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball", keypassives=("Dance with Death", "Dance with Death"))]
+    lookup = {("a", "A"): char_a}
+
+    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
+
+    assert len(results) == 1
+    assert results[0].count == 1
+
+
+def test_aggregate_keypassives_by_skill_skips_characters_below_first_bracket(normalizer, archetyper, skill_normalizer):
+    char_a = CharacterDetail(account="a", name="A", level=10, char_class="X", main_skill="Fireball", items=[])
+    refs = [CharacterRef(name="A", account="a", level=10, char_class="X", main_skill="Fireball", keypassives=("Dance with Death",))]
+    lookup = {("a", "A"): char_a}
+
+    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
+
+    assert results == []
+
+
+def test_aggregate_keypassives_by_skill_no_keypassives_produces_no_rows(normalizer, archetyper, skill_normalizer):
+    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
+    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball")]  # keypassives defaults to ()
+    lookup = {("a", "A"): char_a}
+
+    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
+
+    assert results == []
 
 
 def test_reprocess_chars_to_skill_mod_counts_matches_live_aggregation(normalizer, archetyper, skill_normalizer):

@@ -351,6 +351,72 @@ def compute_skill_bracket_population(
     return dict(counts)
 
 
+@dataclass(frozen=True)
+class KeypassiveCount:
+    main_skill: str
+    level_bracket: str
+    archetype: str
+    keypassive: str
+    count: int
+    population: int
+    usage_pct: float
+    rank_in_bracket: int = 0
+
+
+def aggregate_keypassives_by_skill(
+    unique_char_refs: list[CharacterRef],
+    get_detail: GetDetail,
+    skill_normalizer: SkillNormalizer,
+    archetyper: Archetyper,
+    level_brackets: list[LevelBracket],
+) -> list[KeypassiveCount]:
+    """Skill-meta phase 3, path A: notable/keystone passives only, from
+    `CharacterRef.keypassives` -- already resolved in ninja_builds.py
+    straight from the builds-search response's own "keypassives" column +
+    dictionary, so this needs zero extra requests (`get_detail` is only
+    used here for level/main_skill/archetype, all already being fetched
+    for the existing skill dimension). Deliberately NOT the full passive
+    tree -- poe.ninja's own dictionary only covers notable/keystone-tier
+    passives (~260-330 entries), confirmed live 2026-09-17; see
+    CLAUDE.md/SPEC.md. Counted per character (like a regular slot's mods),
+    keyed by (main_skill, level_bracket, archetype) -- the same dimension
+    as skill_mod_counts minus `slot` (passives aren't slot-specific), so
+    the two can be joined/queried the same way. `archetype` denormalized
+    for the same reason as skill_mod_counts (see aggregate_slot_by_skill)."""
+    denom: dict[tuple[str, str, str], int] = defaultdict(int)
+    counters: dict[tuple[str, str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for ref in unique_char_refs:
+        detail = get_detail(ref.account, ref.name)
+        if detail is None:
+            continue
+        bracket = bracket_for_level(detail.level, level_brackets)
+        if bracket is None:
+            continue
+        skill = skill_normalizer.normalize(detail.main_skill)
+        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
+        key = (skill, bracket, archetype)
+        denom[key] += 1
+        for kp in set(ref.keypassives):
+            counters[key][kp] += 1
+
+    results: list[KeypassiveCount] = []
+    for key, kp_counts in counters.items():
+        skill, bracket, archetype = key
+        population = denom[key]
+        if population == 0:
+            continue
+        ranked = sorted(kp_counts.items(), key=lambda kv: kv[1], reverse=True)
+        for rank, (kp, count) in enumerate(ranked, start=1):
+            results.append(KeypassiveCount(
+                main_skill=skill, level_bracket=bracket, archetype=archetype, keypassive=kp,
+                count=count, population=population,
+                usage_pct=round(count / population * 100, 2) if population else 0.0,
+                rank_in_bracket=rank,
+            ))
+    return results
+
+
 def reprocess_chars_to_skill_mod_counts(
     chars: list[tuple[Optional[str], int, list[ItemDetail]]],
     normalizer: ModNormalizer,

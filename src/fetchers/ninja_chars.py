@@ -122,6 +122,16 @@ class CharacterDetail:
     char_class: str
     main_skill: Optional[str]
     items: list[ItemDetail]
+    # Raw GGG passive-tree node IDs (real tree numbering, NOT poe.ninja's own
+    # small ordinal dictionaries like the builds-search endpoint's
+    # "keypassives" column -- see ninja_builds.py's module docstring/
+    # CLAUDE.md for why those two are incompatible ID spaces). Stored
+    # verbatim in char_items (skill-meta phase 3, path A) at near-zero
+    # marginal cost, so a future "path B" (full passive tree via real GGG
+    # tree data) has historical data to work from instead of starting the
+    # clock over. Not resolved to names anywhere yet -- no tree dataset is
+    # wired in.
+    passive_selection: tuple[int, ...] = ()
 
 
 def item_detail_from_dict(d: dict[str, Any]) -> ItemDetail:
@@ -185,6 +195,7 @@ class NinjaCharsFetcher:
                 items.append(item)
 
         main_skill = self._extract_main_skill(data.get("skills"))
+        passive_selection = tuple(int(n) for n in data.get("passiveSelection") or [])
 
         return CharacterDetail(
             account=data["account"],
@@ -193,6 +204,7 @@ class NinjaCharsFetcher:
             char_class=data["class"],
             main_skill=main_skill,
             items=items,
+            passive_selection=passive_selection,
         )
 
     def _parse_item(self, raw_item: dict[str, Any]) -> Optional[ItemDetail]:

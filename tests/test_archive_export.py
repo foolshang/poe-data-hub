@@ -41,7 +41,7 @@ def test_build_league_archive_basic_shape(tmp_path):
     assert archive["league"] == "L"
     assert archive["league_slug"] == "l"
     assert archive["age_buckets"] == ["1-21", "22-60", "61+", "unknown"]
-    assert archive["passives"] is None
+    assert archive["passives"] == {}  # no keypassive_counts rows inserted in this test
     assert archive["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["1-21"] == [
         {"stat_id": "explicit.stat_life", "mod_kind": "explicit", "count": 8,
          "value_min": 40.0, "value_max": 115.0, "population": 10, "usage_pct": 80.0}
@@ -142,6 +142,54 @@ def test_does_not_leak_other_games_or_leagues(tmp_path):
     db.close()
 
     assert list(archive["skill_mod_counts"].keys()) == ["ring"]
+
+
+def _keypassive_row(**overrides):
+    row = {
+        "main_skill": "Fireball", "level_bracket": "90-100", "archetype": "spell-fire",
+        "keypassive": "Dance with Death", "count": 8, "population": 10, "usage_pct": 80.0, "rank_in_bracket": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_passive_archive_basic_shape(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap_id = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_keypassive_counts(snap_id, "poe2", 5, [_keypassive_row()])
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    assert archive["passives"]["Fireball"]["90-100"]["1-21"] == [
+        {"keypassive": "Dance with Death", "count": 8, "population": 10, "usage_pct": 80.0}
+    ]
+
+
+def test_passive_archive_sums_counts_and_dedupes_population_across_snapshots(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap1 = db.insert_snapshot(game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    snap2 = db.insert_snapshot(game="poe2", league="L", days_since_league_start=10, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_keypassive_counts(snap1, "poe2", 3, [_keypassive_row(count=8, population=10)])
+    db.insert_keypassive_counts(snap2, "poe2", 10, [_keypassive_row(count=4, population=6)])
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    row = archive["passives"]["Fireball"]["90-100"]["1-21"][0]
+    assert row["count"] == 12
+    assert row["population"] == 16
+    assert row["usage_pct"] == round(12 / 16 * 100, 2)
+
+
+def test_passive_archive_no_data_is_empty_dict_not_null(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    assert archive["passives"] == {}
 
 
 def test_export_league_archive_writes_file_and_reports_size(tmp_path):

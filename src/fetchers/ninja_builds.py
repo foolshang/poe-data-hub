@@ -222,6 +222,7 @@ class CharacterRef:
     level: int
     char_class: str
     main_skill: Optional[str]
+    keypassives: tuple[str, ...] = ()
 
 
 @dataclass
@@ -446,6 +447,11 @@ class NinjaBuildsFetcher:
         if skills_col is not None and skills_col.dict_name:
             gem_dict = self._get_dictionary(skills_col.dict_name, dict_refs.get(skills_col.dict_name))
 
+        keypassives_col = columns.get("keypassives")
+        keypassive_dict: list[str] = []
+        if keypassives_col is not None and keypassives_col.dict_name:
+            keypassive_dict = self._get_dictionary(keypassives_col.dict_name, dict_refs.get(keypassives_col.dict_name))
+
         names = columns["name"].strings or []
         accounts = columns["account"].strings or []
         levels = columns["level"].single_values or []
@@ -460,10 +466,14 @@ class NinjaBuildsFetcher:
                 class_idx = int(classes[i])
                 char_class = class_dict[class_idx] if 0 <= class_idx < len(class_dict) else "Unknown"
                 main_skill = self._main_skill(skills_col, i, gem_dict)
+                keypassives = self._resolve_multi_dict_column(keypassives_col, i, keypassive_dict)
             except (IndexError, ValueError) as e:
                 log.warning("ninja_builds: skip malformed row %d: %s", i, e)
                 continue
-            out.append(CharacterRef(name=name, account=account, level=level, char_class=char_class, main_skill=main_skill))
+            out.append(CharacterRef(
+                name=name, account=account, level=level, char_class=char_class,
+                main_skill=main_skill, keypassives=keypassives,
+            ))
         return out
 
     @staticmethod
@@ -481,6 +491,24 @@ class NinjaBuildsFetcher:
             return None
         idx = indices[0]
         return gem_dict[idx] if 0 <= idx < len(gem_dict) else None
+
+    @staticmethod
+    def _resolve_multi_dict_column(col: Optional["_ValueColumn"], i: int, value_dict: list[str]) -> tuple[str, ...]:
+        """Resolves every index in a per-character multi-value dictionary
+        column (e.g. "keypassives") to names, not just the first -- unlike
+        `_main_skill`, which only ever wants the primary one. Used for
+        skill-meta phase 3 (notable/keystone passives): confirmed live
+        2026-09-17 that this "keypassives" column/dictionary is a
+        notable/keystone-only enumeration (poe.ninja's own internal ordinal
+        index, ~260 entries for PoE2) -- it does NOT cover the full passive
+        tree's small stat nodes, and its indices are a completely different
+        ID space from the character-detail endpoint's `passiveSelection`
+        (real GGG tree node IDs) -- never mix the two up. See CLAUDE.md."""
+        if col is None or not col.per_char_values or not value_dict:
+            return ()
+        if i >= len(col.per_char_values):
+            return ()
+        return tuple(value_dict[idx] for idx in col.per_char_values[i] if 0 <= idx < len(value_dict))
 
     def _get_dictionary(self, name: str, hash_: Optional[str]) -> list[str]:
         if not hash_:

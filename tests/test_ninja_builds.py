@@ -23,10 +23,12 @@ SEARCH_RESPONSE_PATH = SAMPLES / "ninja_poe2_builds_search_2026-09-16.bin"
 INDEX_STATE_PATH = SAMPLES / "ninja_poe2_index_state_2026-09-16.json"
 CLASS_DICT_HASH = "57ae44d678bf18b690ba390205e346428fc51e72"
 GEM_DICT_HASH = "82cc7dced089486135a9489463036480a12ac6ad"
+KEYPASSIVE_DICT_HASH = "24321f73c6ad38c633e592e749b230d11cf24c8d"
 
 DICT_FILES = {
     CLASS_DICT_HASH: SAMPLES / "ninja_poe2_dict_class_2026-09-16.bin",
     GEM_DICT_HASH: SAMPLES / "ninja_poe2_dict_gem_2026-09-16.bin",
+    KEYPASSIVE_DICT_HASH: SAMPLES / "ninja_poe2_dict_keypassive_2026-09-16.bin",
 }
 
 
@@ -57,6 +59,7 @@ def fetcher(tmp_path):
             "builds/0336-20260916-24709/search": SEARCH_RESPONSE_PATH,
             f"builds/dictionary/{CLASS_DICT_HASH}": DICT_FILES[CLASS_DICT_HASH],
             f"builds/dictionary/{GEM_DICT_HASH}": DICT_FILES[GEM_DICT_HASH],
+            f"builds/dictionary/{KEYPASSIVE_DICT_HASH}": DICT_FILES[KEYPASSIVE_DICT_HASH],
         },
     )
     return NinjaBuildsFetcher(
@@ -99,7 +102,22 @@ def test_fetch_slot_extracts_known_characters(fetcher: NinjaBuildsFetcher):
     assert first.account == "heygyus-0416"
     assert first.level == 100
     assert first.char_class == "Martial Artist"
+    assert first.keypassives == ("Dance with Death",)
     assert first.main_skill == "Hollow Focus"
+
+
+def test_keypassives_use_the_search_endpoints_own_dictionary_not_ggg_node_ids(fetcher: NinjaBuildsFetcher):
+    """Ground-truth check (2026-09-17): "keypassives" is poe.ninja's own
+    small ordinal dictionary (~260 entries for PoE2), resolving to
+    notable/keystone *names* directly -- NOT the real GGG passive-tree node
+    IDs the character-detail endpoint's `passiveSelection` uses (in the
+    thousands/hundred-thousands range). Confirmed against a known keystone:
+    ResurrectGodAura's real keystone is "Dance with Death" (from a separate
+    character-detail fetch), and this resolves correctly through the
+    search-response's own keypassives column + dictionary alone."""
+    snap = fetcher.resolve_snapshot("Runes of Aldur")
+    chars = fetcher.fetch_slot(snap, "ring")
+    assert chars[0].keypassives == ("Dance with Death",)
 
 
 def test_fetch_slot_saves_last_good_sample(fetcher: NinjaBuildsFetcher, tmp_path):
@@ -260,6 +278,7 @@ POE1_INDEX_STATE_PATH = SAMPLES / "ninja_poe1_index_state_2026-09-16.json"
 POE1_SEARCH_RESPONSE_PATH = SAMPLES / "ninja_poe1_builds_search_2026-09-16.bin"
 POE1_CLASS_DICT_HASH = "1f8a7450649b94a3e6895acbd056902cad1bd353"
 POE1_GEM_DICT_HASH = "0afdf1bad8cbab5592544c9314e5312737327528"
+POE1_KEYPASSIVE_DICT_HASH = "7162e06cf115a2a0b99da789f8c82a4e21a6098f"
 
 
 @pytest.fixture
@@ -271,6 +290,7 @@ def poe1_fetcher(tmp_path):
             "builds/0346-20260916-12666/search": POE1_SEARCH_RESPONSE_PATH,
             f"builds/dictionary/{POE1_CLASS_DICT_HASH}": SAMPLES / "ninja_poe1_dict_class_2026-09-16.bin",
             f"builds/dictionary/{POE1_GEM_DICT_HASH}": SAMPLES / "ninja_poe1_dict_gem_2026-09-16.bin",
+            f"builds/dictionary/{POE1_KEYPASSIVE_DICT_HASH}": SAMPLES / "ninja_poe1_dict_keypassive_2026-09-16.bin",
         },
     )
     return NinjaBuildsFetcher(

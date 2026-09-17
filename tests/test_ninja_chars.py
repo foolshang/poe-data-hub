@@ -70,6 +70,25 @@ def test_fetch_character_basic_fields(fetcher: NinjaCharsFetcher):
     assert detail.main_skill == "Hollow Focus"
 
 
+def test_fetch_character_captures_raw_passive_selection(fetcher: NinjaCharsFetcher):
+    """Skill-meta phase 3, path A: stored verbatim in char_items even though
+    nothing resolves these real GGG node IDs to names yet (no tree dataset
+    wired in) -- so a future full-tree phase has historical data to work
+    from instead of starting the clock over."""
+    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    assert len(detail.passive_selection) == 109
+    assert 331 in detail.passive_selection
+    assert all(isinstance(n, int) for n in detail.passive_selection)
+
+
+def test_fetch_character_passive_selection_defaults_to_empty_when_absent(tmp_path):
+    payload = {"account": "a", "name": "n", "level": 1, "class": "c", "items": []}
+    http = _FakeHttpClient(payload)
+    fetcher = NinjaCharsFetcher(http_client=http, failed_responses_dir=tmp_path / "failed")
+    detail = fetcher.fetch_character(SNAPSHOT, "a", "n")
+    assert detail.passive_selection == ()
+
+
 def test_fetch_character_ring_item_mods(fetcher: NinjaCharsFetcher):
     detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
     ring_items = [i for i in detail.items if i.slot == "ring"]

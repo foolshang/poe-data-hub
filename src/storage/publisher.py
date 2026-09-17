@@ -243,6 +243,28 @@ def build_meta_schema(
     }
 
 
+def build_passives_schema(
+    league: str,
+    days_since_league_start: Optional[int],
+    passives: list[dict[str, Any]],
+    min_population: int = 20,
+) -> dict[str, Any]:
+    """Build `{game}/passives/latest.json` (skill-meta phase 3, path A).
+    Notable/keystone passives only, from poe.ninja's builds-search
+    "keypassives" column -- NOT the full passive tree, see
+    src/fetchers/ninja_builds.py's module docstring and CLAUDE.md for why.
+    Rows below `min_population` are dropped, same noise-cutting rule as
+    `build_meta_schema`'s mod count filter."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "league": league,
+        "days_since_league_start": days_since_league_start,
+        "source": "keypassives (notable/keystone tier only, not the full passive tree)",
+        "passives": [p for p in passives if p["population"] >= min_population],
+    }
+
+
 class PricesPublisher:
     def __init__(
         self,

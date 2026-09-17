@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -117,6 +118,46 @@ def test_insert_char_item_with_main_skill(tmp_path):
     db.close()
 
 
+def test_insert_char_item_with_passive_selection(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap_id = db.insert_snapshot(game="poe2", league="L", days_since_league_start=1, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_char_item(snap_id, "acc", "Char", 92, "Titan", "attack-melee", {"items": []}, passive_selection=[331, 535, 2560])
+    row = db._conn.execute("SELECT passive_selection_json FROM char_items WHERE snapshot_id=?", (snap_id,)).fetchone()
+    assert json.loads(row[0]) == [331, 535, 2560]
+    db.close()
+
+
+def test_insert_char_item_without_passive_selection_stores_null(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap_id = db.insert_snapshot(game="poe2", league="L", days_since_league_start=1, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_char_item(snap_id, "acc", "Char", 92, "Titan", "attack-melee", {"items": []})
+    row = db._conn.execute("SELECT passive_selection_json FROM char_items WHERE snapshot_id=?", (snap_id,)).fetchone()
+    assert row == (None,)
+    db.close()
+
+
+def test_migration_adds_passive_selection_column_defaulting_to_null(tmp_path):
+    """Same situation as main_skill's migration above: a pre-phase-3
+    database has no passive_selection_json column at all -- existing rows
+    backfill to NULL, that data is genuinely unrecoverable for them."""
+    db_path = tmp_path / "legacy2.sqlite3"
+    db = LocalDb(db_path)
+    db.close()
+    conn = sqlite3.connect(db_path)
+    conn.execute("ALTER TABLE char_items DROP COLUMN passive_selection_json")
+    conn.execute(
+        "INSERT INTO char_items (snapshot_id, account, name, level, class, archetype, items_json, created_at) "
+        "VALUES (1, 'acc', 'Old', 90, 'Titan', 'attack-melee', '{}', '2026-07-01T00:00:00Z')"
+    )
+    conn.commit()
+    conn.close()
+
+    db2 = LocalDb(db_path)
+    row = db2._conn.execute("SELECT passive_selection_json FROM char_items WHERE name='Old'").fetchone()
+    assert row == (None,)
+    db2.close()
+
+
 def _skill_row(**overrides):
     row = {
         "slot": "ring", "main_skill": "Fireball", "level_bracket": "90-100", "archetype": "spell-fire",
@@ -232,4 +273,38 @@ def test_cleanup_old_char_items_respects_retention(tmp_path):
     assert deleted == 1
     remaining = db._conn.execute("SELECT name FROM char_items").fetchall()
     assert remaining == [("New",)]
+    db.close()
+
+
+def _keypassive_row(**overrides):
+    row = {
+        "main_skill": "Fireball", "level_bracket": "90-100", "archetype": "spell-fire",
+        "keypassive": "Dance with Death", "count": 8, "population": 10, "usage_pct": 80.0, "rank_in_bracket": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_insert_and_iter_keypassive_counts_for_league(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap_id = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_keypassive_counts(snap_id, "poe2", 5, [_keypassive_row()])
+
+    rows = db.iter_keypassive_counts_for_league("poe2", "L")
+    assert rows == [("Fireball", "90-100", "spell-fire", "Dance with Death", 8, 10, snap_id, 5)]
+    db.close()
+
+
+def test_iter_keypassive_counts_does_not_leak_other_leagues_or_games(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap_a = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_keypassive_counts(snap_a, "poe2", 5, [_keypassive_row()])
+    snap_b = db.insert_snapshot(game="poe2", league="Other", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_keypassive_counts(snap_b, "poe2", 5, [_keypassive_row(keypassive="Ancestral Bond")])
+    snap_c = db.insert_snapshot(game="poe1", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_keypassive_counts(snap_c, "poe1", 5, [_keypassive_row(keypassive="Acrobatics")])
+
+    rows = db.iter_keypassive_counts_for_league("poe2", "L")
+    assert len(rows) == 1
+    assert rows[0][3] == "Dance with Death"
     db.close()

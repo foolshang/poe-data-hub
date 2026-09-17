@@ -37,6 +37,7 @@ from src.fetchers.scout_prices import ScoutPricesFetcher
 from src.processing.aggregator import (
     aggregate_jewels,
     aggregate_jewels_by_skill,
+    aggregate_keypassives_by_skill,
     aggregate_slot,
     aggregate_slot_by_skill,
     compute_archetype_distribution,
@@ -54,6 +55,7 @@ from src.storage.publisher import (
     build_meta_schema,
     build_mtx_schema,
     build_news_schema,
+    build_passives_schema,
     build_prices_schema,
     sanitize_league_filename,
 )
@@ -107,6 +109,10 @@ def _meta_blob_path(game: str) -> str:
 
 def _meta_dated_blob_path(game: str, date_str: str) -> str:
     return f"{game}/meta/{date_str}.json"
+
+
+def _passives_blob_path(game: str) -> str:
+    return f"{game}/passives/latest.json"
 
 
 def _prices_blob_path(game: str) -> str:
@@ -595,6 +601,9 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     skill_bracket_population = compute_skill_bracket_population(
         list(unique_refs_by_key.values()), get_detail, skill_normalizer, level_brackets
     )
+    all_keypassive_counts = aggregate_keypassives_by_skill(
+        list(unique_refs_by_key.values()), get_detail, skill_normalizer, archetyper, level_brackets
+    )
 
     db = LocalDb()
     try:
@@ -619,10 +628,14 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
                 snapshot_id, account, name, detail.level, detail.char_class, archetype,
                 [dataclasses.asdict(i) for i in detail.items],
                 main_skill=detail.main_skill,
+                passive_selection=list(detail.passive_selection),
             )
         db.insert_mod_counts(snapshot_id, [dataclasses.asdict(m) for m in all_mod_counts])
         db.insert_skill_mod_counts(
             snapshot_id, game, days_since_league_start, [dataclasses.asdict(m) for m in all_skill_mod_counts]
+        )
+        db.insert_keypassive_counts(
+            snapshot_id, game, days_since_league_start, [dataclasses.asdict(m) for m in all_keypassive_counts]
         )
         db.commit()
     finally:
@@ -644,6 +657,19 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     publisher.publish(data, _meta_blob_path(game), cache_control="public, max-age=3600")
     publisher.publish(data, dated_path, cache_control="public, max-age=3600")
     log.info("meta job(%s): published %d mods (%d before count>=5 filter)", game, len(data["mods"]), len(all_mod_counts))
+
+    passives_data = build_passives_schema(
+        league=league,
+        days_since_league_start=days_since_league_start,
+        passives=[dataclasses.asdict(m) for m in all_keypassive_counts],
+        min_population=cfg.get("skill_meta", {}).get("min_population_publish", 20),
+    )
+    publisher.publish(passives_data, _passives_blob_path(game), cache_control="public, max-age=3600")
+    log.info(
+        "meta job(%s): published %d keypassives (%d before population>=%d filter)",
+        game, len(passives_data["passives"]), len(all_keypassive_counts),
+        cfg.get("skill_meta", {}).get("min_population_publish", 20),
+    )
 
     unmapped_pct = (
         round(normalizer.unmapped_count / normalizer.processed_count * 100, 2)
@@ -689,6 +715,7 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             "top_20_skills_by_population": top_skills,
             "thin_brackets_below_publish_threshold": thin_brackets,
             "skill_mod_counts_rows": len(all_skill_mod_counts),
+            "keypassive_counts_rows": len(all_keypassive_counts),
         },
     }
 
