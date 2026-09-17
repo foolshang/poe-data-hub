@@ -1656,3 +1656,34 @@ follow-up if poe.ninja 429s are ever observed during that window.
       tattoo/vestigialmod/pantheon/secondascendancy, PoE1-only systems).
       27 tests (`test_ninja_builds.py` rewritten, `test_ndic.py` new),
       357/357 project-wide passing.
+
+- [x] Phase 19: close the exact monitoring gap Phase 18's incident exposed --
+      both layers stayed green for the whole ~43-day breakage because
+      neither checked *content*, only that the job ran and the timestamp
+      was fresh. Layer 1 (`src/main._all_games_got_real_characters`, called
+      from `_run_meta_once_locked` before `_ping_healthcheck`): the meta
+      ping now only fires when every configured game's
+      `summary.sample_total` is nonzero *and* present (a game missing from
+      `results` entirely -- its `_run_meta_for_game` call raised -- also
+      blocks the ping, same as a present-but-zero one). Layer 2
+      (`tools/heartbeat_check.check_meta_sample_total`): reads
+      `status.meta.{game}.meta_job_summary.sample_total` from the public
+      `status.json` and fails if it's 0 or missing, independent of Layer 1
+      and of `check_meta_freshness`. Investigated first whether
+      `pathOfBuildingExport`/Path of Building export data from poe.ninja's
+      character-detail endpoint could replace the character-list source
+      entirely (project owner's ask, prompted by the Phase 18 incident) --
+      concluded C (not worth it): that endpoint is the *same* one
+      `ninja_chars.py` already calls today, its JSON already gives
+      structured mod arrays PoB's flat text would have to be re-parsed to
+      recover, and the wrapper is exactly as much poe.ninja's own surface
+      as what already broke. Two things kept from that investigation for
+      later phases: `passiveSelection` (already free in the existing
+      character-detail response) as the passive-tree data source instead of
+      PoB, pending a real check of why it disagreed with PoB's own node
+      list for the same character (109 vs 155 nodes, not a subset) before
+      trusting either; and storing `pathOfBuildingExport` verbatim
+      (compressed, as received, ~12KB/character) in `char_items` at
+      near-zero marginal cost, as a ready-made artifact for future
+      consumers -- not yet implemented. 10 new tests (`test_main.py`,
+      `test_heartbeat_check.py`), 367/367 project-wide passing.

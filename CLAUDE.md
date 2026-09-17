@@ -220,6 +220,18 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
     as a backup if healthchecks.io itself has an outage.
   - Ping/check failures in either layer must never fail the underlying job
     (Layer 1) or need secrets (Layer 2 reads public URLs only).
+  - **"Freshness" and "success" are not the same as "the data is real"**
+    (learned 2026-09-17, from the ninja_builds schema-break postmortem):
+    both layers stayed green the entire ~43-day breakage, because both only
+    checked "did the job run and publish something recently" — neither
+    checked whether the published *content* was non-empty. The meta job
+    "succeeded" and pinged every single cycle while `sample_total` was
+    silently 0. Fixed by checking the actual population count directly on
+    both layers (`src/main._all_games_got_real_characters` gates the Layer-1
+    ping; `tools/heartbeat_check.check_meta_sample_total` checks Layer 2) —
+    but the general lesson applies beyond meta: when adding a monitoring
+    check for any future job, check a content signal (a count, a nonzero
+    field) in addition to timestamp/success, not instead of it.
 - **An error message's own wording is not a diagnosis — hit the real
   endpoint yourself before writing down a root cause** (learned 2026-09-16):
   `ninja_builds`'s meta job started failing 100% of the time (every slot,
