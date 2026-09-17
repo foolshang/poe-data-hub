@@ -149,11 +149,21 @@ def export_league_archive(
     `archive/{game}-{league-slug}.json` if `publisher` is given (spec item
     22: "if it doesn't add burden" -- a publish failure is logged and
     swallowed, never fails the export itself, since the VM copy is already
-    the durable one)."""
+    the durable one).
+
+    The VM copy is written *compact* (no `indent=`), unlike every other
+    published file in this project -- measured live 2026-09-17 against the
+    real production archive (poe2 Forbidden Rites, poe1 Allflame, both
+    still early in the league): ~49% of the file was pure indentation
+    whitespace (thousands of leaf stat rows nested 4-5 dicts deep), with
+    zero data difference. `publisher.publish` (used for the Firebase copy)
+    is the shared method every other job uses and still writes indented --
+    deliberately not touched here, since that's a project-wide convention
+    affecting every published file, not an archive-specific decision."""
     data = build_league_archive(db, game, league)
     archive_dir.mkdir(parents=True, exist_ok=True)
     path = archive_dir / f"{game}-{data['league_slug']}.json"
-    text = json.dumps(data, ensure_ascii=False, indent=2)
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     path.write_text(text, encoding="utf-8")
     size_kb = len(text.encode("utf-8")) / 1024
     log.info("archive: exported %s/%s -> %s (%.1f KB)", game, league, path, size_kb)
