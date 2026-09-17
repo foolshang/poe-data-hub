@@ -1687,3 +1687,51 @@ follow-up if poe.ninja 429s are ever observed during that window.
       near-zero marginal cost, as a ready-made artifact for future
       consumers -- not yet implemented. 10 new tests (`test_main.py`,
       `test_heartbeat_check.py`), 367/367 project-wide passing.
+
+- [x] Phase 20 (skill-meta phase 5): per-league archive export
+      (`src/processing/archive_export.py`, new). One file per league --
+      `data/archive/{game}-{league-slug}.json` -- not a rough summary: reads
+      `mod_counts`/`skill_mod_counts` (kept forever, never cleaned up)
+      rather than `char_items` (90-day retention), so a league that ended
+      long ago can still be archived in full. Collapses only the *time*
+      dimension, into three age buckets (`"1-21"`, `"22-60"`, `"61+"`, plus
+      `"unknown"` for the rare snapshot where league-start detection failed
+      -- never silently dropped) -- skill/slot/level_bracket/stat_id stay
+      fully expanded, on purpose (spec item 20: answering next year's
+      not-yet-thought-of question needs the real dimensions, not a
+      pre-aggregated top-N). `mod_counts` (archetype dimension) and
+      `skill_mod_counts` (skill+bracket dimension, `archetype` deliberately
+      *not* kept as an archive dimension -- it's a fallback-tier field on
+      that table, not first-class, see local_db.py) are archived
+      separately, using the same population-dedup logic as
+      `LocalDb.query_skill_mod_counts`'s `_aggregate_rows`. `mod_counts` has
+      no `population` column at all (that denominator only ever lived in
+      the ephemeral published meta.json), so its archived rows carry
+      `count`/`value_min`/`value_max` only -- no fabricated `usage_pct`.
+      `passives` is always `null` (Phase 21 fills it in; the field exists
+      now so that phase doesn't need a schema_version bump).
+
+      Three triggers, all shipped: (1) automatic on league change --
+      `_archive_previous_league_if_changed`, called from
+      `_run_meta_for_game` right before inserting the new snapshot, compares
+      `LocalDb.most_recent_league(game)` against the just-detected league
+      and archives the old one if they differ, before any new data can land
+      on top of it; a failure here is logged loudly but never blocks the
+      meta run's own insert. (2) automatic weekly --
+      `run_archive_export_once`, a new `IntervalTrigger(weeks=1)` scheduler
+      job, re-exports whichever league is currently active per game (bounds
+      data loss from a VM dying mid-league to at most a week; idempotent
+      and cheap, no poe.ninja calls, so no healthcheck ping needed). (3)
+      manual -- `--export-league-archive game:league` (e.g. `poe1:Mirage`)
+      backfills a specific league, including one that already ended,
+      regardless of what's currently active.
+
+      Kept on the VM (`data/archive/`, git-ignored, same as `data/*.sqlite3`)
+      and best-effort copied to Firebase at `archive/{game}-{league-slug}.json`
+      (spec item 22: "if it doesn't add burden" -- a publish failure is
+      logged and swallowed, never fails the export itself, since the VM
+      copy is the durable one). Not sent to GitHub yet (item 23's size
+      numbers needed first to decide that; not yet measured against a real
+      multi-week league). 17 new tests (`test_archive_export.py` new, plus
+      `test_main.py` orchestration/scheduler-registration tests), 385/385
+      project-wide passing.
