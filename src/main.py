@@ -44,6 +44,7 @@ from src.processing.aggregator import (
     reprocess_chars_to_skill_mod_counts,
 )
 from src.processing.archetyper import Archetyper
+from src.processing.archive_export import DEFAULT_ARCHIVE_DIR, export_league_archive
 from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
 from src.storage.local_db import LocalDb
@@ -597,6 +598,8 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
 
     db = LocalDb()
     try:
+        _archive_previous_league_if_changed(db, publisher, game, league)
+
         snapshot_id = db.insert_snapshot(
             game=game,
             league=league,
@@ -890,6 +893,72 @@ def _update_meta_status(publisher: PricesPublisher, results: dict[str, dict[str,
         status["errors"] = status["errors"][-10:]
 
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+
+
+def _archive_previous_league_if_changed(
+    db: LocalDb, publisher: PricesPublisher, game: str, new_league: str, archive_dir: Path = DEFAULT_ARCHIVE_DIR,
+) -> None:
+    """Called from `_run_meta_for_game` right before inserting the new
+    snapshot: if this game's most-recently-recorded league differs from the
+    one just detected, the old league has ended -- export its final archive
+    now, while it's still trivial to find (skill-meta phase 5, item 21). A
+    failure here must never block the meta run itself inserting its own
+    data, only get logged loudly (the weekly safety-net job, or a manual
+    `--export-league-archive`, can still catch it up later)."""
+    previous_league = db.most_recent_league(game)
+    if previous_league is None or previous_league == new_league:
+        return
+    log.info("meta job(%s): league changed %r -> %r, archiving the old league", game, previous_league, new_league)
+    try:
+        export_league_archive(db, game, previous_league, archive_dir=archive_dir, publisher=publisher)
+    except Exception as e:
+        log.error("meta job(%s): league-change archive export failed for %r: %s", game, previous_league, e, exc_info=True)
+
+
+def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> dict[str, Optional[str]]:
+    """Weekly safety-net export (skill-meta phase 5, item 21): re-exports
+    whichever league is currently active for each configured game, so a VM
+    that disappears mid-league never loses more than a week of archived
+    data. Idempotent (the export overwrites the same file) and cheap -- no
+    poe.ninja calls, just reading the already-local SQLite tables. Does NOT
+    touch leagues that have already ended; those were already archived once
+    at the moment `_run_meta_for_game` detected the league change, and
+    nothing about a closed league changes afterward. Returns
+    {game: league_exported_or_None}."""
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    results: dict[str, Optional[str]] = {}
+    db = LocalDb()
+    try:
+        for game in cfg.get("game_versions", ["poe2"]):
+            league = db.most_recent_league(game)
+            if league is None:
+                log.info("archive job(%s): no snapshots recorded yet, nothing to export", game)
+                results[game] = None
+                continue
+            try:
+                export_league_archive(db, game, league, archive_dir=archive_dir, publisher=publisher)
+                results[game] = league
+            except Exception as e:
+                log.error("archive job(%s): export failed for league %r: %s", game, league, e, exc_info=True)
+                results[game] = None
+    finally:
+        db.close()
+    return results
+
+
+def run_export_league_archive(cfg: dict[str, Any], game: str, league: str, archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> Path:
+    """`--export-league-archive game:league` CLI escape hatch: export one
+    specific league now regardless of whether it's the currently-active
+    one -- e.g. backfilling an already-ended league (spec item 21's
+    "Mirage that already ended" example) retroactively."""
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    db = LocalDb()
+    try:
+        return export_league_archive(db, game, league, archive_dir=archive_dir, publisher=publisher)
+    finally:
+        db.close()
 
 
 def run_cleanup_once(cfg: dict[str, Any]) -> None:
@@ -1220,9 +1289,20 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
         id="league_start_mode_check", max_instances=1, misfire_grace_time=1800,
     )
 
+    # Weekly safety-net re-export of whatever league is currently active
+    # (skill-meta phase 5, item 21) -- a league *change* already triggers
+    # its own archive export from inside _run_meta_for_game, this just
+    # bounds how much of an in-progress league could be lost if the VM
+    # disappears mid-league to at most a week. No poe.ninja calls (reads
+    # local SQLite only), so no healthcheck ping needed here either.
+    scheduler.add_job(
+        _safe_run, IntervalTrigger(weeks=1), args=[run_archive_export_once, cfg, "archive"],
+        id="archive", max_instances=1, misfire_grace_time=3600,
+    )
+
     log.info(
         "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s: %s], cleanup daily %02d:00 ICT, "
-        "news every %dmin, gems daily %02d:00 ICT)",
+        "news every %dmin, gems daily %02d:00 ICT, archive weekly)",
         prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", per_game_detail,
         cleanup_hour, news_interval, gems_hour,
     )
@@ -1237,6 +1317,7 @@ def main() -> None:
     parser.add_argument("--run-news-once", action="store_true")
     parser.add_argument("--run-gems-once", action="store_true")
     parser.add_argument("--reprocess-char-items", action="store_true", help="Recompute skill_mod_counts from stored char_items, offline (skill-meta phase 2)")
+    parser.add_argument("--export-league-archive", metavar="GAME:LEAGUE", help="Export one league's archive now, e.g. poe1:Mirage (skill-meta phase 5)")
     parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup+news+gems)")
     args = parser.parse_args()
 
@@ -1255,6 +1336,11 @@ def main() -> None:
         run_gems_once(cfg)
     elif args.reprocess_char_items:
         run_reprocess_char_items(cfg)
+    elif args.export_league_archive:
+        game, _, league = args.export_league_archive.partition(":")
+        if not game or not league:
+            parser.error("--export-league-archive expects GAME:LEAGUE, e.g. poe1:Mirage")
+        run_export_league_archive(cfg, game, league)
     elif args.serve:
         run_scheduler(cfg)
     else:

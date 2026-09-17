@@ -14,12 +14,16 @@ from src.fetchers.league_detector import LeagueResult
 from src.main import (
     UNMAPPED_HISTORY_LEN,
     _all_games_got_real_characters,
+    _archive_previous_league_if_changed,
     _check_league_start_mode,
     _check_stats_cache_stale,
     _compute_meta_trigger,
     _ping_healthcheck,
+    _safe_run,
     _update_meta_status,
     _update_status,
+    run_archive_export_once,
+    run_export_league_archive,
     run_meta_once,
     run_prices_once,
     run_reprocess_char_items,
@@ -287,6 +291,102 @@ def test_run_meta_once_skips_ping_when_a_game_got_zero_characters(tmp_path):
         run_meta_once(cfg)
 
     mock_http.get_bytes.assert_not_called()
+
+
+# ── skill-meta phase 5: archive export orchestration ──────────────────────
+
+def test_archive_previous_league_if_changed_exports_the_old_league(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    db.insert_snapshot(game="poe2", league="Mirage", days_since_league_start=80, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+
+    _archive_previous_league_if_changed(db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive")
+    db.close()
+
+    archived = publisher.fetch_previous("archive/poe2-mirage.json")
+    assert archived is not None
+    assert archived["league"] == "Mirage"
+    assert (tmp_path / "archive" / "poe2-mirage.json").exists()
+
+
+def test_archive_previous_league_if_changed_noop_when_league_unchanged(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    db.insert_snapshot(game="poe2", league="Runes of Aldur", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+
+    _archive_previous_league_if_changed(db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive")
+    db.close()
+
+    assert publisher.fetch_previous("archive/poe2-runes-of-aldur.json") is None
+    assert not (tmp_path / "archive").exists()
+
+
+def test_archive_previous_league_if_changed_noop_on_first_ever_snapshot(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    publisher = MagicMock()
+
+    _archive_previous_league_if_changed(db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive")
+    db.close()
+
+    publisher.publish.assert_not_called()
+
+
+def test_archive_previous_league_if_changed_failure_does_not_raise(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    db.insert_snapshot(game="poe2", league="Mirage", days_since_league_start=80, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    publisher = MagicMock()
+    publisher.publish.side_effect = RuntimeError("simulated Firebase outage")
+
+    _archive_previous_league_if_changed(db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive")  # must not raise
+    db.close()
+
+
+def test_run_archive_export_once_exports_current_league_per_game(tmp_path):
+    db_path = tmp_path / "test.sqlite3"
+    db = LocalDb(db_path)
+    db.insert_snapshot(game="poe2", league="Runes of Aldur", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_snapshot(game="poe1", league="Mirage", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.close()
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2", "poe1"]}
+    archive_dir = tmp_path / "archive"
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])):
+        results = run_archive_export_once(cfg, archive_dir=archive_dir)
+
+    assert results == {"poe2": "Runes of Aldur", "poe1": "Mirage"}
+    assert (archive_dir / "poe2-runes-of-aldur.json").exists()
+    assert (archive_dir / "poe1-mirage.json").exists()
+
+
+def test_run_archive_export_once_skips_game_with_no_snapshots(tmp_path):
+    db_path = tmp_path / "empty.sqlite3"
+    LocalDb(db_path).close()
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2"]}
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])):
+        results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive")
+
+    assert results == {"poe2": None}
+
+
+def test_run_export_league_archive_exports_a_specific_league(tmp_path):
+    db_path = tmp_path / "test.sqlite3"
+    db = LocalDb(db_path)
+    db.insert_snapshot(game="poe1", league="Mirage", days_since_league_start=100, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.close()
+
+    cfg = {"firebase": {"bucket": "test-bucket"}}
+    archive_dir = tmp_path / "archive"
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])):
+        path = run_export_league_archive(cfg, "poe1", "Mirage", archive_dir=archive_dir)
+
+    assert path.name == "poe1-mirage.json"
+    assert path.exists()
 
 
 def test_update_status_keeps_other_games_untouched_on_partial_failure(tmp_path):
@@ -597,6 +697,25 @@ def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one(tmp_path):
     meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
     trigger = meta_call.args[1]
     assert isinstance(trigger, CronTrigger)
+
+
+def test_run_scheduler_registers_weekly_archive_job(tmp_path):
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1},
+    }
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
+        run_scheduler(cfg)
+
+    archive_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "archive")
+    assert archive_call.args[0] is _safe_run
+    assert isinstance(archive_call.args[1], IntervalTrigger)
+    assert archive_call.kwargs["args"][0] is run_archive_export_once
 
 
 def test_run_scheduler_switches_to_evenly_spaced_runs_for_league_start(tmp_path):

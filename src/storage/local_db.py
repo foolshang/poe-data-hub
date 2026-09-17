@@ -349,6 +349,51 @@ class LocalDb:
         ).fetchall()
         return [(r[0], r[1], r[2], r[3], json.loads(r[4])) for r in rows]
 
+    def most_recent_league(self, game: str) -> Optional[str]:
+        """The league of this game's most recently-inserted snapshot, or
+        None if this game has no snapshots yet. Used both for league-change
+        detection (compare against the league a new meta run just detected)
+        and by the weekly archive job (re-export whatever's currently
+        active, cheaply, as a safety net against losing more than a week of
+        an in-progress league if the VM disappears)."""
+        row = self._conn.execute(
+            "SELECT league FROM snapshots WHERE game = ? ORDER BY created_at DESC LIMIT 1", (game,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def iter_skill_mod_counts_for_league(self, game: str, league: str) -> list[tuple]:
+        """Every skill_mod_counts row ever recorded for (game, league),
+        joined to its snapshot's days_since_league_start -- used by
+        src/processing/archive_export.py. Reads mod_counts/skill_mod_counts
+        (kept forever) rather than char_items (90-day retention) so a
+        league that ended long ago can still be archived (spec skill-meta
+        phase 5, item 20)."""
+        return self._conn.execute(
+            """SELECT smc.slot, smc.main_skill, smc.level_bracket, smc.archetype, smc.stat_id, smc.mod_kind,
+                      smc.count, smc.population, smc.value_min, smc.value_max, smc.snapshot_id,
+                      smc.days_since_league_start
+               FROM skill_mod_counts smc JOIN snapshots s ON s.id = smc.snapshot_id
+               WHERE s.game = ? AND s.league = ?""",
+            (game, league),
+        ).fetchall()
+
+    def iter_mod_counts_for_league(self, game: str, league: str) -> list[tuple]:
+        """Every mod_counts row ever recorded for (game, league), joined to
+        its snapshot's days_since_league_start. Unlike skill_mod_counts,
+        mod_counts has no `population` column (that denominator only ever
+        lived in the ephemeral published meta.json's per_slot_sample, never
+        persisted per-row) -- archive_export.py deliberately does not
+        recompute a usage_pct for this table's archived rows, since summing
+        `count` across snapshots with no matching population would produce
+        a number that looks precise but isn't."""
+        return self._conn.execute(
+            """SELECT mc.slot, mc.archetype, mc.stat_id, mc.mod_kind, mc.count, mc.value_min, mc.value_max,
+                      s.days_since_league_start
+               FROM mod_counts mc JOIN snapshots s ON s.id = mc.snapshot_id
+               WHERE s.game = ? AND s.league = ?""",
+            (game, league),
+        ).fetchall()
+
     def insert_mod_counts(self, snapshot_id: int, rows: list[dict[str, Any]]) -> None:
         self._conn.executemany(
             """INSERT INTO mod_counts
