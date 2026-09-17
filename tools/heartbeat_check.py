@@ -39,6 +39,13 @@ there's no asymmetric-migration window here the way prices/news had: the
 first meta run under the new code populates both games' `status.meta.*` in
 one write, not two separate job schedules drifting in and out of sync.
 
+Also checks `meta.{game}.meta_job_summary.sample_total` is nonzero (added
+2026-09-17, after the ninja_builds schema-break postmortem): freshness alone
+missed that incident entirely, since the job kept publishing "successfully"
+with a fresh timestamp every cycle for ~43 days while the actual character
+count was silently 0. This check reads the population count directly rather
+than trusting a fresh timestamp to imply real content.
+
 This is deliberately a second, independent system from the
 healthchecks.io dead-man-switch pings the hub sends itself (Layer 1, see
 src/main.py's _ping_healthcheck and CLAUDE.md): Layer 1 watches "is the
@@ -130,6 +137,20 @@ def check_meta_freshness(last_meta: str, now: Optional[datetime] = None) -> Opti
     return None
 
 
+def check_meta_sample_total(meta_job_summary: Optional[dict]) -> Optional[str]:
+    """Returns a problem description if `sample_total` is 0 or missing --
+    freshness alone (check_meta_freshness) cannot catch this: the
+    2026-08-04-to-09-16 ninja_builds schema break kept `last_meta` fresh on
+    every cycle (the job published successfully every time) while the
+    actual character sample was silently empty for ~43 days. This checks
+    the population count directly instead of trusting a fresh timestamp to
+    imply real content."""
+    sample_total = (meta_job_summary or {}).get("sample_total")
+    if not sample_total:
+        return f"meta.meta_job_summary.sample_total is {sample_total!r} (expected > 0)"
+    return None
+
+
 def check_per_category_health(source: str, per_category: dict) -> Optional[str]:
     """Returns a problem description if more than half of `source`'s
     categories have "ok": False, None otherwise (including when
@@ -186,6 +207,9 @@ def run() -> int:
         meta_by_game = status["meta"]
         for game in ("poe2", "poe1"):
             problem = check_meta_freshness(meta_by_game[game]["last_meta"])
+            if problem:
+                problems.append(f"{game}: {problem}")
+            problem = check_meta_sample_total(meta_by_game[game].get("meta_job_summary"))
             if problem:
                 problems.append(f"{game}: {problem}")
     except Exception as e:

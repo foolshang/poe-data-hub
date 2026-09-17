@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from src.fetchers.league_detector import LeagueResult
 from src.main import (
     UNMAPPED_HISTORY_LEN,
+    _all_games_got_real_characters,
     _check_league_start_mode,
     _check_stats_cache_stale,
     _compute_meta_trigger,
@@ -165,7 +166,7 @@ def test_update_meta_status_keeps_other_game_untouched_when_one_fails(tmp_path):
     assert status["meta_unmapped_history"]["poe2"] == [2.0, 2.5]
 
 
-def _fake_meta_result(game: str) -> dict:
+def _fake_meta_result(game: str, sample_total: int = 10) -> dict:
     league = "Runes of Aldur" if game == "poe2" else "Mirage"
     return {
         "data": {
@@ -174,7 +175,10 @@ def _fake_meta_result(game: str) -> dict:
             "archetype_distribution": [], "stat_dictionary": [], "days_since_league_start": 5,
         },
         "end_at": None,
-        "summary": {"unmapped_mod_pct": 1.0, "stats_cache_fetched_at": 1752500000.0, "duration_seconds": 1.0},
+        "summary": {
+            "unmapped_mod_pct": 1.0, "stats_cache_fetched_at": 1752500000.0, "duration_seconds": 1.0,
+            "sample_total": sample_total,
+        },
     }
 
 
@@ -241,6 +245,48 @@ def test_run_meta_once_one_game_failure_does_not_block_the_other(tmp_path):
     status = publisher.fetch_previous("status.json")
     assert "poe2" not in status.get("meta", {})
     assert status["meta"]["poe1"]["league"] == "Mirage"
+
+
+# ── 2026-09-17: Layer-1 ping must never fire on a cycle where any
+# configured game got 0 characters -- exactly the shape the 2026-08-04
+# ninja_builds schema break took (published + pinged successfully every
+# cycle for ~43 days while the actual sample was silently empty) ─────────
+
+def test_all_games_got_real_characters_true_when_all_nonzero():
+    results = {"poe2": _fake_meta_result("poe2", sample_total=50), "poe1": _fake_meta_result("poe1", sample_total=30)}
+    assert _all_games_got_real_characters({"game_versions": ["poe2", "poe1"]}, results) is True
+
+
+def test_all_games_got_real_characters_false_when_one_game_is_zero():
+    results = {"poe2": _fake_meta_result("poe2", sample_total=50), "poe1": _fake_meta_result("poe1", sample_total=0)}
+    assert _all_games_got_real_characters({"game_versions": ["poe2", "poe1"]}, results) is False
+
+
+def test_all_games_got_real_characters_false_when_a_game_is_missing():
+    # e.g. that game's _run_meta_for_game raised and was never added to results
+    results = {"poe2": _fake_meta_result("poe2", sample_total=50)}
+    assert _all_games_got_real_characters({"game_versions": ["poe2", "poe1"]}, results) is False
+
+
+def test_run_meta_once_skips_ping_when_a_game_got_zero_characters(tmp_path):
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {"meta_ping_url": "https://hc-ping.com/test-meta"},
+    }
+
+    def fake_run_meta_for_game(http, publisher, cfg, game):
+        return _fake_meta_result(game, sample_total=0 if game == "poe1" else 50)
+
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main._run_meta_for_game", side_effect=fake_run_meta_for_game), \
+         patch("src.main.HttpClient") as MockHttpClient:
+        mock_http = MockHttpClient.return_value
+        run_meta_once(cfg)
+
+    mock_http.get_bytes.assert_not_called()
 
 
 def test_update_status_keeps_other_games_untouched_on_partial_failure(tmp_path):

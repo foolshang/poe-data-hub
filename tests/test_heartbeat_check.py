@@ -75,6 +75,28 @@ def test_check_meta_freshness_flags_when_stale():
     assert "30.0 hours old" in problem
 
 
+def test_check_meta_sample_total_ok_when_nonzero():
+    assert heartbeat_check.check_meta_sample_total({"sample_total": 42}) is None
+
+
+def test_check_meta_sample_total_flags_when_zero():
+    problem = heartbeat_check.check_meta_sample_total({"sample_total": 0})
+    assert problem is not None
+    assert "sample_total" in problem
+
+
+def test_check_meta_sample_total_flags_when_missing():
+    problem = heartbeat_check.check_meta_sample_total({})
+    assert problem is not None
+
+
+def test_check_meta_sample_total_flags_when_summary_is_none():
+    """Payloads published before this check shipped won't have
+    meta_job_summary at all -- must not crash on None."""
+    problem = heartbeat_check.check_meta_sample_total(None)
+    assert problem is not None
+
+
 def test_check_per_category_health_ok_when_all_ok():
     per_category = {"Currency": {"ok": True, "count": 5}, "Fragment": {"ok": True, "count": 2}}
     assert heartbeat_check.check_per_category_health("ninja", per_category) is None
@@ -127,12 +149,18 @@ def _index_resp(hardcore=None):
     return resp
 
 
-def _status_resp(now, poe2_age=timedelta(hours=2), poe1_age=timedelta(hours=2)):
+def _status_resp(now, poe2_age=timedelta(hours=2), poe1_age=timedelta(hours=2), poe2_sample_total=10, poe1_sample_total=10):
     resp = MagicMock()
     resp.json.return_value = {
         "meta": {
-            "poe2": {"last_meta": (now - poe2_age).strftime("%Y-%m-%dT%H:%M:%SZ")},
-            "poe1": {"last_meta": (now - poe1_age).strftime("%Y-%m-%dT%H:%M:%SZ")},
+            "poe2": {
+                "last_meta": (now - poe2_age).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "meta_job_summary": {"sample_total": poe2_sample_total},
+            },
+            "poe1": {
+                "last_meta": (now - poe1_age).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "meta_job_summary": {"sample_total": poe1_sample_total},
+            },
         }
     }
     return resp
@@ -212,6 +240,26 @@ def test_run_returns_1_when_poe2_meta_stale():
 def test_run_returns_1_when_poe1_meta_stale():
     now = datetime.now(timezone.utc)
     status_resp = _status_resp(now, poe1_age=timedelta(hours=40))
+
+    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe2_meta_sample_total_zero():
+    """2026-09-17: catches exactly the shape of the 2026-08-04 ninja_builds
+    schema break -- last_meta stays fresh (job "succeeds") every cycle while
+    the actual character sample is silently empty. Freshness alone missed
+    it for ~43 days; this reads the population count directly."""
+    now = datetime.now(timezone.utc)
+    status_resp = _status_resp(now, poe2_sample_total=0)
+
+    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe1_meta_sample_total_zero():
+    now = datetime.now(timezone.utc)
+    status_resp = _status_resp(now, poe1_sample_total=0)
 
     with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
         assert heartbeat_check.run() == 1

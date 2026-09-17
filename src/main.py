@@ -730,12 +730,33 @@ def _run_meta_once_locked(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
             except Exception as e:
                 log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
 
-        _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
+        if _all_games_got_real_characters(cfg, results):
+            _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
+        else:
+            log.warning(
+                "meta job: skipping healthcheck ping -- at least one configured game got 0 characters "
+                "or failed entirely this cycle (sample_total by game: %s)",
+                {g: r.get("summary", {}).get("sample_total") for g, r in results.items()},
+            )
         _update_meta_status(publisher, results)
 
         return {game: r["data"] for game, r in results.items()}
     finally:
         _mark_job_finished(publisher, "meta")
+
+
+def _all_games_got_real_characters(cfg: dict[str, Any], results: dict[str, dict[str, Any]]) -> bool:
+    """The Layer-1 ping must never fire on a cycle where any configured game
+    returned zero characters -- exactly the shape the 2026-08-04 ninja_builds
+    schema break took: the job "succeeded" (published, pinged) every single
+    cycle for ~43 days while the actual character sample was silently empty,
+    so freshness/ping-success alone never caught it (see CLAUDE.md). A game
+    missing from `results` entirely (its `_run_meta_for_game` call raised)
+    also fails this check, same as a present-but-empty one."""
+    configured = cfg.get("game_versions", ["poe2"])
+    if set(results) != set(configured):
+        return False
+    return all(r.get("summary", {}).get("sample_total", 0) > 0 for r in results.values())
 
 
 def _mark_job_running(publisher: PricesPublisher, job_name: str) -> None:
