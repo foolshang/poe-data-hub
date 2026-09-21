@@ -287,6 +287,35 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   unused downstream at the time; `char_items.class` comes from the
   character-detail JSON, so the live DB was never affected.
 
+- **Skill-centric collection (2026-09-21) replaced the per-slot skill
+  dimension; a character's skill is the poe.ninja list it was pulled from,
+  never a guess.** The per-slot "main skill" was the first gem of poe.ninja's
+  skill list -- not a main skill (survey: median cell = 1-2 characters, PoE1
+  98% the same characters every run, PoE2 characters carry ~6 "main skills").
+  Now: `src/processing/skill_plan.py` (which lists), `skill_counter.py`
+  (counting), `skill_collect.py` (checkpointed, resumable run),
+  `char_cache.py` (SQLite `char_details` cache shared with the legacy job);
+  full design and numbers in SPEC.md 8.10. Things that will bite:
+  - **Never read `archetype_hint` as a skill.** It is the old first-gem guess,
+    kept only so the legacy per-slot archetype bucketing (`mod_counts` ->
+    `meta/latest.json`, still consumed) keeps working. That per-slot job is a
+    temporary bridge: retire it and the archetype `meta/latest.json` once PoE
+    Checker's mod badge reads per-skill data.
+  - **`snapshots.collection_method`**: everything before 2026-09-21 is
+    `legacy_slot_top100`, whose `main_skill` columns are unreliable. Archive /
+    publish of per-skill data must read only `skill_top100_v1`.
+  - **`skill_meta.collect.scheduled` is `false` on purpose**: a first run takes
+    ~8 h (PoE1) / ~10 h (PoE2) at 1 request / 2 s and must never start by
+    surprise from a deploy. `--run-meta-once --game <g> --only skill` always
+    runs it; flip the flag only after the first manual runs have finished.
+  - poe.ninja's index only holds characters of level >= 80 (checked
+    2026-09-21) and lists come back level-descending, so ~all data lands in
+    the `90-100` bracket. Re-check at each new league's launch whether lower
+    levels get indexed.
+  - Main and spirit (PoE2) lists overlap by name; `gems.json`'s `gem_type` does
+    not identify spirit skills (24 of 450) -- the source of truth is which
+    poe.ninja facet a skill came from.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source

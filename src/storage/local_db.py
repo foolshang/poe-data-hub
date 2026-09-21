@@ -33,6 +33,9 @@ from typing import Any, Optional
 
 DEFAULT_DB_PATH = Path("data/poe_data_hub.sqlite3")
 
+COLLECTION_METHOD_LEGACY = "legacy_slot_top100"
+COLLECTION_METHOD_SKILL = "skill_top100_v1"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,6 +142,139 @@ CREATE TABLE IF NOT EXISTS keypassive_counts (
 CREATE INDEX IF NOT EXISTS idx_keypassive_counts_snapshot ON keypassive_counts(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_keypassive_counts_lookup
     ON keypassive_counts(game, main_skill, level_bracket);
+
+-- ===== Skill-centric collection (2026-09-21) ================================
+-- Replaces the per-slot skill dimension above (skill_mod_counts /
+-- keypassive_counts, fed by a first-gem *guess* -- see SPEC.md "Skill-centric
+-- collection"): each skill is a poe.ninja list, its top-100 characters are
+-- fetched, and a character is counted only into the list(s) it came from.
+
+-- Shared persistent character cache, used by both the skill-centric job and
+-- the legacy per-slot job: a fetched character is reused while its level is
+-- unchanged, the league is the same and the row is younger than
+-- skill_meta.collect.reuse_max_age_days. One row per (game, account, name).
+-- `level` is the level in the stored detail; `list_level` is the level
+-- poe.ninja's LIST row showed when it was fetched. Reuse compares the new list
+-- row against `list_level`: the search index can lag the detail endpoint (a
+-- character levels in between), and comparing against `level` would refetch
+-- such a character on every run until the index catches up.
+CREATE TABLE IF NOT EXISTS char_details (
+    game TEXT NOT NULL,
+    account TEXT NOT NULL,
+    name TEXT NOT NULL,
+    league TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    list_level INTEGER,
+    detail_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (game, account, name)
+);
+CREATE INDEX IF NOT EXISTS idx_char_details_fetched_at ON char_details(fetched_at);
+
+-- One row per collection attempt. `status` = running | finished | failed |
+-- abandoned. A running row is resumed (checkpoints below) instead of
+-- restarting; `plan_json` freezes the skill list + ascendancy cut chosen at
+-- start so a resume continues the same plan.
+CREATE TABLE IF NOT EXISTS skill_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game TEXT NOT NULL,
+    league TEXT NOT NULL,
+    snapshot_id INTEGER REFERENCES snapshots(id),
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    population_total INTEGER,
+    plan_json TEXT NOT NULL,
+    stats_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_skill_runs_game_status ON skill_runs(game, status);
+
+-- List-level checkpoint: a list is 'done' only once all its members are
+-- committed. `skill` is the base name (a Vaal variant folds into it),
+-- `list_name` the poe.ninja name actually queried.
+CREATE TABLE IF NOT EXISTS skill_run_lists (
+    run_id INTEGER NOT NULL REFERENCES skill_runs(id),
+    skill_type TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    list_name TEXT NOT NULL,
+    facet_count INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    server_total INTEGER,
+    fetched_at TEXT,
+    PRIMARY KEY (run_id, skill_type, list_name)
+);
+
+CREATE TABLE IF NOT EXISTS skill_run_members (
+    run_id INTEGER NOT NULL REFERENCES skill_runs(id),
+    skill_type TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    list_name TEXT NOT NULL,
+    account TEXT NOT NULL,
+    name TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    class TEXT NOT NULL,
+    keypassives_json TEXT NOT NULL,
+    PRIMARY KEY (run_id, skill_type, list_name, account, name)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_run_members_skill ON skill_run_members(run_id, skill_type, skill);
+
+-- Results. Kept forever (like mod_counts). `population` = characters counted
+-- for (skill, skill_type, bracket) -- the same base for every slot/stat of
+-- that skill; `slot_holders` = how many of them wear >=1 item in `slot`.
+-- Regular slots and jewels are both counted per character (a character counts
+-- once for a stat in a slot even with two jewels of that base carrying it).
+CREATE TABLE IF NOT EXISTS skill_stat_counts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+    game TEXT NOT NULL,
+    skill_type TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    level_bracket TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    stat_id TEXT NOT NULL,
+    mod_kind TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    population INTEGER NOT NULL,
+    slot_holders INTEGER NOT NULL,
+    usage_pct REAL NOT NULL,
+    value_min REAL,
+    value_max REAL,
+    days_since_league_start INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_stat_counts_snapshot ON skill_stat_counts(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_skill_stat_counts_lookup
+    ON skill_stat_counts(game, skill_type, skill, level_bracket, slot);
+
+CREATE TABLE IF NOT EXISTS skill_passive_counts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+    game TEXT NOT NULL,
+    skill_type TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    level_bracket TEXT NOT NULL,
+    keypassive TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    population INTEGER NOT NULL,
+    usage_pct REAL NOT NULL,
+    days_since_league_start INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_passive_counts_snapshot ON skill_passive_counts(snapshot_id);
+
+-- Per (skill, type, bracket): who was counted and how big the skill is in the
+-- league (`facet_count`, summed over folded Vaal lists). Also what a
+-- skill-autocomplete list (`skills[]`) is built from.
+CREATE TABLE IF NOT EXISTS skill_populations (
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id),
+    game TEXT NOT NULL,
+    skill_type TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    level_bracket TEXT NOT NULL,
+    population INTEGER NOT NULL,
+    facet_count INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, skill_type, skill, level_bracket)
+);
 """
 
 
@@ -176,6 +312,19 @@ class LocalDb:
         if "passive_selection_json" not in char_items_cols:
             self._conn.execute("ALTER TABLE char_items ADD COLUMN passive_selection_json TEXT")
 
+        # Skill-centric collection (2026-09-21): every snapshot records HOW its
+        # data was collected. Rows that exist before this column are all
+        # 'legacy_slot_top100' -- top-100-per-slot samples whose `main_skill`
+        # (char_items / skill_mod_counts / keypassive_counts) was the first gem
+        # of poe.ninja's skill list, a guess that is NOT reliable as a main
+        # skill. Kept, not deleted; archive/publish of skill-level data must
+        # only read 'skill_top100_v1' snapshots.
+        snapshot_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(snapshots)")}
+        if "collection_method" not in snapshot_cols:
+            self._conn.execute(
+                "ALTER TABLE snapshots ADD COLUMN collection_method TEXT NOT NULL DEFAULT 'legacy_slot_top100'"
+            )
+
     def close(self) -> None:
         self._conn.close()
 
@@ -188,12 +337,13 @@ class LocalDb:
         unique_characters_fetched: int,
         fetch_failed: int,
         snapshot_date: Optional[str] = None,
+        collection_method: str = COLLECTION_METHOD_LEGACY,
     ) -> int:
         cur = self._conn.execute(
             """INSERT INTO snapshots
                (snapshot_date, game, league, days_since_league_start, sample_total,
-                unique_characters_fetched, fetch_failed, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                unique_characters_fetched, fetch_failed, created_at, collection_method)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 game,
@@ -203,6 +353,7 @@ class LocalDb:
                 unique_characters_fetched,
                 fetch_failed,
                 _now_iso(),
+                collection_method,
             ),
         )
         self._conn.commit()
@@ -480,6 +631,268 @@ class LocalDb:
             ],
         )
         self._conn.commit()
+
+    # ---- shared character cache ------------------------------------------
+
+    def get_fresh_char_detail(
+        self, game: str, account: str, name: str, league: str, level: int, max_age_days: float,
+    ) -> Optional[dict[str, Any]]:
+        """The stored detail JSON for (game, account, name) if it is still
+        reusable: same league, same level as the list row that asked, and
+        fetched within `max_age_days`. Otherwise None (caller refetches)."""
+        row = self._conn.execute(
+            "SELECT league, COALESCE(list_level, level), detail_json, fetched_at FROM char_details "
+            "WHERE game = ? AND account = ? AND name = ?",
+            (game, account, name),
+        ).fetchone()
+        if row is None or row[0] != league or row[1] != level:
+            return None
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_days * 86400
+        fetched = datetime.strptime(row[3], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+        if fetched < cutoff:
+            return None
+        return json.loads(row[2])
+
+    def get_char_detail_any(self, game: str, account: str, name: str) -> Optional[dict[str, Any]]:
+        """Stored detail JSON regardless of league/level/age -- for the counting
+        phase, which must use exactly what the fetch phase left behind."""
+        row = self._conn.execute(
+            "SELECT detail_json FROM char_details WHERE game = ? AND account = ? AND name = ?",
+            (game, account, name),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def upsert_char_detail(
+        self, game: str, league: str, detail: dict[str, Any], list_level: Optional[int] = None,
+    ) -> None:
+        self._conn.execute(
+            """INSERT INTO char_details (game, account, name, league, level, list_level, detail_json, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(game, account, name) DO UPDATE SET
+                 league = excluded.league, level = excluded.level, list_level = excluded.list_level,
+                 detail_json = excluded.detail_json, fetched_at = excluded.fetched_at""",
+            (
+                game, detail["account"], detail["name"], league, int(detail["level"]), list_level,
+                json.dumps(detail, ensure_ascii=False), _now_iso(),
+            ),
+        )
+        self._conn.commit()
+
+    def cleanup_old_char_details(self, older_than_days: int) -> int:
+        cutoff = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - older_than_days * 86400, tz=timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cur = self._conn.execute("DELETE FROM char_details WHERE fetched_at < ?", (cutoff,))
+        self._conn.commit()
+        return cur.rowcount
+
+    # ---- skill-centric run checkpoints -----------------------------------
+
+    def find_resumable_skill_run(self, game: str, league: str, max_age_hours: float) -> Optional[dict[str, Any]]:
+        """The newest still-'running' run for (game, league) started within
+        `max_age_hours`; older or other-league 'running' rows are marked
+        'abandoned' (they can never be resumed) so they don't linger."""
+        cutoff = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - max_age_hours * 3600, tz=timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self._conn.execute(
+            "UPDATE skill_runs SET status = 'abandoned', finished_at = ? "
+            "WHERE game = ? AND status = 'running' AND (started_at < ? OR league != ?)",
+            (_now_iso(), game, cutoff, league),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            "SELECT id, snapshot_id, started_at, population_total, plan_json FROM skill_runs "
+            "WHERE game = ? AND league = ? AND status = 'running' ORDER BY id DESC LIMIT 1",
+            (game, league),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0], "snapshot_id": row[1], "started_at": row[2],
+            "population_total": row[3], "plan": json.loads(row[4]),
+        }
+
+    def create_skill_run(
+        self, game: str, league: str, snapshot_id: int, population_total: int, plan: dict[str, Any],
+        lists: list[dict[str, Any]],
+    ) -> int:
+        cur = self._conn.execute(
+            """INSERT INTO skill_runs (game, league, snapshot_id, status, started_at, population_total, plan_json)
+               VALUES (?, ?, ?, 'running', ?, ?, ?)""",
+            (game, league, snapshot_id, _now_iso(), population_total, json.dumps(plan, ensure_ascii=False)),
+        )
+        run_id = cur.lastrowid
+        self._conn.executemany(
+            """INSERT INTO skill_run_lists (run_id, skill_type, skill, list_name, facet_count)
+               VALUES (?, ?, ?, ?, ?)""",
+            [(run_id, l["skill_type"], l["skill"], l["list_name"], l["facet_count"]) for l in lists],
+        )
+        self._conn.commit()
+        return run_id
+
+    def pending_skill_lists(self, run_id: int) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT skill_type, skill, list_name, facet_count FROM skill_run_lists "
+            "WHERE run_id = ? AND status != 'done' ORDER BY facet_count DESC, list_name",
+            (run_id,),
+        ).fetchall()
+        return [{"skill_type": r[0], "skill": r[1], "list_name": r[2], "facet_count": r[3]} for r in rows]
+
+    def skill_list_counts(self, run_id: int) -> dict[str, int]:
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) FROM skill_run_lists WHERE run_id = ? GROUP BY status", (run_id,)
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def save_skill_list_members(
+        self, run_id: int, skill_type: str, skill: str, list_name: str, server_total: int,
+        members: list[dict[str, Any]],
+    ) -> None:
+        """Atomic: members + the list's 'done' flag commit together, so a kill
+        mid-list leaves it 'pending' with no half-saved members."""
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM skill_run_members WHERE run_id = ? AND skill_type = ? AND list_name = ?",
+                (run_id, skill_type, list_name),
+            )
+            self._conn.executemany(
+                """INSERT OR IGNORE INTO skill_run_members
+                   (run_id, skill_type, skill, list_name, account, name, level, class, keypassives_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        run_id, skill_type, skill, list_name, m["account"], m["name"], m["level"], m["class"],
+                        json.dumps(list(m["keypassives"]), ensure_ascii=False),
+                    )
+                    for m in members
+                ],
+            )
+            self._conn.execute(
+                "UPDATE skill_run_lists SET status = 'done', server_total = ?, fetched_at = ? "
+                "WHERE run_id = ? AND skill_type = ? AND list_name = ?",
+                (server_total, _now_iso(), run_id, skill_type, list_name),
+            )
+
+    def mark_skill_list_failed(self, run_id: int, skill_type: str, list_name: str) -> None:
+        self._conn.execute(
+            "UPDATE skill_run_lists SET status = 'failed' WHERE run_id = ? AND skill_type = ? AND list_name = ?",
+            (run_id, skill_type, list_name),
+        )
+        self._conn.commit()
+
+    def iter_run_member_keys(self, run_id: int, excluded_classes: set[str]) -> list[tuple[str, str, int]]:
+        """Distinct (account, name, level) across every list of the run,
+        excluding cut ascendancy classes. Level is the list row's (what a
+        cached detail must match to be reused)."""
+        rows = self._conn.execute(
+            "SELECT account, name, level, class FROM skill_run_members WHERE run_id = ?", (run_id,)
+        ).fetchall()
+        seen: dict[tuple[str, str], int] = {}
+        for account, name, level, cls in rows:
+            if cls in excluded_classes:
+                continue
+            seen[(account, name)] = level
+        return [(a, n, lv) for (a, n), lv in seen.items()]
+
+    def member_stats(self, run_id: int, excluded_classes: set[str]) -> dict[str, int]:
+        rows = self._conn.execute(
+            "SELECT account, name, class FROM skill_run_members WHERE run_id = ?", (run_id,)
+        ).fetchall()
+        cut_rows = sum(1 for r in rows if r[2] in excluded_classes)
+        all_unique = {(r[0], r[1]) for r in rows}
+        kept_unique = {(r[0], r[1]) for r in rows if r[2] not in excluded_classes}
+        return {
+            "member_rows": len(rows), "cut_rows": cut_rows,
+            "unique_chars": len(all_unique), "unique_chars_cut": len(all_unique) - len(kept_unique),
+        }
+
+    def run_skill_groups(self, run_id: int) -> list[tuple[str, str]]:
+        return [
+            (r[0], r[1]) for r in self._conn.execute(
+                "SELECT DISTINCT skill_type, skill FROM skill_run_members WHERE run_id = ? ORDER BY skill_type, skill",
+                (run_id,),
+            )
+        ]
+
+    def iter_skill_members(self, run_id: int, skill_type: str, skill: str) -> list[tuple[str, str, int, str, list[str]]]:
+        """Distinct members of one skill group across its folded lists:
+        (account, name, list-row level, class, keypassives)."""
+        rows = self._conn.execute(
+            "SELECT account, name, level, class, keypassives_json FROM skill_run_members "
+            "WHERE run_id = ? AND skill_type = ? AND skill = ?",
+            (run_id, skill_type, skill),
+        ).fetchall()
+        seen: dict[tuple[str, str], tuple[str, str, int, str, list[str]]] = {}
+        for account, name, level, cls, kp in rows:
+            seen.setdefault((account, name), (account, name, level, cls, json.loads(kp)))
+        return list(seen.values())
+
+    def finish_skill_run(self, run_id: int, status: str, stats: dict[str, Any]) -> None:
+        self._conn.execute(
+            "UPDATE skill_runs SET status = ?, finished_at = ?, stats_json = ? WHERE id = ?",
+            (status, _now_iso(), json.dumps(stats, ensure_ascii=False), run_id),
+        )
+        self._conn.commit()
+
+    def update_snapshot_summary(
+        self, snapshot_id: int, sample_total: int, unique_characters_fetched: int, fetch_failed: int,
+    ) -> None:
+        self._conn.execute(
+            "UPDATE snapshots SET sample_total = ?, unique_characters_fetched = ?, fetch_failed = ? WHERE id = ?",
+            (sample_total, unique_characters_fetched, fetch_failed, snapshot_id),
+        )
+        self._conn.commit()
+
+    def replace_skill_counts_for_snapshot(
+        self, snapshot_id: int, game: str, days_since_league_start: Optional[int], skill_type: str, skill: str,
+        stat_rows: list[dict[str, Any]], passive_rows: list[dict[str, Any]], population_rows: list[dict[str, Any]],
+    ) -> None:
+        """One skill group's results, replaced atomically (idempotent: a
+        resumed/recounted group never double-counts)."""
+        now = _now_iso()
+        with self._conn:
+            for table in ("skill_stat_counts", "skill_passive_counts", "skill_populations"):
+                self._conn.execute(
+                    f"DELETE FROM {table} WHERE snapshot_id = ? AND skill_type = ? AND skill = ?",
+                    (snapshot_id, skill_type, skill),
+                )
+            self._conn.executemany(
+                """INSERT INTO skill_stat_counts
+                   (snapshot_id, game, skill_type, skill, level_bracket, slot, stat_id, mod_kind, count,
+                    population, slot_holders, usage_pct, value_min, value_max, days_since_league_start, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        snapshot_id, game, skill_type, skill, r["level_bracket"], r["slot"], r["stat_id"],
+                        r["mod_kind"], r["count"], r["population"], r["slot_holders"], r["usage_pct"],
+                        r["value_min"], r["value_max"], days_since_league_start, now,
+                    )
+                    for r in stat_rows
+                ],
+            )
+            self._conn.executemany(
+                """INSERT INTO skill_passive_counts
+                   (snapshot_id, game, skill_type, skill, level_bracket, keypassive, count, population,
+                    usage_pct, days_since_league_start, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        snapshot_id, game, skill_type, skill, r["level_bracket"], r["keypassive"], r["count"],
+                        r["population"], r["usage_pct"], days_since_league_start, now,
+                    )
+                    for r in passive_rows
+                ],
+            )
+            self._conn.executemany(
+                """INSERT INTO skill_populations
+                   (snapshot_id, game, skill_type, skill, level_bracket, population, facet_count)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (snapshot_id, game, skill_type, skill, r["level_bracket"], r["population"], r["facet_count"])
+                    for r in population_rows
+                ],
+            )
 
     def commit(self) -> None:
         self._conn.commit()

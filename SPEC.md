@@ -1189,6 +1189,146 @@ dimension). `(main_skill, level_bracket, archetype)` matches
 `skill_mod_counts`'s own dimension (minus `slot`, since passives aren't
 slot-specific) so the two can be joined/queried the same way.
 
+## 8.10 Skill-centric collection (2026-09-21; SQLite-side, publish step pending)
+
+Replaces the *skill dimension* of the per-slot collection. Not a published
+schema yet -- the publish step (per-skill mods, `passives/latest.json`, the
+`skills[]` autocomplete list, archive) lands after the first live run; see
+Phase 22 in Status.
+
+**Why.** The 2026-09-21 distribution survey of the per-slot data found: the
+median (slot x skill x bracket x archetype) cell held 1-2 characters (98% of
+cells < 20), PoE1 returned the *same* ~1,334 characters every run (98% overlap
+in 5 days), the "main skill" was the first gem of poe.ninja's skill list (in
+real characters routinely a low-DPS utility skill; in PoE2 27% of the sample
+had a spirit skill there), and PoE2 characters carry ~6 "main skills" each.
+
+**Method.** poe.ninja's builds-search endpoint filters by skill and returns the
+top 100 rows by level:
+
+| query | meaning |
+|---|---|
+| `search?overview=<snapshot>` (no filter) | the whole-league population `total` **plus a facet table**: every skill with its character count (`skills`, PoE2 also `spiritgems`) and every class (`class`) |
+| `&skills=<name>` | "Main Skills" list (both games) |
+| `&spiritgems=<name>` | "Spirit Skills" list (PoE2 only) |
+
+The facet table comes free with the unfiltered response, so planning costs one
+request. Facets, lists and class names go through the same validated protobuf
+path as the per-slot fetch (`NinjaBuildsFetcher.fetch_population_facets` /
+`fetch_skill_list`; bad responses dump their bytes to `failed_responses/`).
+`min-level` / `max-level` query params exist and work but are deliberately not
+used (see Level brackets below).
+
+**A skill's identity is the list a character was pulled from.** Nothing is
+inferred from DPS or gem order. `CharacterDetail.archetype_hint` /
+`CharacterRef.archetype_hint` (the old first-gem guess, renamed from
+`main_skill`) is read only by the legacy archetype bucketing.
+
+**Plan (`src/processing/skill_plan.py`), all thresholds in
+`config.skill_meta.collect`:**
+- Include a skill when `count / league population >= min_skill_pct` (0.1%).
+  The base is poe.ninja's own population (~124k), not the sampled characters.
+  (Using the sum of skill uses instead of the population would give 164 / 139
+  / 88 skills instead of 171 / 271 / 146 -- the population base was chosen.)
+- Main and spirit lists are separate lists under the same rules. They overlap
+  (51 names >= 0.1% are in both PoE2 facets, e.g. Herald of Ice) and are never
+  merged: dimension `skill_type` = `main` | `spirit`. `gems.json`'s `gem_type`
+  is **not** used to decide this -- it flags only 24 of the 450 spirit entries.
+- PoE1 Vaal skills ("Vaal Reap") are separate poe.ninja entries. With
+  `fold_vaal` both the Vaal and base lists are fetched and their characters
+  counted under the base name (`Reap`); a folded skill qualifies on the
+  combined count; a member list under `min_member_list_count` is not requested.
+- Ascendancy cut: characters of a class with `< min_ascendancy_pct` of the
+  population (unascended base classes; PoE1 7, PoE2 8 classes) are dropped from
+  the lists. The number of member rows / unique characters cut is logged every
+  run and stored in the run stats. Real effect is tiny (1-4 rows) because
+  lists are ordered by level.
+- The plan (skill list + cut classes) is frozen in `skill_runs.plan_json` when a
+  run starts; a resumed run continues that plan.
+
+**Counting (`src/processing/skill_counter.py`).** A character is counted only
+into the group(s) it was pulled from -- never into every skill it runs -- so
+every skill has a comparable base (~100). Dimensions: `(game, skill_type, skill,
+level_bracket, slot, stat_id)`; no archetype split. Everything is per
+character, jewels included (deliberately unlike the legacy spec-6.4 per-gem
+rule). `population` = characters counted in the (skill, bracket); `slot_holders`
+= those wearing >= 1 item in the slot; `usage_pct = count / population`.
+Keypassives are counted the same way from the search rows' own `keypassives`
+column. SQLite keeps every stat with no count threshold; the publish-time
+filter is `skill_meta.publish.min_usage_pct` (0.1%, percentage only -- the old
+`count >= 5` / `population >= 20` rules do not apply). With ~100 characters per
+skill any stat seen once is already >= 0.5%, so that filter removes nothing
+today; it exists for when a skill's base grows.
+
+**Level brackets** stay `28-65 / 65-75 / 75-90 / 90-100`. poe.ninja's index
+currently holds only characters of **level >= 80** (its own level facet reports
+80-100; `min-level=28..64` returns nothing) and top-100-by-level lists sit at
+99-100, so in practice almost everything lands in `90-100` (99.7-100% of list
+rows); `28-65` and `65-75` are empty and `75-90` holds only levels 80-89. This
+is expected and accepted. **TODO at the next league launch: during its first
+1-3 weeks, check whether poe.ninja indexes characters below level 80** (the 80
+floor may be league-age dependent, not fixed). The bracket code already handles
+low levels; nothing needs to change if it does.
+
+**Data model (`src/storage/local_db.py`).** `char_details` (shared persistent
+character cache), `skill_runs` / `skill_run_lists` / `skill_run_members`
+(checkpoints), and results `skill_stat_counts`, `skill_passive_counts`,
+`skill_populations` (kept forever, like `mod_counts`).
+
+**Incremental + resumable.** A run is Phase A (fetch lists; a list is `done`
+atomically with its members), B (fetch the distinct characters into
+`char_details`, one commit per character), C (count per skill group, replacing
+that group's rows, so it is idempotent). A kill / restart / deploy resumes the
+unfinished run (< `resume_max_age_hours` old, same league) without refetching
+finished lists or characters. A character is **reused, not refetched**, when the
+stored copy is the same league, was fetched when its list row showed the same
+level, and is younger than `reuse_max_age_days` (7; a level-capped character can
+still swap gear). The row level is compared with the *list row* level stored at
+fetch time, not the detail's own level, because the search index can lag the
+detail endpoint. The index `version` in every character URL rolls over during a
+long run, so the snapshot is re-resolved every `snapshot_refresh_seconds` and
+once on a failed fetch. Every attempt logs new / reused / failed characters.
+Guards: an empty plan, 0 characters loaded, or 0 characters counted refuses to
+run; more than `max_failed_list_pct` failed lists or `max_failed_char_pct`
+failed characters aborts with nothing counted and the run left resumable.
+
+**Memory.** The population is never held in RAM: characters go to SQLite one at
+a time and counting streams one skill group's ~100 members at a time.
+
+**First-run cost (measured 2026-09-21, 1 request / 2s).** PoE1: 171 lists +
+13,780 distinct characters ~ 8.0 h; PoE2: 417 lists + 16,717 ~ 9.8 h. Observed
+list stability between index versions: PoE2 lists kept a median 98/100 members
+(96.5/100 with the same level), so steady-state runs should refetch only a few
+percent plus the 7-day refresh (estimated ~40-60 min per game per run).
+
+**CLI.** `python -m src.main --run-meta-once [--game poe1|poe2 ...]
+[--only slot|skill]`. The scheduled meta job runs, per game, the legacy
+per-slot job then the skill-centric job, all under the one `meta` job lock (so a
+long manual first run simply makes the scheduler's ticks skip).
+
+**Legacy per-slot job -- a temporary bridge.** The per-slot job (top-100 per
+equipment slot -> `mod_counts` -> `{game}/meta/latest.json`) still runs because
+consumers read that file. It shares the persistent character cache with the
+skill-centric job, no longer writes any skill/passive data, and buckets
+archetypes with `archetype_hint` (never a "main skill"). **When PoE Checker
+moves its mod badge to the per-skill data, retire the per-slot job and the
+archetype `meta/latest.json` entirely.**
+
+**Old data is marked, not deleted.** `snapshots.collection_method` records how
+each snapshot was collected: every snapshot that existed before 2026-09-21 is
+`legacy_slot_top100` (added by migration with that default), skill-centric
+snapshots are `skill_top100_v1`. In `legacy_slot_top100` snapshots the
+`main_skill` of `char_items`, `skill_mod_counts` and `keypassive_counts` is a
+first-gem guess and **not reliable** -- do not build on it. Archive and publish
+of per-skill data must read only `skill_top100_v1` snapshots.
+
+**`days_since_league_start` was NULL in every snapshot** (Allflame, Forbidden
+Rites): `LeagueDatesFetcher` only recognised a "... Now Available" post, and
+neither league had one. It now falls back to a post that names the league and
+states its launch ("Releases on July 24", "launching September 4th"), most
+recent post wins, forward-looking dates only. Verified against the live Steam
+feed: Allflame -> 2026-07-24, Forbidden Rites -> 2026-09-04.
+
 ## Binding conditions (from project owner, still in force)
 
 1. ห้ามตัด price field ใดๆ ทิ้งโดยไม่เสนอก่อน — ทุก entry มี `value` +
@@ -1913,3 +2053,35 @@ slot-specific) so the two can be joined/queried the same way.
       regress silently), `test_ninja_chars.py`, `test_local_db.py`,
       `test_aggregator.py`, `test_archive_export.py`. 400/400 project-wide
       passing.
+
+- [ ] Phase 22: skill-centric collection (top-100 per poe.ninja skill instead
+      of top-100 per slot) -- **steps 2-4 implemented and tested; steps 5+
+      (first live run, measurement, publish, archive re-export, autocomplete,
+      deploy) pending.** Full design in 8.10.
+
+      Done: facet/list fetchers (real-sample tests), skill plan (Vaal fold,
+      spirit lists, ascendancy cut, all thresholds in config), counter,
+      shared persistent character cache, checkpointed + resumable run,
+      `collection_method` marking of old snapshots, `days_since_league_start`
+      fix, legacy job kept as a bridge (shares the cache; no longer writes
+      skill/passive data), CLI `--game` / `--only`. Removed from the live
+      path: the first-gem `main_skill` guess (renamed `archetype_hint`, legacy
+      archetype bucketing only), `aggregate_*_by_skill`,
+      `compute_skill_bracket_population`, `aggregate_keypassives_by_skill`,
+      and the legacy job's `passives/latest.json` publish (that file keeps its
+      last content until the new publish step ships) and the legacy summary
+      keys `skill_bracket_population`, `top_20_skills_by_population`,
+      `thin_brackets_below_publish_threshold`, `skill_mod_counts_rows`,
+      `keypassive_counts_rows`, `unmapped_skill_names`, `skill_gems_*`.
+
+      Also fixed this phase: `ndic.decode` accepted the first of several
+      valid split points and returned garbled names for PoE2's 31-entry class
+      dictionary (`Druid`); class dictionaries are now validated against
+      `KNOWN_CLASSES_BY_GAME` (CLAUDE.md).
+
+      Pending: first live run per game (manual, `--only skill`, hours),
+      second run to measure incremental cost (stop and report if a game
+      exceeds 6 h -> consider top-50), publish + archive re-export +
+      `passives/latest.json` new shape + `skills[]` (main and spirit) for the
+      F4 autocomplete, deploy + verify. TODO: check at the next league's
+      launch whether poe.ninja indexes characters below level 80.

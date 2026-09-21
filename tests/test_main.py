@@ -4,6 +4,8 @@ healthchecks.io dead-man-switch ping helper, and (phase 7) the multi-game /
 multi-league prices job (run_prices_once, _update_status)."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import time
 from datetime import date
@@ -32,6 +34,22 @@ from src.main import (
 from src.storage.local_db import LocalDb
 from src.storage.publisher import PricesPublisher
 from src.utils import job_lock
+
+
+_TESTS_OF_THE_REAL_SKILL_JOB = {"test_run_skill_meta_for_game_wires_league_cache_and_collection"}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_skill_meta_job(request):
+    """run_meta_once now also runs the skill-centric job per game; every test
+    that exercises run_meta_once patches the legacy job, so patch this one by
+    default too (tests of the skill part re-patch it themselves; the few that
+    test the real glue opt out by name)."""
+    if request.node.name in _TESTS_OF_THE_REAL_SKILL_JOB:
+        yield None
+        return
+    with patch("src.main._run_skill_meta_for_game", return_value={}) as fake:
+        yield fake
 
 
 def test_ping_healthcheck_noop_when_url_missing():
@@ -1237,3 +1255,168 @@ def test_run_reprocess_char_items_is_idempotent_on_rerun(tmp_path):
     count = verify_db._conn.execute("SELECT count(*) FROM skill_mod_counts WHERE snapshot_id=?", (snap_id,)).fetchone()[0]
     assert count == 1
     verify_db.close()
+
+
+# --- Skill-centric job wiring (2026-09-21) ------------------------------------------
+
+def _meta_cfg(ping=True, scheduled=True):
+    return {
+        "skill_meta": {"collect": {"scheduled": scheduled}},
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {"meta_ping_url": "https://hc-ping.com/test-meta"} if ping else {},
+    }
+
+
+def _run_with_call_log(tmp_path, cfg, skill_side_effect=None, slot_side_effect=None, **kwargs):
+    calls: list[tuple[str, str]] = []
+
+    def fake_slot(http, publisher, cfg, game):
+        calls.append(("slot", game))
+        if slot_side_effect:
+            slot_side_effect(game)
+        return _fake_meta_result(game)
+
+    def fake_skill(http, publisher, cfg, game):
+        calls.append(("skill", game))
+        if skill_side_effect:
+            skill_side_effect(game)
+        return {}
+
+    created: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)), \
+         patch("src.main._run_meta_for_game", side_effect=fake_slot), \
+         patch("src.main._run_skill_meta_for_game", side_effect=fake_skill), \
+         patch("src.main.HttpClient") as MockHttpClient:
+        result = run_meta_once(cfg, **kwargs)
+    return result, calls, MockHttpClient.return_value, created[-1]
+
+
+def test_run_meta_once_runs_the_slot_job_then_the_skill_job_for_each_game(tmp_path):
+    result, calls, http, _pub = _run_with_call_log(tmp_path, _meta_cfg())
+    assert calls == [("slot", "poe2"), ("skill", "poe2"), ("slot", "poe1"), ("skill", "poe1")]
+    assert set(result) == {"poe2", "poe1"}
+    http.get_bytes.assert_called_once_with("https://hc-ping.com/test-meta")  # full default run still pings once
+
+
+def test_skill_part_is_not_scheduled_by_default_but_only_skill_always_runs(tmp_path):
+    """Deploy safety: with skill_meta.collect.scheduled=false (the shipped default) the
+    scheduler / a plain run never starts the multi-hour first skill run."""
+    _result, calls, http, _pub = _run_with_call_log(tmp_path, _meta_cfg(scheduled=False))
+    assert calls == [("slot", "poe2"), ("slot", "poe1")]
+    http.get_bytes.assert_called_once()  # the slot job's ping is unaffected
+
+    _result, calls, _http, _pub = _run_with_call_log(tmp_path, _meta_cfg(scheduled=False), parts=("skill",), games=["poe2"])
+    assert calls == [("skill", "poe2")]  # explicit --only skill runs regardless of the flag
+
+
+def test_shipped_config_leaves_the_skill_part_unscheduled():
+    from src.utils.config import load_config
+
+    assert load_config()["skill_meta"]["collect"]["scheduled"] is False
+
+
+def test_run_meta_once_only_skill_skips_the_slot_job_and_never_pings_or_touches_meta_status(tmp_path):
+    result, calls, http, pub = _run_with_call_log(tmp_path, _meta_cfg(), parts=("skill",), games=["poe1"])
+    assert calls == [("skill", "poe1")]
+    assert result == {}
+    http.get_bytes.assert_not_called()  # a partial run must not ping healthchecks or claim meta freshness
+    assert "meta" not in (pub.fetch_previous("status.json") or {})
+
+
+def test_run_meta_once_only_slot_for_one_game_is_a_partial_run_too(tmp_path):
+    result, calls, http, _pub = _run_with_call_log(tmp_path, _meta_cfg(), parts=("slot",), games=["poe2"])
+    assert calls == [("slot", "poe2")]
+    assert set(result) == {"poe2"}
+    http.get_bytes.assert_not_called()  # only one of two configured games ran -> no ping
+
+
+def test_run_meta_once_a_skill_failure_does_not_block_the_slot_job_or_the_next_game(tmp_path):
+    def boom(game):
+        if game == "poe2":
+            raise RuntimeError("skill run exploded")
+
+    result, calls, http, _pub = _run_with_call_log(tmp_path, _meta_cfg(), skill_side_effect=boom)
+    assert calls == [("slot", "poe2"), ("skill", "poe2"), ("slot", "poe1"), ("skill", "poe1")]
+    assert set(result) == {"poe2", "poe1"}
+    http.get_bytes.assert_called_once()  # the meta.json path succeeded for both games -> ping unaffected
+
+
+def test_run_meta_once_unknown_game_is_a_loud_error_and_releases_the_lock(tmp_path):
+    with pytest.raises(ValueError, match="not in configured game_versions"):
+        _run_with_call_log(tmp_path, _meta_cfg(), games=["poe3"])
+    result, calls, _http, _pub = _run_with_call_log(tmp_path, _meta_cfg())  # lock free again
+    assert calls
+
+
+def test_main_parses_game_and_only_flags(monkeypatch):
+    import src.main as main_module
+
+    with patch("src.main.load_config", return_value={}), patch("src.main._setup_logging"), \
+         patch("src.main.run_meta_once") as fake_run:
+        monkeypatch.setattr("sys.argv", ["main", "--run-meta-once", "--game", "poe1", "--only", "skill"])
+        main_module.main()
+        fake_run.assert_called_once_with({}, games=["poe1"], parts=("skill",))
+
+        fake_run.reset_mock()
+        monkeypatch.setattr("sys.argv", ["main", "--run-meta-once"])
+        main_module.main()
+        fake_run.assert_called_once_with({}, games=None, parts=None)
+
+        fake_run.reset_mock()
+        monkeypatch.setattr("sys.argv", ["main", "--run-meta-once", "--game", "poe2", "--game", "poe1"])
+        main_module.main()
+        fake_run.assert_called_once_with({}, games=["poe2", "poe1"], parts=None)
+
+
+def test_run_skill_meta_for_game_wires_league_cache_and_collection(tmp_path, monkeypatch):
+    """Glue only: league detection -> shared cache -> run_skill_collection, with
+    the archive-on-league-change hook run first. The run itself is tested in
+    test_skill_collect."""
+    import src.main as main_module
+    from datetime import datetime, timezone
+
+    monkeypatch.chdir(tmp_path)
+    start = datetime(2026, 9, 4, 20, 0, tzinfo=timezone.utc)
+    cfg = {
+        "firebase": {"bucket": "b"}, "game_versions": ["poe2"], "rate_limits": {}, "http": {},
+        "skill_meta": {"collect": {"reuse_max_age_days": 3, "min_skill_pct": 0.5}},
+    }
+    seen: dict = {}
+
+    def fake_collection(**kw):
+        seen.update(kw)
+        return {"run_id": 1}
+
+    class FakeDetector:
+        def __init__(self, *a, **k): pass
+        def detect(self): return LeagueResult(main="Forbidden Rites", events=[])
+
+    class FakeDates:
+        def __init__(self, *a, **k): pass
+        def fetch(self, league):
+            from src.fetchers.league_dates import LeagueDates
+            return LeagueDates(start_at=start, end_at=None)
+
+    class FakeBuilds:
+        def __init__(self, *a, **k): pass
+        def resolve_snapshot(self, league):
+            from src.fetchers.ninja_builds import SnapshotVersion
+            return SnapshotVersion("u", league, "v1", "s")
+
+    normalizer = MagicMock(stats_source="test")
+    with patch("src.main.LeagueDetector", FakeDetector), patch("src.main.LeagueDatesFetcher", FakeDates), \
+         patch("src.main.NinjaBuildsFetcher", FakeBuilds), patch("src.main.ModNormalizer", return_value=normalizer), \
+         patch("src.main.run_skill_collection", side_effect=fake_collection), \
+         patch("src.main._archive_previous_league_if_changed") as archive, \
+         patch("src.main.NinjaCharsFetcher"):
+        stats = main_module._run_skill_meta_for_game(MagicMock(), MagicMock(), cfg, "poe2")
+
+    assert stats["run_id"] == 1 and "peak_rss_mb" in stats
+    archive.assert_called_once()
+    assert seen["game"] == "poe2" and seen["league"] == "Forbidden Rites"
+    assert seen["days_since_league_start"] == (datetime.now(timezone.utc) - start).days  # no longer NULL
+    assert seen["config"].min_skill_pct == 0.5 and seen["config"].reuse_max_age_days == 3.0
+    normalizer.load.assert_called_once()

@@ -118,7 +118,7 @@ def aggregate_slot(
         slot_items = [i for i in detail.items if i.slot == slot]
         if not slot_items:
             continue
-        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
+        archetype = archetyper.classify(detail.archetype_hint, _weapon_base_type(detail))
         for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items(slot_items, normalizer).items():
             for target in {archetype, "all"}:
                 counters[target][stat_id].add(mod_kind, v_min, v_max)
@@ -145,7 +145,7 @@ def aggregate_jewels(
         jewel_items = [i for i in detail.items if i.slot.startswith("jewel:")]
         if not jewel_items:
             continue
-        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
+        archetype = archetyper.classify(detail.archetype_hint, _weapon_base_type(detail))
         for jewel in jewel_items:
             base_slot = jewel.slot
             denom_by_base[base_slot] += 1
@@ -175,7 +175,7 @@ def compute_archetype_distribution(
         detail = get_detail(ref.account, ref.name)
         if detail is None:
             continue
-        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
+        archetype = archetyper.classify(detail.archetype_hint, _weapon_base_type(detail))
         counts[archetype] += 1
         total += 1
     if total == 0:
@@ -208,14 +208,14 @@ def _finalize(slot: str, denom: int, counters: dict[str, dict[str, _StatBucket]]
 
 
 # ---------------------------------------------------------------------------
-# Skill-centric meta (skill-meta phase 2): a second, orthogonal counting
-# dimension -- (slot, main_skill, level_bracket, stat_id) -- covering both
-# gear and jewels, alongside (not replacing) the archetype-based counting
-# above. Population is "everyone in the already-sampled per-slot lists who
-# matches this skill+bracket", not a separately-fetched "true" population of
-# every player running that skill -- poe.ninja's builds-search endpoint has
-# no such query, and re-fetching more data than the archetype pipeline
-# already pulls is explicitly out of scope for this phase.
+# Legacy skill dimension (skill-meta phase 2). The live per-slot skill
+# aggregation that used to sit here (fed by a first-gem *guess* at the main
+# skill) was removed 2026-09-21 in favour of the skill-centric pipeline
+# (src/processing/skill_collect.py + skill_counter.py). What remains is
+# offline-only: `bracket_for_level` (shared), `SkillModCount` and
+# `reprocess_chars_to_skill_mod_counts` (recompute legacy rows from stored
+# char_items for `--reprocess-char-items`; those rows are marked
+# `collection_method = 'legacy_slot_top100'` and their skill is unreliable).
 # ---------------------------------------------------------------------------
 
 
@@ -251,170 +251,6 @@ class SkillModCount:
     value_min: Optional[float]
     value_max: Optional[float]
     rank_in_bracket: int = 0
-
-
-def aggregate_slot_by_skill(
-    slot: str,
-    char_refs: list[CharacterRef],
-    get_detail: GetDetail,
-    normalizer: ModNormalizer,
-    skill_normalizer: SkillNormalizer,
-    archetyper: Archetyper,
-    level_brackets: list[LevelBracket],
-) -> list[SkillModCount]:
-    """`archetype` is stored per row (not just skill/bracket) because it is
-    NOT a pure function of `main_skill` alone: `Archetyper.classify`'s
-    weapon-attack fallback path depends on the character's actual equipped
-    weapon, so two characters on the same skill can land in different
-    archetypes (e.g. a generic physical attack skill used with a bow vs a
-    sword). Storing it keeps every 4-tier fallback aggregation (item 12) a
-    plain SQL SUM/GROUP BY over disjoint partitions of this same table --
-    see local_db.py's `query_skill_mod_counts`."""
-    denom: dict[tuple[str, str, str, str], int] = defaultdict(int)
-    counters: dict[tuple[str, str, str, str], dict[str, _StatBucket]] = defaultdict(lambda: defaultdict(_StatBucket))
-
-    for ref in char_refs:
-        detail = get_detail(ref.account, ref.name)
-        if detail is None:
-            continue
-        bracket = bracket_for_level(detail.level, level_brackets)
-        if bracket is None:
-            continue
-        slot_items = [i for i in detail.items if i.slot == slot]
-        if not slot_items:
-            continue
-        skill = skill_normalizer.normalize(detail.main_skill)
-        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
-        key = (slot, skill, bracket, archetype)
-        denom[key] += 1
-        for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items(slot_items, normalizer).items():
-            counters[key][stat_id].add(mod_kind, v_min, v_max)
-
-    return _finalize_skill(denom, counters)
-
-
-def aggregate_jewels_by_skill(
-    char_refs: list[CharacterRef],
-    get_detail: GetDetail,
-    normalizer: ModNormalizer,
-    skill_normalizer: SkillNormalizer,
-    archetyper: Archetyper,
-    level_brackets: list[LevelBracket],
-) -> list[SkillModCount]:
-    """Per-gem-instance counting (spec 6.4), same as `aggregate_jewels`, now
-    additionally keyed by (normalized main_skill, level_bracket, archetype)."""
-    denom: dict[tuple[str, str, str, str], int] = defaultdict(int)
-    counters: dict[tuple[str, str, str, str], dict[str, _StatBucket]] = defaultdict(lambda: defaultdict(_StatBucket))
-
-    for ref in char_refs:
-        detail = get_detail(ref.account, ref.name)
-        if detail is None:
-            continue
-        bracket = bracket_for_level(detail.level, level_brackets)
-        if bracket is None:
-            continue
-        jewel_items = [i for i in detail.items if i.slot.startswith("jewel:")]
-        if not jewel_items:
-            continue
-        skill = skill_normalizer.normalize(detail.main_skill)
-        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
-        for jewel in jewel_items:
-            key = (jewel.slot, skill, bracket, archetype)
-            denom[key] += 1
-            for stat_id, (mod_kind, v_min, v_max) in _stat_hits_for_items([jewel], normalizer).items():
-                counters[key][stat_id].add(mod_kind, v_min, v_max)
-
-    return _finalize_skill(denom, counters)
-
-
-def compute_skill_bracket_population(
-    unique_char_refs: list[CharacterRef],
-    get_detail: GetDetail,
-    skill_normalizer: SkillNormalizer,
-    level_brackets: list[LevelBracket],
-) -> dict[tuple[str, str], int]:
-    """(normalized main_skill, level_bracket) -> distinct character count,
-    across the deduped set of characters actually fetched this snapshot --
-    not per-slot, unlike the aggregate_*_by_skill population above. This is
-    what a "top 20 skills, how many per bracket" report reads (item 14),
-    and what decides which bracket is too thin to publish later."""
-    counts: dict[tuple[str, str], int] = defaultdict(int)
-    for ref in unique_char_refs:
-        detail = get_detail(ref.account, ref.name)
-        if detail is None:
-            continue
-        bracket = bracket_for_level(detail.level, level_brackets)
-        if bracket is None:
-            continue
-        skill = skill_normalizer.normalize(detail.main_skill)
-        counts[(skill, bracket)] += 1
-    return dict(counts)
-
-
-@dataclass(frozen=True)
-class KeypassiveCount:
-    main_skill: str
-    level_bracket: str
-    archetype: str
-    keypassive: str
-    count: int
-    population: int
-    usage_pct: float
-    rank_in_bracket: int = 0
-
-
-def aggregate_keypassives_by_skill(
-    unique_char_refs: list[CharacterRef],
-    get_detail: GetDetail,
-    skill_normalizer: SkillNormalizer,
-    archetyper: Archetyper,
-    level_brackets: list[LevelBracket],
-) -> list[KeypassiveCount]:
-    """Skill-meta phase 3, path A: notable/keystone passives only, from
-    `CharacterRef.keypassives` -- already resolved in ninja_builds.py
-    straight from the builds-search response's own "keypassives" column +
-    dictionary, so this needs zero extra requests (`get_detail` is only
-    used here for level/main_skill/archetype, all already being fetched
-    for the existing skill dimension). Deliberately NOT the full passive
-    tree -- poe.ninja's own dictionary only covers notable/keystone-tier
-    passives (~260-330 entries), confirmed live 2026-09-17; see
-    CLAUDE.md/SPEC.md. Counted per character (like a regular slot's mods),
-    keyed by (main_skill, level_bracket, archetype) -- the same dimension
-    as skill_mod_counts minus `slot` (passives aren't slot-specific), so
-    the two can be joined/queried the same way. `archetype` denormalized
-    for the same reason as skill_mod_counts (see aggregate_slot_by_skill)."""
-    denom: dict[tuple[str, str, str], int] = defaultdict(int)
-    counters: dict[tuple[str, str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
-
-    for ref in unique_char_refs:
-        detail = get_detail(ref.account, ref.name)
-        if detail is None:
-            continue
-        bracket = bracket_for_level(detail.level, level_brackets)
-        if bracket is None:
-            continue
-        skill = skill_normalizer.normalize(detail.main_skill)
-        archetype = archetyper.classify(detail.main_skill, _weapon_base_type(detail))
-        key = (skill, bracket, archetype)
-        denom[key] += 1
-        for kp in set(ref.keypassives):
-            counters[key][kp] += 1
-
-    results: list[KeypassiveCount] = []
-    for key, kp_counts in counters.items():
-        skill, bracket, archetype = key
-        population = denom[key]
-        if population == 0:
-            continue
-        ranked = sorted(kp_counts.items(), key=lambda kv: kv[1], reverse=True)
-        for rank, (kp, count) in enumerate(ranked, start=1):
-            results.append(KeypassiveCount(
-                main_skill=skill, level_bracket=bracket, archetype=archetype, keypassive=kp,
-                count=count, population=population,
-                usage_pct=round(count / population * 100, 2) if population else 0.0,
-                rank_in_bracket=rank,
-            ))
-    return results
 
 
 def reprocess_chars_to_skill_mod_counts(

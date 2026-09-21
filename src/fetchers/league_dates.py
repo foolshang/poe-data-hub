@@ -100,6 +100,20 @@ _UPCOMING_LAUNCH_RE = re.compile(
 )
 
 
+# Launch-date phrasing used to date a league's start when no "... Now
+# Available" post exists (2026-09-21: neither Allflame nor Forbidden Rites had
+# one, so days_since_league_start was NULL for every snapshot). Real phrasings:
+#   PoE1 title  "Path of Exile: Curse of the Allflame Releases on July 24 PDT"
+#   PoE2 body   "...Path of Exile 2: Forbidden Rites, launching September 4th at 1PM PDT..."
+# Unlike `_UPCOMING_LAUNCH_RE` the "on" is optional and the date must start
+# with a real month name, so "launching alongside the 0.5 patch" can't match.
+_MONTH = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+_NAMED_LEAGUE_LAUNCH_RE = re.compile(
+    rf"(?:launch(?:es|ing)?|releases?)\s+(?:on\s+)?({_MONTH}\.?\s+\d{{1,2}})(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+
+
 def _parse_date_relative_to_post(text: str, post_dt: datetime) -> Optional[datetime]:
     """Parses a bare "Month Day" fragment using post_dt's year as a
     default, rolling forward to the next year if the parsed month is
@@ -178,9 +192,32 @@ class LeagueDatesFetcher:
             and league_name.lower() in it.get("contents", "").lower()
         ]
         if not candidates:
-            return None
+            return self._find_start_from_announcement(items, league_name)
         best = min(candidates, key=lambda it: it["date"])
         return datetime.fromtimestamp(best["date"], tz=timezone.utc)
+
+    def _find_start_from_announcement(self, items: list[dict[str, Any]], league_name: str) -> Optional[datetime]:
+        """Fallback: a post that names the league and states when it launches
+        ("Releases on July 24", "launching September 4th"). The most recent
+        such post wins, so a later post restating or correcting the date
+        overrides an earlier one. Only forward-looking dates count (on/after
+        the post's own date) -- a retrospective mention isn't a launch date."""
+        needle = league_name.lower()
+        found: list[tuple[int, datetime]] = []
+        for it in items:
+            text = f"{it.get('title', '')} {it.get('contents', '')}"
+            if needle not in text.lower():
+                continue
+            match = _NAMED_LEAGUE_LAUNCH_RE.search(text)
+            if not match:
+                continue
+            post_dt = datetime.fromtimestamp(it["date"], tz=timezone.utc)
+            parsed = _parse_date_relative_to_post(match.group(1), post_dt)
+            if parsed is not None and parsed.date() >= post_dt.date():
+                found.append((it["date"], parsed))
+        if not found:
+            return None
+        return max(found, key=lambda f: f[0])[1]
 
     def _find_end(self, items: list[dict[str, Any]], league_name: str) -> Optional[datetime]:
         candidates = [

@@ -12,7 +12,9 @@ from pathlib import Path
 import pytest
 
 from src.fetchers.ninja_builds import SnapshotVersion
-from src.fetchers.ninja_chars import DedupedCharacterCache, NinjaCharsFetcher, _clean_mod_text, _slugify_jewel_base
+from src.fetchers.ninja_chars import (
+    NinjaCharsFetcher, _clean_mod_text, _slugify_jewel_base, character_detail_from_dict, character_detail_to_dict,
+)
 
 SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "samples" / "ninja_poe2_char_detail.json"
 POE1_SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "samples" / "ninja_poe1_char_detail.json"
@@ -67,7 +69,7 @@ def test_fetch_character_basic_fields(fetcher: NinjaCharsFetcher):
     assert detail.name == "ResurrectGodAura"
     assert detail.level == 100
     assert detail.char_class == "Martial Artist"
-    assert detail.main_skill == "Hollow Focus"
+    assert detail.archetype_hint == "Hollow Focus"
 
 
 def test_fetch_character_captures_raw_passive_selection(fetcher: NinjaCharsFetcher):
@@ -120,26 +122,13 @@ def test_validation_failure_does_not_raise_generic_exception(tmp_path):
     assert len(dumped) == 1
 
 
-def test_deduped_cache_fetches_once_per_character(fetcher: NinjaCharsFetcher):
-    cache = DedupedCharacterCache(fetcher, SNAPSHOT)
-    d1 = cache.get("heygyus-0416", "ResurrectGodAura")
-    d2 = cache.get("heygyus-0416", "ResurrectGodAura")
-    assert d1 is d2
-    assert cache.fetched_count == 1
-    assert cache.cache_hit_count == 1
-    assert cache.failed_count == 0
-
-
-def test_deduped_cache_counts_failures_without_raising(tmp_path, sample_payload):
-    class FlakyHttp:
-        def get_json(self, url):
-            raise RuntimeError("simulated network failure")
-
-    fetcher2 = NinjaCharsFetcher(http_client=FlakyHttp(), failed_responses_dir=tmp_path / "failed")
-    cache = DedupedCharacterCache(fetcher2, SNAPSHOT)
-    result = cache.get("acc", "char")
-    assert result is None
-    assert cache.failed_count == 1
+def test_character_detail_round_trips_through_the_store_serializers(fetcher: NinjaCharsFetcher):
+    """The shared SQLite character cache stores `character_detail_to_dict` JSON
+    and rebuilds with `character_detail_from_dict` -- nothing may be lost."""
+    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    restored = character_detail_from_dict(json.loads(json.dumps(character_detail_to_dict(detail))))
+    assert restored == detail
+    assert restored.items and restored.passive_selection
 
 
 def test_unknown_game_raises_at_construction(tmp_path):
@@ -199,7 +188,7 @@ def test_fetch_poe1_character_basic_fields(poe1_fetcher: NinjaCharsFetcher):
     detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
     assert detail.char_class == "Pathfinder"
     assert detail.level == 100
-    assert detail.main_skill == "Vaal Caustic Arrow"
+    assert detail.archetype_hint == "Vaal Caustic Arrow"
 
 
 def test_fetch_poe1_character_jewels_split_by_clean_base_type(poe1_fetcher: NinjaCharsFetcher):

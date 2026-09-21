@@ -1,4 +1,4 @@
-"""Fetch full character detail (gear, mods, jewels, main skill) from poe.ninja
+"""Fetch full character detail (gear, mods, jewels, passive selection) from poe.ninja
 (spec sections 3.4 and 6.2).
 
 Unlike the builds-search endpoint (src/fetchers/ninja_builds.py), this one is
@@ -42,6 +42,7 @@ Prismatic jewels + Medium/Large Cluster Jewels all seen in one character).
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 import time
@@ -120,7 +121,11 @@ class CharacterDetail:
     name: str
     level: int
     char_class: str
-    main_skill: Optional[str]
+    # NOT the character's main skill -- see `_extract_archetype_hint`. Only
+    # the legacy per-slot job's archetype bucketing reads this; the
+    # skill-centric pipeline's "main skill" is the poe.ninja list a character
+    # was pulled from, never this field.
+    archetype_hint: Optional[str]
     items: list[ItemDetail]
     # Raw GGG passive-tree node IDs (real tree numbering, NOT poe.ninja's own
     # small ordinal dictionaries like the builds-search endpoint's
@@ -151,6 +156,31 @@ def item_detail_from_dict(d: dict[str, Any]) -> ItemDetail:
             explicit=list(mods.get("explicit", [])),
             fractured=list(mods.get("fractured", [])),
         ),
+    )
+
+
+def character_detail_to_dict(detail: CharacterDetail) -> dict[str, Any]:
+    """JSON-safe shape for the shared `char_details` SQLite store."""
+    return {
+        "account": detail.account,
+        "name": detail.name,
+        "level": detail.level,
+        "class": detail.char_class,
+        "archetype_hint": detail.archetype_hint,
+        "items": [dataclasses.asdict(i) for i in detail.items],
+        "passive_selection": list(detail.passive_selection),
+    }
+
+
+def character_detail_from_dict(d: dict[str, Any]) -> CharacterDetail:
+    return CharacterDetail(
+        account=d["account"],
+        name=d["name"],
+        level=int(d["level"]),
+        char_class=d["class"],
+        archetype_hint=d.get("archetype_hint"),
+        items=[item_detail_from_dict(i) for i in d.get("items", [])],
+        passive_selection=tuple(int(n) for n in d.get("passive_selection", [])),
     )
 
 
@@ -194,7 +224,7 @@ class NinjaCharsFetcher:
             if item is not None:
                 items.append(item)
 
-        main_skill = self._extract_main_skill(data.get("skills"))
+        archetype_hint = self._extract_archetype_hint(data.get("skills"))
         passive_selection = tuple(int(n) for n in data.get("passiveSelection") or [])
 
         return CharacterDetail(
@@ -202,7 +232,7 @@ class NinjaCharsFetcher:
             name=data["name"],
             level=int(data["level"]),
             char_class=data["class"],
-            main_skill=main_skill,
+            archetype_hint=archetype_hint,
             items=items,
             passive_selection=passive_selection,
         )
@@ -235,7 +265,14 @@ class NinjaCharsFetcher:
         )
 
     @staticmethod
-    def _extract_main_skill(skills: Any) -> Optional[str]:
+    def _extract_archetype_hint(skills: Any) -> Optional[str]:
+        """First gem of the first skill group -- a *guess*, and a bad one for
+        "main skill" (2026-09-21 survey: in real characters the first group is
+        routinely a low-DPS utility skill, and in PoE2 it is often a spirit
+        skill). Kept only because the legacy per-slot archetype bucketing
+        (`mod_counts` / meta/latest.json, still consumed) was built on it;
+        never use it as a skill identity. The skill-centric pipeline takes the
+        skill from the poe.ninja list a character was pulled from instead."""
         if not isinstance(skills, list) or not skills:
             return None
         try:
@@ -252,34 +289,3 @@ class NinjaCharsFetcher:
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             log.warning("ninja_chars: could not write failed response dump", exc_info=True)
-
-
-class DedupedCharacterCache:
-    """Ensures each (account, name) is fetched at most once per snapshot run
-    (spec 6.2) even though the same character can appear in multiple
-    per-slot lists from ninja_builds.NinjaBuildsFetcher.fetch_all."""
-
-    def __init__(self, fetcher: NinjaCharsFetcher, snapshot: SnapshotVersion):
-        self._fetcher = fetcher
-        self._snapshot = snapshot
-        self._cache: dict[tuple[str, str], Optional[CharacterDetail]] = {}
-        self.fetched_count = 0
-        self.cache_hit_count = 0
-        self.failed_count = 0
-
-    def get(self, account: str, name: str) -> Optional[CharacterDetail]:
-        key = (account, name)
-        if key in self._cache:
-            self.cache_hit_count += 1
-            return self._cache[key]
-
-        try:
-            detail = self._fetcher.fetch_character(self._snapshot, account, name)
-            self.fetched_count += 1
-        except Exception as e:
-            log.warning("ninja_chars: skip character %s/%s: %s", account, name, e)
-            detail = None
-            self.failed_count += 1
-
-        self._cache[key] = detail
-        return detail

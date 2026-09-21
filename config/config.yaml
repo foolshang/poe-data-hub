@@ -120,10 +120,42 @@ skill_meta:
   # considered too thin to publish on its own -- not yet wired to an actual
   # publish step (that's a later phase), but query_skill_mod_counts' 4-tier
   # fallback already uses it to decide when to widen to a coarser tier.
+  # (Legacy per-slot dimension only; the skill-centric pipeline below uses
+  # percentage thresholds exclusively.)
   min_population_publish: 20
+
+  # Skill-centric collection (2026-09-21): top-100 characters per poe.ninja
+  # skill list instead of top-100 per equipment slot. See SPEC.md "Skill-centric
+  # collection". Every percentage is of the whole league population
+  # (poe.ninja's own count of indexed characters, ~124k), never of the
+  # sampled characters. main and spirit (PoE2) skills follow the same rules.
+  collect:
+    # Whether the *scheduler* (and a plain `--run-meta-once`) also runs the
+    # skill-centric job. Keep false until the first manual runs have finished
+    # (`--run-meta-once --game <g> --only skill` always runs it, this flag or
+    # not) -- a first run takes hours per game and must not start by surprise.
+    scheduled: false
+    min_skill_pct: 0.1          # skip skills used by < this % of the league
+    min_ascendancy_pct: 0.1     # cut characters of classes < this % (unascended base classes)
+    min_member_list_count: 20   # PoE1 Vaal folding: don't request a Vaal/base list with fewer characters
+    fold_vaal: true             # PoE1: "Vaal Reap" characters count under "Reap"
+    list_size: 100              # rows kept per list (poe.ninja returns 100)
+    reuse_max_age_days: 7       # refetch a character's detail when the stored copy is older
+    resume_max_age_hours: 48    # an unfinished run older than this is abandoned, not resumed
+    max_failed_list_pct: 5.0    # abort (nothing counted) if more lists than this % fail
+    max_failed_char_pct: 25.0   # abort (nothing counted) if more character fetches than this % fail
+    snapshot_refresh_seconds: 1800  # re-resolve poe.ninja's index version this often mid-run
+    progress_every_lists: 25
+    progress_every_chars: 250
+  # Publish-time filter for per-skill mods/passives (used by the publish step):
+  # drop entries used by < this % of that skill's characters. Percentage only --
+  # no count-based cutoff (the old count>=5 / population>=20 rules do not apply).
+  publish:
+    min_usage_pct: 0.1
 
 retention:
   char_items_days: 90
+  char_details_days: 30      # shared character cache (skill-centric + legacy jobs)
   meta_files_days: 30
   failed_responses_days: 30
   log_rotate_days: 7

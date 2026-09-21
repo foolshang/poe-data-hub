@@ -9,13 +9,9 @@ from src.fetchers.ninja_builds import CharacterRef
 from src.fetchers.ninja_chars import CharacterDetail, ItemDetail, ItemMods
 from src.processing.aggregator import (
     aggregate_jewels,
-    aggregate_jewels_by_skill,
-    aggregate_keypassives_by_skill,
     aggregate_slot,
-    aggregate_slot_by_skill,
     bracket_for_level,
     compute_archetype_distribution,
-    compute_skill_bracket_population,
     reprocess_chars_to_skill_mod_counts,
 )
 from src.processing.archetyper import Archetyper
@@ -88,16 +84,16 @@ def _jewel(base_slot, mods_explicit):
 
 def test_aggregate_slot_counts_per_character_not_per_item(normalizer, archetyper):
     char_a = CharacterDetail(
-        account="a", name="A", level=100, char_class="X", main_skill="Herald of Ash",
+        account="a", name="A", level=100, char_class="X", archetype_hint="Herald of Ash",
         items=[_ring(["+87 to maximum Life"]), _weapon("Wand")],
     )
     char_b = CharacterDetail(
-        account="b", name="B", level=100, char_class="X", main_skill="Shield Wall",
+        account="b", name="B", level=100, char_class="X", archetype_hint="Shield Wall",
         items=[_ring(["+87 to maximum Life"]), _ring(["+23% to Cold Resistance"]), _weapon("Two Handed Mace")],
     )
     lookup = {("a", "A"): char_a, ("b", "B"): char_b}
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill="Herald of Ash"),
-            CharacterRef(name="B", account="b", level=100, char_class="X", main_skill="Shield Wall")]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint="Herald of Ash"),
+            CharacterRef(name="B", account="b", level=100, char_class="X", archetype_hint="Shield Wall")]
 
     results = aggregate_slot("ring", refs, lambda acc, nm: lookup[(acc, nm)], archetyper, normalizer)
     by_key = {(r.archetype, r.stat_id): r for r in results}
@@ -116,13 +112,13 @@ def test_aggregate_slot_counts_per_character_not_per_item(normalizer, archetyper
 
 
 def test_aggregate_slot_value_min_max(normalizer, archetyper):
-    char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", main_skill=None,
+    char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", archetype_hint=None,
                               items=[_ring(["+40 to maximum Life"])])
-    char_b = CharacterDetail(account="b", name="B", level=100, char_class="X", main_skill=None,
+    char_b = CharacterDetail(account="b", name="B", level=100, char_class="X", archetype_hint=None,
                               items=[_ring(["+115 to maximum Life"])])
     lookup = {("a", "A"): char_a, ("b", "B"): char_b}
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill=None),
-            CharacterRef(name="B", account="b", level=100, char_class="X", main_skill=None)]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint=None),
+            CharacterRef(name="B", account="b", level=100, char_class="X", archetype_hint=None)]
 
     results = aggregate_slot("ring", refs, lambda acc, nm: lookup[(acc, nm)], archetyper, normalizer)
     life = next(r for r in results if r.archetype == "all")
@@ -135,7 +131,7 @@ def test_aggregate_slot_empty_list_returns_empty(normalizer, archetyper):
 
 
 def test_aggregate_slot_skips_missing_character_detail(normalizer, archetyper):
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill=None)]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint=None)]
     results = aggregate_slot("ring", refs, lambda a, n: None, archetyper, normalizer)
     assert results == []
 
@@ -143,11 +139,11 @@ def test_aggregate_slot_skips_missing_character_detail(normalizer, archetyper):
 def test_aggregate_jewels_denominator_is_per_gem(normalizer, archetyper):
     # char A has TWO emerald jewels (both with the same mod) -> denominator counts 2 gems, not 1 character.
     char_a = CharacterDetail(
-        account="a", name="A", level=100, char_class="X", main_skill=None,
+        account="a", name="A", level=100, char_class="X", archetype_hint=None,
         items=[_jewel("jewel:emerald", ["+23% to Cold Resistance"]), _jewel("jewel:emerald", ["+23% to Cold Resistance"])],
     )
     lookup = {("a", "A"): char_a}
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill=None)]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint=None)]
 
     results, denom_by_base = aggregate_jewels(refs, lambda acc, nm: lookup[(acc, nm)], archetyper, normalizer)
     all_result = next(r for r in results if r.archetype == "all")
@@ -159,11 +155,11 @@ def test_aggregate_jewels_denominator_is_per_gem(normalizer, archetyper):
 
 def test_aggregate_jewels_different_base_types_are_separate(normalizer, archetyper):
     char_a = CharacterDetail(
-        account="a", name="A", level=100, char_class="X", main_skill=None,
+        account="a", name="A", level=100, char_class="X", archetype_hint=None,
         items=[_jewel("jewel:emerald", ["+23% to Cold Resistance"]), _jewel("jewel:sapphire", ["+23% to Cold Resistance"])],
     )
     lookup = {("a", "A"): char_a}
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill=None)]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint=None)]
 
     results, denom_by_base = aggregate_jewels(refs, lambda acc, nm: lookup[(acc, nm)], archetyper, normalizer)
     slots = {r.slot for r in results}
@@ -176,13 +172,13 @@ def test_aggregate_jewels_different_base_types_are_separate(normalizer, archetyp
 
 
 def test_compute_archetype_distribution(normalizer, archetyper):
-    char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", main_skill="Herald of Ash", items=[])
-    char_b = CharacterDetail(account="b", name="B", level=100, char_class="X", main_skill="Herald of Ice", items=[])
-    char_c = CharacterDetail(account="c", name="C", level=100, char_class="X", main_skill="Shield Wall", items=[_weapon("Bow")])
+    char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", archetype_hint="Herald of Ash", items=[])
+    char_b = CharacterDetail(account="b", name="B", level=100, char_class="X", archetype_hint="Herald of Ice", items=[])
+    char_c = CharacterDetail(account="c", name="C", level=100, char_class="X", archetype_hint="Shield Wall", items=[_weapon("Bow")])
     lookup = {("a", "A"): char_a, ("b", "B"): char_b, ("c", "C"): char_c}
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill="Herald of Ash"),
-            CharacterRef(name="B", account="b", level=100, char_class="X", main_skill="Herald of Ice"),
-            CharacterRef(name="C", account="c", level=100, char_class="X", main_skill="Shield Wall")]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint="Herald of Ash"),
+            CharacterRef(name="B", account="b", level=100, char_class="X", archetype_hint="Herald of Ice"),
+            CharacterRef(name="C", account="c", level=100, char_class="X", archetype_hint="Shield Wall")]
 
     dist = compute_archetype_distribution(refs, lambda acc, nm: lookup[(acc, nm)], archetyper)
     by_archetype = {d["archetype"]: d["pct"] for d in dist}
@@ -202,13 +198,13 @@ def test_compute_archetype_distribution_empty_refs_returns_empty_list(archetyper
 
 
 def test_rank_in_slot_orders_by_count_desc(normalizer, archetyper):
-    char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", main_skill=None,
+    char_a = CharacterDetail(account="a", name="A", level=100, char_class="X", archetype_hint=None,
                               items=[_ring(["+87 to maximum Life", "+23% to Cold Resistance"])])
-    char_b = CharacterDetail(account="b", name="B", level=100, char_class="X", main_skill=None,
+    char_b = CharacterDetail(account="b", name="B", level=100, char_class="X", archetype_hint=None,
                               items=[_ring(["+87 to maximum Life"])])
     lookup = {("a", "A"): char_a, ("b", "B"): char_b}
-    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", main_skill=None),
-            CharacterRef(name="B", account="b", level=100, char_class="X", main_skill=None)]
+    refs = [CharacterRef(name="A", account="a", level=100, char_class="X", archetype_hint=None),
+            CharacterRef(name="B", account="b", level=100, char_class="X", archetype_hint=None)]
 
     results = aggregate_slot("ring", refs, lambda acc, nm: lookup[(acc, nm)], archetyper, normalizer)
     all_results = sorted((r for r in results if r.archetype == "all"), key=lambda r: r.rank_in_slot)
@@ -245,136 +241,18 @@ def test_bracket_for_level_none_level_returns_none():
     assert bracket_for_level(None, LEVEL_BRACKETS) is None
 
 
-def test_aggregate_slot_by_skill_normalizes_and_buckets_by_bracket(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball",
-                              items=[_ring(["+87 to maximum Life"])])
-    char_b = CharacterDetail(account="b", name="B", level=30, char_class="X", main_skill="Fireball",
-                              items=[_ring(["+87 to maximum Life"])])
-    char_c = CharacterDetail(account="c", name="C", level=95, char_class="X", main_skill="Some Unknown Gem",
-                              items=[_ring(["+87 to maximum Life"])])
-    lookup = {("a", "A"): char_a, ("b", "B"): char_b, ("c", "C"): char_c}
-    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball"),
-            CharacterRef(name="B", account="b", level=30, char_class="X", main_skill="Fireball"),
-            CharacterRef(name="C", account="c", level=95, char_class="X", main_skill="Some Unknown Gem")]
-
-    results = aggregate_slot_by_skill("ring", refs, lambda acc, nm: lookup[(acc, nm)], normalizer, skill_normalizer, archetyper, LEVEL_BRACKETS)
-    by_key = {(r.main_skill, r.level_bracket): r for r in results}
-
-    assert by_key[("Fireball", "90-100")].population == 1
-    assert by_key[("Fireball", "28-65")].population == 1
-    assert by_key[("unknown", "90-100")].population == 1
-    assert ("Fireball", "90-100") != ("Fireball", "28-65")  # distinct brackets, not merged
-
-
-def test_aggregate_slot_by_skill_excludes_below_bracket_range(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(account="a", name="A", level=5, char_class="X", main_skill="Fireball",
-                              items=[_ring(["+87 to maximum Life"])])
-    lookup = {("a", "A"): char_a}
-    refs = [CharacterRef(name="A", account="a", level=5, char_class="X", main_skill="Fireball")]
-    results = aggregate_slot_by_skill("ring", refs, lambda acc, nm: lookup[(acc, nm)], normalizer, skill_normalizer, archetyper, LEVEL_BRACKETS)
-    assert results == []
-
-
-def test_aggregate_jewels_by_skill_counts_per_gem_instance(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(
-        account="a", name="A", level=95, char_class="X", main_skill="Fireball",
-        items=[_jewel("jewel:emerald", ["+23% to Cold Resistance"]), _jewel("jewel:emerald", ["+23% to Cold Resistance"])],
-    )
-    lookup = {("a", "A"): char_a}
-    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball")]
-
-    results = aggregate_jewels_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], normalizer, skill_normalizer, archetyper, LEVEL_BRACKETS)
-    row = next(r for r in results if r.slot == "jewel:emerald")
-    assert row.main_skill == "Fireball"
-    assert row.level_bracket == "90-100"
-    assert row.population == 2  # two gem instances, not one character
-    assert row.count == 2
-
-
-def test_compute_skill_bracket_population(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
-    char_b = CharacterDetail(account="b", name="B", level=96, char_class="X", main_skill="Fireball", items=[])
-    char_c = CharacterDetail(account="c", name="C", level=30, char_class="X", main_skill="Fireball", items=[])
-    lookup = {("a", "A"): char_a, ("b", "B"): char_b, ("c", "C"): char_c}
-    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball"),
-            CharacterRef(name="B", account="b", level=96, char_class="X", main_skill="Fireball"),
-            CharacterRef(name="C", account="c", level=30, char_class="X", main_skill="Fireball")]
-
-    pop = compute_skill_bracket_population(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, LEVEL_BRACKETS)
-    assert pop == {("Fireball", "90-100"): 2, ("Fireball", "28-65"): 1}
-
-
-def test_aggregate_keypassives_by_skill_counts_per_character(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
-    char_b = CharacterDetail(account="b", name="B", level=96, char_class="X", main_skill="Fireball", items=[])
-    refs = [
-        CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball", keypassives=("Dance with Death",)),
-        CharacterRef(name="B", account="b", level=96, char_class="X", main_skill="Fireball", keypassives=("Dance with Death", "Ancestral Bond")),
-    ]
-    lookup = {("a", "A"): char_a, ("b", "B"): char_b}
-
-    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
-
-    by_kp = {r.keypassive: r for r in results}
-    assert by_kp["Dance with Death"].count == 2
-    assert by_kp["Dance with Death"].population == 2
-    assert by_kp["Dance with Death"].usage_pct == 100.0
-    assert by_kp["Ancestral Bond"].count == 1
-    assert by_kp["Ancestral Bond"].usage_pct == 50.0
-    assert all(r.main_skill == "Fireball" and r.level_bracket == "90-100" for r in results)
-
-
-def test_aggregate_keypassives_by_skill_dedupes_repeated_keypassive_per_character(normalizer, archetyper, skill_normalizer):
-    """A character listing the same keypassive twice (shouldn't happen, but
-    defensively) must count once, same rule as a stat_id on regular slots."""
-    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
-    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball", keypassives=("Dance with Death", "Dance with Death"))]
-    lookup = {("a", "A"): char_a}
-
-    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
-
-    assert len(results) == 1
-    assert results[0].count == 1
-
-
-def test_aggregate_keypassives_by_skill_skips_characters_below_first_bracket(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(account="a", name="A", level=10, char_class="X", main_skill="Fireball", items=[])
-    refs = [CharacterRef(name="A", account="a", level=10, char_class="X", main_skill="Fireball", keypassives=("Dance with Death",))]
-    lookup = {("a", "A"): char_a}
-
-    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
-
-    assert results == []
-
-
-def test_aggregate_keypassives_by_skill_no_keypassives_produces_no_rows(normalizer, archetyper, skill_normalizer):
-    char_a = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=[])
-    refs = [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball")]  # keypassives defaults to ()
-    lookup = {("a", "A"): char_a}
-
-    results = aggregate_keypassives_by_skill(refs, lambda acc, nm: lookup[(acc, nm)], skill_normalizer, archetyper, LEVEL_BRACKETS)
-
-    assert results == []
-
-
-def test_reprocess_chars_to_skill_mod_counts_matches_live_aggregation(normalizer, archetyper, skill_normalizer):
-    """The offline reprocess path (item 13, no CharacterRef/get_detail) must
-    produce the same population/count as the live aggregate_slot_by_skill
-    path for equivalent input."""
+def test_reprocess_chars_to_skill_mod_counts_buckets_by_normalized_skill_and_bracket(normalizer, archetyper, skill_normalizer):
+    """Offline reprocess of stored legacy rows (item 13): skill normalized, level
+    bucketed, one population entry per (slot, skill, bracket, archetype)."""
     items = [_ring(["+87 to maximum Life"])]
-    chars = [("Fireball", 95, items)]
+    chars = [("Fireball", 95, items), ("Fireball", 96, items), ("Some Unknown Gem", 95, items)]
 
-    live_char = CharacterDetail(account="a", name="A", level=95, char_class="X", main_skill="Fireball", items=items)
-    live_results = aggregate_slot_by_skill(
-        "ring", [CharacterRef(name="A", account="a", level=95, char_class="X", main_skill="Fireball")],
-        lambda acc, nm: live_char, normalizer, skill_normalizer, archetyper, LEVEL_BRACKETS,
-    )
-    reprocessed = reprocess_chars_to_skill_mod_counts(chars, normalizer, skill_normalizer, archetyper, LEVEL_BRACKETS)
+    results = reprocess_chars_to_skill_mod_counts(chars, normalizer, skill_normalizer, archetyper, LEVEL_BRACKETS)
 
-    assert len(live_results) == 1 and len(reprocessed) == 1
-    live, repro = live_results[0], reprocessed[0]
-    assert (repro.slot, repro.main_skill, repro.level_bracket, repro.archetype, repro.stat_id, repro.count, repro.population) == \
-           (live.slot, live.main_skill, live.level_bracket, live.archetype, live.stat_id, live.count, live.population)
+    by_skill = {r.main_skill: r for r in results}
+    assert by_skill["Fireball"].population == 2 and by_skill["Fireball"].count == 2
+    assert by_skill["Fireball"].level_bracket == "90-100"
+    assert by_skill["unknown"].population == 1
 
 
 def test_reprocess_chars_to_skill_mod_counts_handles_jewels_and_multiple_slots(normalizer, archetyper, skill_normalizer):

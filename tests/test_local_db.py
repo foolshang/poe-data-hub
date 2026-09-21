@@ -308,3 +308,162 @@ def test_iter_keypassive_counts_does_not_leak_other_leagues_or_games(tmp_path):
     assert len(rows) == 1
     assert rows[0][3] == "Dance with Death"
     db.close()
+
+
+# --- Skill-centric collection (2026-09-21) -----------------------------------------
+
+import pytest  # noqa: E402
+
+from src.storage.local_db import COLLECTION_METHOD_LEGACY, COLLECTION_METHOD_SKILL  # noqa: E402
+
+
+def test_migration_marks_every_existing_snapshot_as_legacy_slot_top100(tmp_path):
+    """A production DB from before the skill-centric collection: snapshots have
+    no collection_method column. After migrating, all existing rows must carry
+    'legacy_slot_top100' (their main_skill is a first-gem guess, unreliable),
+    while new skill-centric snapshots carry their own marker."""
+    db_path = tmp_path / "prod.sqlite3"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_date TEXT NOT NULL, league TEXT NOT NULL,
+            days_since_league_start INTEGER, sample_total INTEGER NOT NULL,
+            unique_characters_fetched INTEGER NOT NULL, fetch_failed INTEGER NOT NULL, created_at TEXT NOT NULL,
+            game TEXT NOT NULL DEFAULT 'poe2')"""
+    )
+    conn.execute(
+        "INSERT INTO snapshots (snapshot_date, league, sample_total, unique_characters_fetched, fetch_failed, created_at, game) "
+        "VALUES ('2026-09-16', 'Allflame', 2183, 1334, 0, '2026-09-16T11:14:35Z', 'poe1')"
+    )
+    conn.commit()
+    conn.close()
+
+    db = LocalDb(db_path)
+    assert db._conn.execute("SELECT collection_method FROM snapshots WHERE id = 1").fetchone() == (COLLECTION_METHOD_LEGACY,)
+    new_id = db.insert_snapshot("poe1", "Allflame", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    default_id = db.insert_snapshot("poe1", "Allflame", 5, 0, 0, 0)  # the legacy job passes nothing
+    methods = dict(db._conn.execute("SELECT id, collection_method FROM snapshots").fetchall())
+    assert methods == {1: COLLECTION_METHOD_LEGACY, new_id: COLLECTION_METHOD_SKILL, default_id: COLLECTION_METHOD_LEGACY}
+    db.close()
+
+
+def test_char_details_freshness_rules(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    detail = {"account": "a", "name": "N", "level": 99, "items": []}
+    db.upsert_char_detail("poe1", "L", detail, list_level=98)
+
+    assert db.get_fresh_char_detail("poe1", "a", "N", "L", 98, 7) == detail       # list row unchanged
+    assert db.get_fresh_char_detail("poe1", "a", "N", "L", 99, 7) is None          # list row moved
+    assert db.get_fresh_char_detail("poe1", "a", "N", "Other", 98, 7) is None      # other league
+    assert db.get_fresh_char_detail("poe2", "a", "N", "L", 98, 7) is None          # other game
+    assert db.get_fresh_char_detail("poe1", "ghost", "N", "L", 98, 7) is None
+
+    db._conn.execute("UPDATE char_details SET fetched_at = '2020-01-01T00:00:00Z'")
+    assert db.get_fresh_char_detail("poe1", "a", "N", "L", 98, 7) is None          # too old
+    assert db.get_char_detail_any("poe1", "a", "N") == detail                      # but still readable for counting
+    assert db.cleanup_old_char_details(30) == 1
+    assert db.get_char_detail_any("poe1", "a", "N") is None
+    db.close()
+
+
+def test_upsert_char_detail_replaces_the_row(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    db.upsert_char_detail("poe1", "L", {"account": "a", "name": "N", "level": 90}, list_level=90)
+    db.upsert_char_detail("poe1", "L", {"account": "a", "name": "N", "level": 91}, list_level=91)
+    assert db._conn.execute("SELECT COUNT(*), MAX(level) FROM char_details").fetchone() == (1, 91)
+    db.close()
+
+
+def _new_run(db, league="L", lists=None, game="poe2"):
+    snap = db.insert_snapshot(game, league, None, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    lists = lists or [{"skill_type": "main", "skill": "Fireball", "list_name": "Fireball", "facet_count": 500}]
+    return snap, db.create_skill_run(game, league, snap, 100_000, {"plan": True}, lists)
+
+
+def test_resumable_run_lookup_and_abandonment(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    _snap, run_id = _new_run(db)
+
+    found = db.find_resumable_skill_run("poe2", "L", 48)
+    assert found["id"] == run_id and found["plan"] == {"plan": True}
+    assert db.find_resumable_skill_run("poe1", "L", 48) is None       # other game
+    assert db.find_resumable_skill_run("poe2", "Other", 48) is None   # other league...
+    assert db._conn.execute("SELECT status FROM skill_runs WHERE id = ?", (run_id,)).fetchone() == ("abandoned",)  # ...abandons it
+
+    _snap2, run2 = _new_run(db)
+    db._conn.execute("UPDATE skill_runs SET started_at = '2020-01-01T00:00:00Z' WHERE id = ?", (run2,))
+    assert db.find_resumable_skill_run("poe2", "L", 48) is None       # too old to resume
+    assert db._conn.execute("SELECT status FROM skill_runs WHERE id = ?", (run2,)).fetchone() == ("abandoned",)
+
+    _snap3, run3 = _new_run(db)
+    db.finish_skill_run(run3, "finished", {})
+    assert db.find_resumable_skill_run("poe2", "L", 48) is None       # finished runs are never resumed
+    db.close()
+
+
+def test_saving_a_list_is_atomic_and_marks_it_done(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    _snap, run_id = _new_run(db)
+    members = [{"account": "a", "name": "A", "level": 99, "class": "Slayer", "keypassives": ("K1",)}]
+    db.save_skill_list_members(run_id, "main", "Fireball", "Fireball", 500, members)
+
+    assert db.pending_skill_lists(run_id) == []
+    assert db.skill_list_counts(run_id) == {"done": 1}
+    assert db.iter_skill_members(run_id, "main", "Fireball") == [("a", "A", 99, "Slayer", ["K1"])]
+
+    # a poisoned member (missing key) must roll the whole list back, not leave it half-saved
+    db2 = LocalDb(tmp_path / "t2.sqlite3")
+    _snap2, run2 = _new_run(db2)
+    with pytest.raises(KeyError):
+        db2.save_skill_list_members(run2, "main", "Fireball", "Fireball", 500, [members[0], {"account": "b"}])
+    assert db2.pending_skill_lists(run2) != []
+    assert db2._conn.execute("SELECT COUNT(*) FROM skill_run_members").fetchone() == (0,)
+    db.close()
+    db2.close()
+
+
+def test_a_failed_list_stays_pending_for_the_next_attempt(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    _snap, run_id = _new_run(db)
+    db.mark_skill_list_failed(run_id, "main", "Fireball")
+    assert db.skill_list_counts(run_id) == {"failed": 1}
+    assert [l["list_name"] for l in db.pending_skill_lists(run_id)] == ["Fireball"]
+    db.close()
+
+
+def test_member_keys_and_cut_stats_exclude_cut_classes(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    lists = [
+        {"skill_type": "main", "skill": "A", "list_name": "A", "facet_count": 9},
+        {"skill_type": "spirit", "skill": "B", "list_name": "B", "facet_count": 8},
+    ]
+    _snap, run_id = _new_run(db, lists=lists)
+
+    def m(acct, cls, lv=99):
+        return {"account": acct, "name": acct.upper(), "level": lv, "class": cls, "keypassives": ()}
+
+    db.save_skill_list_members(run_id, "main", "A", "A", 9, [m("x", "Slayer"), m("y", "Witch")])
+    db.save_skill_list_members(run_id, "spirit", "B", "B", 8, [m("x", "Slayer"), m("z", "Witch")])
+
+    assert sorted(db.iter_run_member_keys(run_id, {"Witch"})) == [("x", "X", 99)]
+    assert db.member_stats(run_id, {"Witch"}) == {"member_rows": 4, "cut_rows": 2, "unique_chars": 3, "unique_chars_cut": 2}
+    assert db.run_skill_groups(run_id) == [("main", "A"), ("spirit", "B")]
+    db.close()
+
+
+def test_replace_skill_counts_is_idempotent_per_group(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    snap, _run = _new_run(db)
+    stat = {"level_bracket": "90-100", "slot": "ring", "stat_id": "s1", "mod_kind": "explicit", "count": 2,
+            "population": 4, "slot_holders": 3, "usage_pct": 50.0, "value_min": 1.0, "value_max": 2.0}
+    passive = {"level_bracket": "90-100", "keypassive": "K", "count": 1, "population": 4, "usage_pct": 25.0}
+    pop = {"level_bracket": "90-100", "population": 4, "facet_count": 500}
+    for _ in range(2):  # twice: a recount must replace, never accumulate
+        db.replace_skill_counts_for_snapshot(snap, "poe2", 9, "main", "Fireball", [stat], [passive], [pop])
+    db.replace_skill_counts_for_snapshot(snap, "poe2", 9, "spirit", "Fireball", [stat], [passive], [pop])
+
+    counts = {t: db._conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+              for t in ("skill_stat_counts", "skill_passive_counts", "skill_populations")}
+    assert counts == {"skill_stat_counts": 2, "skill_passive_counts": 2, "skill_populations": 2}  # main + spirit, once each
+    assert db._conn.execute("SELECT days_since_league_start FROM skill_stat_counts").fetchone() == (9,)
+    db.close()

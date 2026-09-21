@@ -1,7 +1,7 @@
 """Entry point.
 
     python -m src.main --run-prices-once
-    python -m src.main --run-meta-once
+    python -m src.main --run-meta-once [--game poe1|poe2 ...] [--only slot|skill]
     python -m src.main --run-cleanup-once
     python -m src.main --run-news-once
     python -m src.main --run-gems-once
@@ -31,31 +31,28 @@ from src.fetchers import deals, news, ninja_prices, scout_prices
 from src.fetchers.league_dates import LeagueDatesFetcher
 from src.fetchers.league_detector import LeagueDetector
 from src.fetchers.ninja_builds import NinjaBuildsFetcher
-from src.fetchers.ninja_chars import DedupedCharacterCache, NinjaCharsFetcher, item_detail_from_dict
+from src.fetchers.ninja_chars import NinjaCharsFetcher, item_detail_from_dict
 from src.fetchers.ninja_prices import NinjaPricesFetcher
 from src.fetchers.scout_prices import ScoutPricesFetcher
 from src.processing.aggregator import (
     aggregate_jewels,
-    aggregate_jewels_by_skill,
-    aggregate_keypassives_by_skill,
     aggregate_slot,
-    aggregate_slot_by_skill,
     compute_archetype_distribution,
-    compute_skill_bracket_population,
     reprocess_chars_to_skill_mod_counts,
 )
 from src.processing.archetyper import Archetyper
 from src.processing.archive_export import DEFAULT_ARCHIVE_DIR, export_league_archive
+from src.processing.char_cache import SnapshotProvider, StoreBackedCharacterCache
+from src.processing.skill_collect import CollectConfig, run_skill_collection
 from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
-from src.storage.local_db import LocalDb
+from src.storage.local_db import COLLECTION_METHOD_LEGACY, LocalDb
 from src.storage.publisher import (
     PricesPublisher,
     build_index_schema,
     build_meta_schema,
     build_mtx_schema,
     build_news_schema,
-    build_passives_schema,
     build_prices_schema,
     sanitize_league_filename,
 )
@@ -528,9 +525,10 @@ def run_reprocess_char_items(cfg: dict[str, Any]) -> dict[str, Any]:
     return per_game
 
 
-def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str) -> dict[str, Any]:
-    job_start = time.monotonic()
-
+def _detect_league_and_dates(http: HttpClient, cfg: dict[str, Any], game: str):
+    """League name, its start/end dates, and `days_since_league_start` (None
+    only when no start date could be established -- see
+    `LeagueDatesFetcher._find_start`)."""
     league_cfg = cfg.get("league", {})
     detector = LeagueDetector(
         http,
@@ -547,9 +545,29 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
         (datetime.now(timezone.utc) - league_dates.start_at).days if league_dates.start_at else None
     )
     log.info("meta job(%s): league_dates start_at=%s end_at=%s", game, league_dates.start_at, league_dates.end_at)
+    return league, league_dates, days_since_league_start
 
+
+def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str) -> dict[str, Any]:
+    """The legacy per-slot job: top-100 characters per equipment slot ->
+    `mod_counts` (archetype-based) -> meta/latest.json. Kept because
+    consumers still read that file; a temporary bridge -- see SPEC.md
+    "Skill-centric collection". It no longer produces any skill- or
+    passive-level data (that moved to `_run_skill_meta_for_game`), and its
+    first-gem `archetype_hint` is used for archetype bucketing only.
+
+    Shares the persistent character cache with the skill-centric job: a
+    character fetched by either is reused (same league + level, younger than
+    `skill_meta.collect.reuse_max_age_days`) instead of refetched."""
+    job_start = time.monotonic()
+    league, league_dates, days_since_league_start = _detect_league_and_dates(http, cfg, game)
+
+    collect_cfg = CollectConfig.from_cfg(cfg)
     builds_fetcher = NinjaBuildsFetcher(http, game=game)
-    snapshot = builds_fetcher.resolve_snapshot(league)
+    snapshots = SnapshotProvider(
+        lambda: builds_fetcher.resolve_snapshot(league), refresh_seconds=collect_cfg.snapshot_refresh_seconds
+    )
+    snapshot = snapshots.get()
 
     by_slot, per_slot_counts = builds_fetcher.fetch_all(snapshot)
     log.info("meta job(%s): fetched %d slot lists: %s", game, len(by_slot), per_slot_counts)
@@ -565,48 +583,36 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     log.info("meta job(%s): stats loaded from %s (fetched_at=%s)", game, normalizer.stats_source, normalizer.stats_fetched_at)
     archetyper = Archetyper()
 
-    skill_normalizer = SkillNormalizer(http, game=game, gems_url=_gems_url(cfg, game))
-    skill_normalizer.load()
-    log.info(
-        "meta job(%s): skill normalizer loaded=%s gems=%d", game, skill_normalizer.available, skill_normalizer.loaded_count,
-    )
-    level_brackets = _level_brackets(cfg)
-
-    chars_fetcher = NinjaCharsFetcher(http, game=game)
-    cache = DedupedCharacterCache(chars_fetcher, snapshot)
-
-    def get_detail(account: str, name: str):
-        return cache.get(account, name)
-
+    level_by_key = {(r.account, r.name): r.level for refs in by_slot.values() for r in refs}
     all_mod_counts = []
-    all_skill_mod_counts = []
     per_slot_sample: dict[str, int] = {}
-    for slot, char_refs in by_slot.items():
-        if slot == "jewel":
-            jewel_counts, denom_by_base = aggregate_jewels(char_refs, get_detail, archetyper, normalizer)
-            all_mod_counts.extend(jewel_counts)
-            per_slot_sample.update(denom_by_base)
-            all_skill_mod_counts.extend(
-                aggregate_jewels_by_skill(char_refs, get_detail, normalizer, skill_normalizer, archetyper, level_brackets)
-            )
-        else:
-            all_mod_counts.extend(aggregate_slot(slot, char_refs, get_detail, archetyper, normalizer))
-            per_slot_sample[slot] = len(char_refs)
-            all_skill_mod_counts.extend(
-                aggregate_slot_by_skill(slot, char_refs, get_detail, normalizer, skill_normalizer, archetyper, level_brackets)
-            )
-
-    unique_refs_by_key = {(r.account, r.name): r for refs in by_slot.values() for r in refs}
-    archetype_distribution = compute_archetype_distribution(list(unique_refs_by_key.values()), get_detail, archetyper)
-    skill_bracket_population = compute_skill_bracket_population(
-        list(unique_refs_by_key.values()), get_detail, skill_normalizer, level_brackets
-    )
-    all_keypassive_counts = aggregate_keypassives_by_skill(
-        list(unique_refs_by_key.values()), get_detail, skill_normalizer, archetyper, level_brackets
-    )
 
     db = LocalDb()
     try:
+        cache = StoreBackedCharacterCache(
+            db, NinjaCharsFetcher(http, game=game), snapshots, game, league,
+            max_age_days=collect_cfg.reuse_max_age_days, memoize=True,
+        )
+
+        def get_detail(account: str, name: str):
+            return cache.get(account, name, level_by_key.get((account, name)))
+
+        for slot, char_refs in by_slot.items():
+            if slot == "jewel":
+                jewel_counts, denom_by_base = aggregate_jewels(char_refs, get_detail, archetyper, normalizer)
+                all_mod_counts.extend(jewel_counts)
+                per_slot_sample.update(denom_by_base)
+            else:
+                all_mod_counts.extend(aggregate_slot(slot, char_refs, get_detail, archetyper, normalizer))
+                per_slot_sample[slot] = len(char_refs)
+
+        unique_refs_by_key = {(r.account, r.name): r for refs in by_slot.values() for r in refs}
+        archetype_distribution = compute_archetype_distribution(list(unique_refs_by_key.values()), get_detail, archetyper)
+        log.info(
+            "meta job(%s): characters -- fetched %d NEW, reused %d from the shared cache, %d unique loaded, %d failed",
+            game, cache.fetched_count, cache.reused_count, cache.unique_ok_count, cache.failed_count,
+        )
+
         _archive_previous_league_if_changed(db, publisher, game, league)
 
         snapshot_id = db.insert_snapshot(
@@ -614,29 +620,24 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             league=league,
             days_since_league_start=days_since_league_start,
             sample_total=sum(per_slot_counts.values()),
-            unique_characters_fetched=cache.fetched_count,
+            unique_characters_fetched=cache.unique_ok_count,
             fetch_failed=cache.failed_count,
+            collection_method=COLLECTION_METHOD_LEGACY,
         )
         for (account, name), ref in unique_refs_by_key.items():
             detail = get_detail(account, name)
             if detail is None:
                 continue
             archetype = archetyper.classify(
-                detail.main_skill, next((i.base_type for i in detail.items if i.slot == "weapon"), None)
+                detail.archetype_hint, next((i.base_type for i in detail.items if i.slot == "weapon"), None)
             )
             db.insert_char_item(
                 snapshot_id, account, name, detail.level, detail.char_class, archetype,
                 [dataclasses.asdict(i) for i in detail.items],
-                main_skill=detail.main_skill,
+                main_skill=None,  # never persist the first-gem guess as a "main skill"
                 passive_selection=list(detail.passive_selection),
             )
         db.insert_mod_counts(snapshot_id, [dataclasses.asdict(m) for m in all_mod_counts])
-        db.insert_skill_mod_counts(
-            snapshot_id, game, days_since_league_start, [dataclasses.asdict(m) for m in all_skill_mod_counts]
-        )
-        db.insert_keypassive_counts(
-            snapshot_id, game, days_since_league_start, [dataclasses.asdict(m) for m in all_keypassive_counts]
-        )
         db.commit()
     finally:
         db.close()
@@ -645,7 +646,7 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
         league=league,
         days_since_league_start=days_since_league_start,
         per_slot_sample=per_slot_sample,
-        unique_characters_fetched=cache.fetched_count,
+        unique_characters_fetched=cache.unique_ok_count,
         fetch_failed=cache.failed_count,
         archetype_distribution=archetype_distribution,
         stat_dictionary=normalizer.stat_dictionary(),
@@ -658,19 +659,6 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     publisher.publish(data, dated_path, cache_control="public, max-age=3600")
     log.info("meta job(%s): published %d mods (%d before count>=5 filter)", game, len(data["mods"]), len(all_mod_counts))
 
-    passives_data = build_passives_schema(
-        league=league,
-        days_since_league_start=days_since_league_start,
-        passives=[dataclasses.asdict(m) for m in all_keypassive_counts],
-        min_population=cfg.get("skill_meta", {}).get("min_population_publish", 20),
-    )
-    publisher.publish(passives_data, _passives_blob_path(game), cache_control="public, max-age=3600")
-    log.info(
-        "meta job(%s): published %d keypassives (%d before population>=%d filter)",
-        game, len(passives_data["passives"]), len(all_keypassive_counts),
-        cfg.get("skill_meta", {}).get("min_population_publish", 20),
-    )
-
     unmapped_pct = (
         round(normalizer.unmapped_count / normalizer.processed_count * 100, 2)
         if normalizer.processed_count else 0.0
@@ -678,55 +666,81 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
     peak_rss_mb = _peak_memory_mb()
     log.info("meta job(%s): peak RSS = %s MB", game, peak_rss_mb if peak_rss_mb is not None else "unknown (non-Unix)")
 
-    top_skills = sorted(
-        {skill for skill, _bracket in skill_bracket_population if skill != "unknown"},
-        key=lambda s: sum(pop for (sk, _b), pop in skill_bracket_population.items() if sk == s),
-        reverse=True,
-    )[:20]
-    thin_brackets = sorted(
-        f"{skill}/{bracket} ({pop})"
-        for (skill, bracket), pop in skill_bracket_population.items()
-        if skill != "unknown" and pop < cfg.get("skill_meta", {}).get("min_population_publish", 20)
-    )
-    log.info(
-        "meta job(%s): skill dimension -- %d rows, top skills=%s, %d thin bracket(s) below publish threshold, "
-        "%d unmapped skill name(s)",
-        game, len(all_skill_mod_counts), top_skills[:5], len(thin_brackets), len(skill_normalizer.unmapped_names),
-    )
-
     return {
         "data": data,
         "end_at": league_dates.end_at,
         "summary": {
             "duration_seconds": round(time.monotonic() - job_start, 1),
             "sample_total": sum(per_slot_counts.values()),
-            "unique_characters_fetched": cache.fetched_count,
-            "dedupe_savings": sum(per_slot_counts.values()) - cache.fetched_count,
+            "unique_characters_fetched": cache.unique_ok_count,
+            "characters_fetched_new": cache.fetched_count,
+            "characters_reused": cache.reused_count,
+            "dedupe_savings": sum(per_slot_counts.values()) - cache.unique_ok_count,
             "characters_failed": cache.failed_count,
             "mods_processed": normalizer.processed_count,
             "unmapped_mod_pct": unmapped_pct,
             "peak_rss_mb": peak_rss_mb,
             "stats_source": normalizer.stats_source,
             "stats_cache_fetched_at": normalizer.stats_fetched_at,
-            "skill_gems_loaded": skill_normalizer.loaded_count,
-            "skill_gems_available": skill_normalizer.available,
-            "unmapped_skill_names": dict(skill_normalizer.unmapped_names),
-            "skill_bracket_population": {f"{s}/{b}": p for (s, b), p in skill_bracket_population.items()},
-            "top_20_skills_by_population": top_skills,
-            "thin_brackets_below_publish_threshold": thin_brackets,
-            "skill_mod_counts_rows": len(all_skill_mod_counts),
-            "keypassive_counts_rows": len(all_keypassive_counts),
         },
     }
 
 
-def run_meta_once(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Runs poe2 then poe1 sequentially in one job invocation (approved:
-    same nightly cron slot, one game after the other -- see SPEC.md for the
-    measured combined wall-clock time and peak RAM). One game's failure
-    never blocks or corrupts the other's publish; one healthchecks.io ping
-    fires only after both have been attempted, so a failure in either game
-    is visible (task 7).
+def _run_skill_meta_for_game(
+    http: HttpClient, publisher: PricesPublisher, cfg: dict[str, Any], game: str,
+) -> dict[str, Any]:
+    """The skill-centric job: top-100 characters per poe.ninja skill list
+    (main, and spirit in PoE2), checkpointed and resumable -- see
+    `src/processing/skill_collect.py`."""
+    league, _league_dates, days_since_league_start = _detect_league_and_dates(http, cfg, game)
+
+    collect_cfg = CollectConfig.from_cfg(cfg)
+    builds_fetcher = NinjaBuildsFetcher(http, game=game)
+    snapshots = SnapshotProvider(
+        lambda: builds_fetcher.resolve_snapshot(league), refresh_seconds=collect_cfg.snapshot_refresh_seconds
+    )
+    firebase_bucket = cfg["firebase"]["bucket"]
+    normalizer = ModNormalizer(
+        http,
+        game=game,
+        cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
+        firebase_stats_url=f"https://storage.googleapis.com/{firebase_bucket}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+    )
+    normalizer.load()
+    log.info("skill meta job(%s): stats loaded from %s", game, normalizer.stats_source)
+
+    db = LocalDb()
+    try:
+        _archive_previous_league_if_changed(db, publisher, game, league)
+        cache = StoreBackedCharacterCache(
+            db, NinjaCharsFetcher(http, game=game), snapshots, game, league,
+            max_age_days=collect_cfg.reuse_max_age_days, memoize=False,
+        )
+        stats = run_skill_collection(
+            game=game, league=league, days_since_league_start=days_since_league_start,
+            builds_fetcher=builds_fetcher, snapshots=snapshots, cache=cache, db=db,
+            normalizer=normalizer, level_brackets=_level_brackets(cfg), config=collect_cfg,
+        )
+    finally:
+        db.close()
+    stats["peak_rss_mb"] = _peak_memory_mb()
+    log.info("skill meta job(%s): peak RSS = %s MB", game, stats["peak_rss_mb"])
+    return stats
+
+
+META_PARTS = ("slot", "skill")
+
+
+def run_meta_once(
+    cfg: dict[str, Any], games: Optional[list[str]] = None, parts: Optional[tuple[str, ...]] = None,
+) -> dict[str, dict[str, Any]]:
+    """Runs, per game (default: every configured game, one after the other):
+    the legacy per-slot job ("slot" part -> meta/latest.json) and then the
+    skill-centric job ("skill" part -> SQLite; resumable). `games` / `parts`
+    restrict that -- the multi-hour first skill-centric run is launched as
+    `--run-meta-once --game poe1 --only skill`. One game's failure never
+    blocks or corrupts another's; the single healthchecks.io ping fires only
+    when the full default run (every game, slot part) succeeded.
 
     Guarded by job_lock so the scheduler's own cron and a manually launched
     `--run-meta-once` (or two overlapping manual runs) can never race the
@@ -734,10 +748,12 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
     so locking here covers both callers. A second attempt while one is
     already running skips cleanly rather than colliding (see CLAUDE.md's
     2026-07-15 incident, where exactly this collision stalled poe.ninja
-    requests for hours via duplicate, uncoordinated retries)."""
+    requests for hours via duplicate, uncoordinated retries). The lock is
+    held for the whole multi-hour skill-centric run too, so the scheduler's
+    ticks simply skip while it works."""
     try:
         with job_lock.acquire("meta"):
-            return _run_meta_once_locked(cfg)
+            return _run_meta_once_locked(cfg, games, parts)
     except job_lock.JobAlreadyRunning as e:
         log.warning(
             "meta job: skip -- previous run still active (pid=%s, started_at=%s)",
@@ -746,21 +762,44 @@ def run_meta_once(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
         return {}
 
 
-def _run_meta_once_locked(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _run_meta_once_locked(
+    cfg: dict[str, Any], games: Optional[list[str]] = None, parts: Optional[tuple[str, ...]] = None,
+) -> dict[str, dict[str, Any]]:
     http = _build_http_client(cfg)
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
 
+    configured = list(cfg.get("game_versions", ["poe2"]))
+    selected = [g for g in configured if games is None or g in games]
+    unknown = [g for g in (games or []) if g not in configured]
+    if unknown:
+        raise ValueError(f"meta job: game(s) {unknown} not in configured game_versions {configured}")
+    explicit_parts = bool(parts)
+    parts = tuple(parts) if parts else META_PARTS
+    if not explicit_parts and not cfg.get("skill_meta", {}).get("collect", {}).get("scheduled", False):
+        # Off by default so a deploy can never silently start the multi-hour
+        # first skill-centric run; `--only skill` (explicit) always runs.
+        parts = tuple(p for p in parts if p != "skill")
+        log.info("meta job: skill-centric part is not scheduled (skill_meta.collect.scheduled=false); run it with --only skill")
+
     _mark_job_running(publisher, "meta")
     try:
         results: dict[str, dict[str, Any]] = {}
-        for game in cfg.get("game_versions", ["poe2"]):
-            try:
-                results[game] = _run_meta_for_game(http, publisher, cfg, game)
-            except Exception as e:
-                log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
+        for game in selected:
+            if "slot" in parts:
+                try:
+                    results[game] = _run_meta_for_game(http, publisher, cfg, game)
+                except Exception as e:
+                    log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
+            if "skill" in parts:
+                try:
+                    _run_skill_meta_for_game(http, publisher, cfg, game)
+                except Exception as e:
+                    log.error("skill meta job(%s): failed: %s", game, e, exc_info=True)
 
-        if _all_games_got_real_characters(cfg, results):
+        if "slot" not in parts or selected != configured:
+            log.info("meta job: partial run (games=%s, parts=%s) -- no healthcheck ping / status update", selected, parts)
+        elif _all_games_got_real_characters(cfg, results):
             _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
         else:
             log.warning(
@@ -768,7 +807,8 @@ def _run_meta_once_locked(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 "or failed entirely this cycle (sample_total by game: %s)",
                 {g: r.get("summary", {}).get("sample_total") for g, r in results.items()},
             )
-        _update_meta_status(publisher, results)
+        if results:
+            _update_meta_status(publisher, results)
 
         return {game: r["data"] for game, r in results.items()}
     finally:
@@ -999,6 +1039,8 @@ def run_cleanup_once(cfg: dict[str, Any]) -> None:
     db = LocalDb()
     try:
         deleted_rows = db.cleanup_old_char_items(older_than_days=retention_cfg.get("char_items_days", 90))
+        deleted_details = db.cleanup_old_char_details(older_than_days=retention_cfg.get("char_details_days", 30))
+        log.info("cleanup: removed %d stale char_details row(s)", deleted_details)
         log.info("cleanup job: deleted %d old char_items rows", deleted_rows)
     finally:
         db.close()
@@ -1340,6 +1382,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-prices-once", action="store_true")
     parser.add_argument("--run-meta-once", action="store_true")
+    parser.add_argument(
+        "--game", action="append", choices=["poe1", "poe2"],
+        help="With --run-meta-once: restrict to this game (repeatable). Default: every configured game.",
+    )
+    parser.add_argument(
+        "--only", choices=list(META_PARTS),
+        help="With --run-meta-once: 'slot' = legacy per-slot job only, 'skill' = skill-centric job only. Default: both.",
+    )
     parser.add_argument("--run-cleanup-once", action="store_true")
     parser.add_argument("--run-news-once", action="store_true")
     parser.add_argument("--run-gems-once", action="store_true")
@@ -1354,7 +1404,7 @@ def main() -> None:
     if args.run_prices_once:
         run_prices_once(cfg)
     elif args.run_meta_once:
-        run_meta_once(cfg)
+        run_meta_once(cfg, games=args.game, parts=(args.only,) if args.only else None)
     elif args.run_cleanup_once:
         run_cleanup_once(cfg)
     elif args.run_news_once:

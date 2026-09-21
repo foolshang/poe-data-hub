@@ -249,8 +249,25 @@ class CharacterRef:
     account: str
     level: int
     char_class: str
-    main_skill: Optional[str]
+    # NOT the character's main skill -- the first gem of poe.ninja's own
+    # per-character skill list, a guess kept only for the legacy per-slot
+    # archetype bucketing (see `_archetype_hint`). The skill-centric pipeline
+    # never reads this: a character's skill there is the list it was pulled
+    # from (`fetch_skill_list`).
+    archetype_hint: Optional[str]
     keypassives: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PopulationFacets:
+    """League population and per-facet character counts from an unfiltered
+    search response. `skills` = poe.ninja's "Main Skills" facet (in PoE2 a
+    character appears under ~6 of them), `spirit_skills` = "Spirit Skills"
+    (PoE2 only, else None), `classes` = character class/ascendancy counts."""
+    total: int
+    skills: dict[str, int]
+    spirit_skills: Optional[dict[str, int]]
+    classes: dict[str, int]
 
 
 @dataclass
@@ -366,6 +383,103 @@ class NinjaBuildsFetcher:
                     merged.append(char)
         return merged
 
+    # ------------------------------------------------------------------
+    # Skill-centric collection (2026-09-21): poe.ninja's search endpoint
+    # filters by skill (`skills=<name>` = "Main Skills"; `spiritgems=<name>`
+    # = "Spirit Skills", PoE2 only) and returns the top 100 rows by level, and
+    # its *unfiltered* response already carries the whole facet table (every
+    # skill with the number of characters using it), so listing candidate
+    # skills costs no extra request. See SPEC.md "Skill-centric collection".
+    # ------------------------------------------------------------------
+
+    def fetch_population_facets(self, snapshot: SnapshotVersion) -> "PopulationFacets":
+        """Unfiltered search response -> league population + per-skill /
+        per-class character counts. Validated before use; a bad response
+        dumps its raw bytes to `failed_responses/` and raises (never a silent
+        empty plan)."""
+        url = self._build_query_url(snapshot, {})
+        raw = self._http.get_bytes(url)
+        try:
+            body = pb.first(raw, 1)
+            if body is None:
+                raise pb.ProtoParseError("missing top-level field 1")
+            total = pb.first(body, 1)
+            _columns, dict_refs = self._parse_body(body)
+            raw_facets = self._parse_facets(body)
+            self._validate_facets(raw_facets, total, url)
+        except pb.ProtoParseError as e:
+            self._dump_failed_bytes(raw, url)
+            raise ValueError(f"ninja_builds({self._game}): could not parse facets ({url}): {e}") from e
+
+        self._save_last_good(self._last_good_sample_path.parent / f"last_good_facets_{self._game}.bin", raw)
+
+        def resolve(facet_name: str) -> dict[str, int]:
+            dict_name, entries = raw_facets[facet_name]
+            values = self._get_dictionary(dict_name, dict_refs.get(dict_name))
+            out: dict[str, int] = {}
+            for idx, count in entries:
+                if not 0 <= idx < len(values):
+                    self._dump_failed_bytes(raw, url)
+                    raise ValueError(
+                        f"ninja_builds({self._game}): facet {facet_name!r} index {idx} outside its "
+                        f"{dict_name!r} dictionary ({len(values)} entries) -- {url}"
+                    )
+                out[values[idx]] = out.get(values[idx], 0) + count
+            return out
+
+        return PopulationFacets(
+            total=int(total),
+            skills=resolve("skills"),
+            spirit_skills=resolve("spiritgems") if "spiritgems" in raw_facets else None,
+            classes=resolve("class"),
+        )
+
+    @staticmethod
+    def _parse_facets(body: bytes) -> dict[str, tuple[str, list[tuple[int, int]]]]:
+        """field 2 entries: {1: facet name, 2: dictionary name, 3*: {1: index
+        (absent = 0), 2: count}}."""
+        facets: dict[str, tuple[str, list[tuple[int, int]]]] = {}
+        for entry in pb.all_of(body, 2):
+            name = pb.as_str(pb.first(entry, 1))
+            dict_name = pb.as_str(pb.first(entry, 2))
+            rows = [(int(pb.first(e, 1) or 0), int(pb.first(e, 2) or 0)) for e in pb.all_of(entry, 3)]
+            facets[name] = (dict_name, rows)
+        return facets
+
+    def _validate_facets(self, facets: dict, total: Any, url: str) -> None:
+        if not isinstance(total, int) or total <= 0:
+            raise pb.ProtoParseError(f"facet response has no usable population total ({total!r}) in {url}")
+        required = ["skills", "class"] + (["spiritgems"] if self._game == "poe2" else [])
+        missing = [f for f in required if f not in facets or not facets[f][1]]
+        if missing:
+            raise pb.ProtoParseError(f"missing/empty facet(s) {missing}; found {sorted(facets)} in {url}")
+        class_sum = sum(c for _i, c in facets["class"][1])
+        if abs(class_sum - total) > max(1, total // 100):
+            raise pb.ProtoParseError(f"class facet sums to {class_sum}, not the population total {total} (>1% off) in {url}")
+
+    def fetch_skill_list(self, snapshot: SnapshotVersion, list_type: str, skill_name: str) -> tuple[int, list[CharacterRef]]:
+        """Top-100 characters (poe.ninja's own order: level descending) for
+        one skill. `list_type`: "main" -> `skills=`, "spirit" -> `spiritgems=`
+        (PoE2 only). Returns (population count for that skill as reported by
+        the server, rows). Rows carry `char_class` and `keypassives` resolved
+        from this same response's dictionaries."""
+        param = {"main": "skills", "spirit": "spiritgems"}.get(list_type)
+        if param is None or (list_type == "spirit" and self._game != "poe2"):
+            raise ValueError(f"ninja_builds({self._game}): unsupported skill list type {list_type!r}")
+        url = self._build_query_url(snapshot, {param: skill_name})
+        raw = self._http.get_bytes(url)
+        try:
+            body = pb.first(raw, 1)
+            if body is None:
+                raise pb.ProtoParseError("missing top-level field 1")
+            total = pb.first(body, 1)
+            columns, dict_refs = self._parse_body(body)
+            self._validate_search_response(columns, total, url)
+        except pb.ProtoParseError as e:
+            self._dump_failed_bytes(raw, url)
+            raise ValueError(f"ninja_builds({self._game}): could not parse skill list ({url}): {e}") from e
+        return int(total or 0), self._extract_characters(columns, dict_refs, url)
+
     def _fetch_one_filter(self, snapshot: SnapshotVersion, item_filter: str) -> list[CharacterRef]:
         cache_key = f"{snapshot.version}|{item_filter}"
         if cache_key in self._search_cache:
@@ -395,6 +509,13 @@ class NinjaBuildsFetcher:
         overview = urllib.parse.quote(snapshot.snapshot_name)
         items = urllib.parse.quote(item_filter)
         return f"{base}?overview={overview}&items={items}"
+
+    def _build_query_url(self, snapshot: SnapshotVersion, params: dict[str, str]) -> str:
+        base = SEARCH_URL_TEMPLATE.format(game=self._game, version=snapshot.version)
+        query = "overview=" + urllib.parse.quote(snapshot.snapshot_name)
+        for key, value in params.items():
+            query += f"&{key}={urllib.parse.quote(value)}"
+        return f"{base}?{query}"
 
     def _parse_body(self, body: bytes) -> tuple[dict[str, "_ValueColumn"], dict[str, str]]:
         columns: dict[str, _ValueColumn] = {}
@@ -495,23 +616,24 @@ class NinjaBuildsFetcher:
                 level = int(levels[i])
                 class_idx = int(classes[i])
                 char_class = class_dict[class_idx] if 0 <= class_idx < len(class_dict) else "Unknown"
-                main_skill = self._main_skill(skills_col, i, gem_dict)
+                archetype_hint = self._archetype_hint(skills_col, i, gem_dict)
                 keypassives = self._resolve_multi_dict_column(keypassives_col, i, keypassive_dict)
             except (IndexError, ValueError) as e:
                 log.warning("ninja_builds: skip malformed row %d: %s", i, e)
                 continue
             out.append(CharacterRef(
                 name=name, account=account, level=level, char_class=char_class,
-                main_skill=main_skill, keypassives=keypassives,
+                archetype_hint=archetype_hint, keypassives=keypassives,
             ))
         return out
 
     @staticmethod
-    def _main_skill(skills_col: Optional["_ValueColumn"], i: int, gem_dict: list[str]) -> Optional[str]:
-        """Best-effort: poe.ninja doesn't flag a single "main" skill
-        explicitly, so the first gem in the character's per-character skill
-        index list is used (matches the ordering poe.ninja's own build page
-        displays the primary skill in)."""
+    def _archetype_hint(skills_col: Optional["_ValueColumn"], i: int, gem_dict: list[str]) -> Optional[str]:
+        """The first gem in the character's per-character skill index list.
+        A guess, and *not* a main skill: poe.ninja flags no single main skill
+        (PoE1 rows carry ~1 skill, PoE2 rows ~6 in no meaningful order --
+        surveyed 2026-09-21). Kept solely as the legacy per-slot archetype
+        bucketing's input; never use it as a skill identity."""
         if skills_col is None or not skills_col.per_char_values or not gem_dict:
             return None
         if i >= len(skills_col.per_char_values):
@@ -526,7 +648,7 @@ class NinjaBuildsFetcher:
     def _resolve_multi_dict_column(col: Optional["_ValueColumn"], i: int, value_dict: list[str]) -> tuple[str, ...]:
         """Resolves every index in a per-character multi-value dictionary
         column (e.g. "keypassives") to names, not just the first -- unlike
-        `_main_skill`, which only ever wants the primary one. Used for
+        `_archetype_hint`, which only ever wants the first one. Used for
         skill-meta phase 3 (notable/keystone passives): confirmed live
         2026-09-17 that this "keypassives" column/dictionary is a
         notable/keystone-only enumeration (poe.ninja's own internal ordinal

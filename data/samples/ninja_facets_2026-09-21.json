@@ -1,0 +1,14568 @@
+{
+ "poe1": {
+  "total": 124413,
+  "class": [
+   [
+    "Luminary",
+    28743
+   ],
+   [
+    "Elementalist",
+    17804
+   ],
+   [
+    "Occultist",
+    11595
+   ],
+   [
+    "Necromancer",
+    9234
+   ],
+   [
+    "Chieftain",
+    8391
+   ],
+   [
+    "Juggernaut",
+    6948
+   ],
+   [
+    "Slayer",
+    6808
+   ],
+   [
+    "Assassin",
+    6668
+   ],
+   [
+    "Hierophant",
+    5193
+   ],
+   [
+    "Deadeye",
+    4550
+   ],
+   [
+    "Gladiator",
+    3196
+   ],
+   [
+    "Reliquarian",
+    3064
+   ],
+   [
+    "Pathfinder",
+    2947
+   ],
+   [
+    "Inquisitor",
+    1783
+   ],
+   [
+    "Champion",
+    1555
+   ],
+   [
+    "Guardian",
+    1506
+   ],
+   [
+    "Berserker",
+    1397
+   ],
+   [
+    "Ascendant",
+    1141
+   ],
+   [
+    "Trickster",
+    950
+   ],
+   [
+    "Saboteur",
+    526
+   ],
+   [
+    "Warden",
+    364
+   ],
+   [
+    "Shadow",
+    12
+   ],
+   [
+    "Scion",
+    11
+   ],
+   [
+    "Witch",
+    10
+   ],
+   [
+    "Ranger",
+    8
+   ],
+   [
+    "Templar",
+    5
+   ],
+   [
+    "Duelist",
+    3
+   ],
+   [
+    "Marauder",
+    1
+   ]
+  ],
+  "secondascendancy": [
+   [
+    "#9",
+    99046
+   ],
+   [
+    "#6",
+    6593
+   ],
+   [
+    "#7",
+    6110
+   ],
+   [
+    "#3",
+    4617
+   ],
+   [
+    "#8",
+    2108
+   ],
+   [
+    "#11",
+    1602
+   ],
+   [
+    "#4",
+    1247
+   ],
+   [
+    "#1",
+    963
+   ],
+   [
+    "#10",
+    664
+   ],
+   [
+    "#12",
+    593
+   ],
+   [
+    "#0",
+    356
+   ],
+   [
+    "#2",
+    292
+   ],
+   [
+    "#5",
+    222
+   ]
+  ],
+  "skills": [
+   [
+    "Winter Orb",
+    9328
+   ],
+   [
+    "Righteous Fire",
+    5790
+   ],
+   [
+    "Animate Guardian",
+    5670
+   ],
+   [
+    "Raise Spectre",
+    4988
+   ],
+   [
+    "Ethereal Knives",
+    3836
+   ],
+   [
+    "Flicker Strike",
+    3100
+   ],
+   [
+    "Penance Brand",
+    2860
+   ],
+   [
+    "Cyclone of Tumult",
+    2552
+   ],
+   [
+    "Void Shockwave",
+    2343
+   ],
+   [
+    "Kinetic Blast of Clustering",
+    2336
+   ],
+   [
+    "Kinetic Blast",
+    2238
+   ],
+   [
+    "Cyclone",
+    2112
+   ],
+   [
+    "Death Aura",
+    2104
+   ],
+   [
+    "Fire Trap",
+    1932
+   ],
+   [
+    "Scorching Ray of Immolation",
+    1657
+   ],
+   [
+    "Vaal Reap",
+    1653
+   ],
+   [
+    "Corrupting Fever",
+    1557
+   ],
+   [
+    "Vaal Righteous Fire",
+    1363
+   ],
+   [
+    "Ethereal Knives of the Massacre",
+    1324
+   ],
+   [
+    "Frenzy",
+    1317
+   ],
+   [
+    "Lightning Tendrils of Eccentricity",
+    1240
+   ],
+   [
+    "Animate Weapon of Ranged Arms",
+    1215
+   ],
+   [
+    "Lancing Steel of Spraying",
+    1206
+   ],
+   [
+    "Forbidden Rite of Soul Sacrifice",
+    1186
+   ],
+   [
+    "Blade Blast",
+    1158
+   ],
+   [
+    "Viper Strike of the Mamba",
+    1152
+   ],
+   [
+    "Heavy Strike of Trarthus",
+    1125
+   ],
+   [
+    "Reap of Butchery",
+    1091
+   ],
+   [
+    "Elemental Hit of the Spectrum",
+    1080
+   ],
+   [
+    "Unhinge",
+    1061
+   ],
+   [
+    "Desecrate",
+    1057
+   ],
+   [
+    "Kinetic Fusillade",
+    1031
+   ],
+   [
+    "Summon Holy Relic of Conviction",
+    969
+   ],
+   [
+    "Essence Drain",
+    964
+   ],
+   [
+    "Detonate Dead of Scavenging",
+    940
+   ],
+   [
+    "Static Strike of Gathering Lightning",
+    936
+   ],
+   [
+    "Smite",
+    923
+   ],
+   [
+    "Storm Burst of Repulsion",
+    908
+   ],
+   [
+    "Lightning Arrow",
+    883
+   ],
+   [
+    "Blight of Contagion",
+    838
+   ],
+   [
+    "Dual Strike of Ambidexterity",
+    838
+   ],
+   [
+    "Spark of the Nova",
+    824
+   ],
+   [
+    "Fireball",
+    814
+   ],
+   [
+    "Bladefall",
+    808
+   ],
+   [
+    "Volatile Dead",
+    760
+   ],
+   [
+    "Earthshatter",
+    741
+   ],
+   [
+    "Absolution",
+    738
+   ],
+   [
+    "Reap",
+    729
+   ],
+   [
+    "Smite of Divine Judgement",
+    724
+   ],
+   [
+    "Toxic Rain",
+    720
+   ],
+   [
+    "Vaal Absolution",
+    712
+   ],
+   [
+    "Molten Strike of the Zenith",
+    704
+   ],
+   [
+    "Penance Brand of Dissipation",
+    703
+   ],
+   [
+    "Storm Rain",
+    685
+   ],
+   [
+    "Storm Burst",
+    666
+   ],
+   [
+    "Arc of Oscillating",
+    642
+   ],
+   [
+    "Tornado Shot",
+    633
+   ],
+   [
+    "Lightning Tendrils of Escalation",
+    627
+   ],
+   [
+    "Summon Raging Spirit",
+    623
+   ],
+   [
+    "Molten Strike",
+    620
+   ],
+   [
+    "Animate Guardian of Smiting",
+    612
+   ],
+   [
+    "Boneshatter of Complex Trauma",
+    605
+   ],
+   [
+    "Poisonous Concoction of Bouncing",
+    600
+   ],
+   [
+    "Doom Blast",
+    585
+   ],
+   [
+    "Temporal Chains",
+    575
+   ],
+   [
+    "Elemental Hit",
+    566
+   ],
+   [
+    "Shield Crush",
+    551
+   ],
+   [
+    "Vaal Arc",
+    527
+   ],
+   [
+    "Vaal Smite",
+    527
+   ],
+   [
+    "Glacial Cascade of the Fissure",
+    522
+   ],
+   [
+    "Caustic Arrow",
+    519
+   ],
+   [
+    "Double Strike of Momentum",
+    515
+   ],
+   [
+    "Hexblast of Contradiction",
+    513
+   ],
+   [
+    "Freezing Pulse",
+    512
+   ],
+   [
+    "Lacerate of Haemorrhage",
+    498
+   ],
+   [
+    "Vaal Blight",
+    481
+   ],
+   [
+    "Eviscerate",
+    462
+   ],
+   [
+    "Shockwave",
+    457
+   ],
+   [
+    "Rolling Magma",
+    453
+   ],
+   [
+    "Blight",
+    451
+   ],
+   [
+    "Static Strike",
+    447
+   ],
+   [
+    "General's Cry",
+    446
+   ],
+   [
+    "Automation",
+    437
+   ],
+   [
+    "Shock Nova of Procession",
+    434
+   ],
+   [
+    "Exsanguinate",
+    432
+   ],
+   [
+    "Autoexertion",
+    426
+   ],
+   [
+    "Arc",
+    419
+   ],
+   [
+    "Discharge",
+    393
+   ],
+   [
+    "Divine Retribution",
+    386
+   ],
+   [
+    "Herald of Thunder",
+    375
+   ],
+   [
+    "Icicle Mine of Fanning",
+    375
+   ],
+   [
+    "Vaal Flicker Strike",
+    375
+   ],
+   [
+    "Explosive Arrow",
+    373
+   ],
+   [
+    "Phase Run",
+    371
+   ],
+   [
+    "Signal Prey",
+    357
+   ],
+   [
+    "Ice Trap",
+    354
+   ],
+   [
+    "Venom Gyre",
+    354
+   ],
+   [
+    "Vaal Caustic Arrow",
+    342
+   ],
+   [
+    "Cold Snap",
+    328
+   ],
+   [
+    "Ground Slam of Earthshaking",
+    324
+   ],
+   [
+    "Reave of Refraction",
+    320
+   ],
+   [
+    "Dominating Blow of Inspiring",
+    318
+   ],
+   [
+    "Vaal Cold Snap",
+    318
+   ],
+   [
+    "Frost Blades",
+    312
+   ],
+   [
+    "Blade Blast of Unloading",
+    311
+   ],
+   [
+    "Vaal Animate Weapon",
+    310
+   ],
+   [
+    "Sunder",
+    307
+   ],
+   [
+    "Vaal Venom Gyre",
+    303
+   ],
+   [
+    "Soulrend of Reaping",
+    297
+   ],
+   [
+    "Soulrend",
+    294
+   ],
+   [
+    "Shield Charge",
+    293
+   ],
+   [
+    "Detonate Dead",
+    292
+   ],
+   [
+    "Ice Nova of Frostbolts",
+    292
+   ],
+   [
+    "Summon Flame Golem of Hordes",
+    288
+   ],
+   [
+    "Lacerate of Butchering",
+    283
+   ],
+   [
+    "Shrapnel Ballista",
+    279
+   ],
+   [
+    "Stormblast Mine",
+    278
+   ],
+   [
+    "Leap Slam",
+    263
+   ],
+   [
+    "Vaal Cyclone",
+    257
+   ],
+   [
+    "Wave of Conviction of Trarthus",
+    252
+   ],
+   [
+    "Bane",
+    251
+   ],
+   [
+    "Purity of Elements",
+    251
+   ],
+   [
+    "Immortal Call",
+    250
+   ],
+   [
+    "Spark",
+    250
+   ],
+   [
+    "Blade Vortex",
+    240
+   ],
+   [
+    "Consecrated Path of Endurance",
+    240
+   ],
+   [
+    "Sniper's Mark",
+    239
+   ],
+   [
+    "Tornado of Elemental Turbulence",
+    239
+   ],
+   [
+    "Vaal Ice Nova",
+    239
+   ],
+   [
+    "Artillery Ballista",
+    235
+   ],
+   [
+    "Creeping Frost",
+    234
+   ],
+   [
+    "Withering Step",
+    232
+   ],
+   [
+    "Vaal Lightning Strike",
+    230
+   ],
+   [
+    "Firestorm of Pelting",
+    227
+   ],
+   [
+    "Power Siphon",
+    227
+   ],
+   [
+    "Lightning Strike of Arcing",
+    222
+   ],
+   [
+    "Storm Call",
+    220
+   ],
+   [
+    "Wintertide Brand",
+    213
+   ],
+   [
+    "Summon Carrion Golem of Scavenging",
+    210
+   ],
+   [
+    "Bane of Condemnation",
+    204
+   ],
+   [
+    "Death Wish",
+    204
+   ],
+   [
+    "Frostblink of Wintry Blast",
+    203
+   ],
+   [
+    "Ice Spear",
+    203
+   ],
+   [
+    "Lightning Strike",
+    202
+   ],
+   [
+    "Barrage of Volley Fire",
+    200
+   ],
+   [
+    "Crackling Lance",
+    199
+   ],
+   [
+    "Vaal Blade Vortex",
+    192
+   ],
+   [
+    "Summon Stone Golem",
+    190
+   ],
+   [
+    "Ice Nova",
+    188
+   ],
+   [
+    "Flame Surge of Combusting",
+    182
+   ],
+   [
+    "Vortex",
+    180
+   ],
+   [
+    "Vaal Ground Slam",
+    178
+   ],
+   [
+    "Herald of Ice",
+    173
+   ],
+   [
+    "Raise Zombie",
+    173
+   ],
+   [
+    "Cremation of the Volcano",
+    172
+   ],
+   [
+    "Herald of Agony",
+    170
+   ],
+   [
+    "Assassin's Mark",
+    168
+   ],
+   [
+    "Earthquake",
+    167
+   ],
+   [
+    "Soulrend of the Spiral",
+    167
+   ],
+   [
+    "Ensnaring Arrow",
+    156
+   ],
+   [
+    "Vaal Lightning Arrow",
+    148
+   ],
+   [
+    "Despair",
+    147
+   ],
+   [
+    "Flame Wall",
+    146
+   ],
+   [
+    "Summon Raging Spirit of Enormity",
+    144
+   ],
+   [
+    "Ice Crash",
+    141
+   ],
+   [
+    "Shockwave Totem",
+    139
+   ],
+   [
+    "Reave",
+    135
+   ],
+   [
+    "Vaal Reave",
+    133
+   ],
+   [
+    "Raise Zombie of Slamming",
+    132
+   ],
+   [
+    "Divine Ire",
+    127
+   ],
+   [
+    "Incinerate of Venting",
+    126
+   ],
+   [
+    "Purity of Fire",
+    124
+   ],
+   [
+    "Lightning Tendrils",
+    123
+   ],
+   [
+    "Spellslinger",
+    123
+   ],
+   [
+    "Doryani's Touch",
+    122
+   ],
+   [
+    "Lightning Warp",
+    121
+   ],
+   [
+    "Ball Lightning of Static",
+    120
+   ],
+   [
+    "Cold Snap of Power",
+    116
+   ],
+   [
+    "Shield Crush of the Chieftain",
+    116
+   ],
+   [
+    "Rain of Arrows of Saturation",
+    115
+   ],
+   [
+    "Creeping Frost of Floes",
+    114
+   ],
+   [
+    "Firestorm of Meteors",
+    114
+   ],
+   [
+    "Ice Shot",
+    113
+   ],
+   [
+    "Mana-Infused Staff",
+    113
+   ],
+   [
+    "Rage Vortex",
+    113
+   ],
+   [
+    "Frostblink",
+    112
+   ],
+   [
+    "Void Sphere of Rending",
+    112
+   ],
+   [
+    "Ball Lightning of Orbiting",
+    111
+   ],
+   [
+    "Flame Link",
+    111
+   ],
+   [
+    "Kinetic Bolt",
+    111
+   ],
+   [
+    "Enduring Cry",
+    110
+   ],
+   [
+    "Volcanic Fissure of Snaking",
+    108
+   ],
+   [
+    "Ice Spear of Splitting",
+    107
+   ],
+   [
+    "Vaal Summon Skeletons",
+    107
+   ],
+   [
+    "Vaal Earthquake",
+    106
+   ],
+   [
+    "Holy Hammers",
+    105
+   ],
+   [
+    "Forbidden Rite",
+    103
+   ],
+   [
+    "Frenzy of Onslaught",
+    103
+   ],
+   [
+    "Scorching Ray",
+    102
+   ],
+   [
+    "Purity of Ice",
+    99
+   ],
+   [
+    "Wrath",
+    99
+   ],
+   [
+    "Vaal Ice Shot",
+    98
+   ],
+   [
+    "Blood Rage",
+    94
+   ],
+   [
+    "Summon Skeletons",
+    91
+   ],
+   [
+    "Vaal Domination",
+    90
+   ],
+   [
+    "Summon Carrion Golem of Hordes",
+    89
+   ],
+   [
+    "Cobra Lash",
+    88
+   ],
+   [
+    "Lightning Conduit",
+    87
+   ],
+   [
+    "Molten Shell",
+    86
+   ],
+   [
+    "Bodyswap of Sacrifice",
+    84
+   ],
+   [
+    "Ice Shot of Penetration",
+    84
+   ],
+   [
+    "Summon Reaper of Revenants",
+    83
+   ],
+   [
+    "Anger",
+    81
+   ],
+   [
+    "Blazing Salvo",
+    81
+   ],
+   [
+    "Eye of Winter",
+    81
+   ],
+   [
+    "Firestorm",
+    80
+   ],
+   [
+    "Split Arrow",
+    80
+   ],
+   [
+    "Haste",
+    76
+   ],
+   [
+    "Wild Strike",
+    76
+   ],
+   [
+    "Bladefall of Trarthus",
+    75
+   ],
+   [
+    "Blood Sacrament",
+    74
+   ],
+   [
+    "Explosive Trap",
+    74
+   ],
+   [
+    "Malevolence",
+    74
+   ],
+   [
+    "Shock Nova",
+    74
+   ],
+   [
+    "Vaal Spark",
+    74
+   ],
+   [
+    "Crackling Lance of Branching",
+    73
+   ],
+   [
+    "Rage Vortex of Berserking",
+    73
+   ],
+   [
+    "Vaal Storm Call",
+    71
+   ],
+   [
+    "Vaal Fireball",
+    69
+   ],
+   [
+    "Voltaxic Burst",
+    69
+   ],
+   [
+    "Dash",
+    68
+   ],
+   [
+    "Precision",
+    68
+   ],
+   [
+    "Defiance Banner",
+    67
+   ],
+   [
+    "Scourge Arrow of Menace",
+    67
+   ],
+   [
+    "Puncture",
+    66
+   ],
+   [
+    "Dominating Blow",
+    65
+   ],
+   [
+    "Spectral Shield Throw",
+    65
+   ],
+   [
+    "Vaal Detonate Dead",
+    63
+   ],
+   [
+    "Flicker Strike of Power",
+    62
+   ],
+   [
+    "Double Strike",
+    60
+   ],
+   [
+    "Dread Banner",
+    60
+   ],
+   [
+    "Aspect of Lunaris",
+    59
+   ],
+   [
+    "Avenging Flame",
+    59
+   ],
+   [
+    "Vortex of Projection",
+    59
+   ],
+   [
+    "Decoy Totem",
+    58
+   ],
+   [
+    "Domination",
+    58
+   ],
+   [
+    "Absolution of Inspiring",
+    56
+   ],
+   [
+    "Crackling Lance of Disintegration",
+    56
+   ],
+   [
+    "Vaal Double Strike",
+    56
+   ],
+   [
+    "Flame Dash",
+    55
+   ],
+   [
+    "Holy Flame Totem",
+    55
+   ],
+   [
+    "Storm Brand",
+    55
+   ],
+   [
+    "Splitting Steel",
+    54
+   ],
+   [
+    "Aspect of Arakaali",
+    53
+   ],
+   [
+    "Snipe",
+    53
+   ],
+   [
+    "Zealotry",
+    53
+   ],
+   [
+    "Void Sphere",
+    52
+   ],
+   [
+    "Icestorm",
+    51
+   ],
+   [
+    "Leap Slam of Groundbreaking",
+    51
+   ],
+   [
+    "Blade Flurry",
+    50
+   ],
+   [
+    "Wave of Conviction",
+    50
+   ],
+   [
+    "Ground Slam",
+    49
+   ],
+   [
+    "Storm Rain of the Conduit",
+    49
+   ],
+   [
+    "Hatred",
+    48
+   ],
+   [
+    "Rejuvenation Totem",
+    48
+   ],
+   [
+    "Aspect of the Spider",
+    47
+   ],
+   [
+    "Sigil of Power",
+    47
+   ],
+   [
+    "Whirling Blades",
+    47
+   ],
+   [
+    "Aspect of the Brine King",
+    46
+   ],
+   [
+    "Bladefall of Volleys",
+    46
+   ],
+   [
+    "Divine Ire of Holy Lightning",
+    46
+   ],
+   [
+    "Enfeeble",
+    46
+   ],
+   [
+    "Searing Bond",
+    45
+   ],
+   [
+    "Animate Weapon",
+    44
+   ],
+   [
+    "Crushing Fist",
+    44
+   ],
+   [
+    "Intuitive Link",
+    44
+   ],
+   [
+    "Summon Skeletons of Mages",
+    44
+   ],
+   [
+    "Tornado",
+    43
+   ],
+   [
+    "Pact of Beidat",
+    42
+   ],
+   [
+    "Tectonic Slam of Cataclysm",
+    42
+   ],
+   [
+    "Arcanist Brand",
+    41
+   ],
+   [
+    "Lightning Conduit of the Heavens",
+    41
+   ],
+   [
+    "Summon Lightning Golem",
+    40
+   ],
+   [
+    "Conductivity",
+    39
+   ],
+   [
+    "Frost Wall",
+    39
+   ],
+   [
+    "Mirror Arrow of Bombarding Clones",
+    39
+   ],
+   [
+    "Spectral Throw",
+    39
+   ],
+   [
+    "Vigilant Strike",
+    39
+   ],
+   [
+    "Viper Strike",
+    39
+   ],
+   [
+    "Discharge of Misery",
+    38
+   ],
+   [
+    "Blast Rain",
+    37
+   ],
+   [
+    "Flameblast of Celerity",
+    37
+   ],
+   [
+    "Toxic Rain of Withering",
+    37
+   ],
+   [
+    "Vaal Firestorm",
+    37
+   ],
+   [
+    "Heavy Strike",
+    36
+   ],
+   [
+    "Holy Sweep",
+    36
+   ],
+   [
+    "Orb of Storms",
+    36
+   ],
+   [
+    "Siege Ballista",
+    36
+   ],
+   [
+    "Steelskin",
+    36
+   ],
+   [
+    "Summon Carrion Golem",
+    36
+   ],
+   [
+    "Ball Lightning",
+    35
+   ],
+   [
+    "Bodyswap",
+    34
+   ],
+   [
+    "Grace",
+    34
+   ],
+   [
+    "Righteous Fire of Arcane Devotion",
+    34
+   ],
+   [
+    "Detonate Dead of Chain Reaction",
+    33
+   ],
+   [
+    "Glacial Hammer of Shattering",
+    33
+   ],
+   [
+    "Purifying Flame of Revelations",
+    33
+   ],
+   [
+    "Summon Stone Golem of Hordes",
+    33
+   ],
+   [
+    "Vaal Molten Strike",
+    33
+   ],
+   [
+    "Vitality",
+    33
+   ],
+   [
+    "Battlemage's Cry",
+    32
+   ],
+   [
+    "Flame Surge",
+    31
+   ],
+   [
+    "Summon Flame Golem",
+    31
+   ],
+   [
+    "Burning Arrow of Vigour",
+    30
+   ],
+   [
+    "Hexblast",
+    30
+   ],
+   [
+    "Punishment",
+    30
+   ],
+   [
+    "Rain of Arrows",
+    30
+   ],
+   [
+    "Sunder of Earthbreaking",
+    30
+   ],
+   [
+    "Boneshatter",
+    29
+   ],
+   [
+    "Elemental Weakness",
+    29
+   ],
+   [
+    "Ethereal Knives of Lingering Blades",
+    29
+   ],
+   [
+    "Divine Blast",
+    28
+   ],
+   [
+    "Pact of Lycia",
+    28
+   ],
+   [
+    "Unearth",
+    28
+   ],
+   [
+    "Vaal Flameblast",
+    28
+   ],
+   [
+    "Will of the Lords",
+    28
+   ],
+   [
+    "Bladefall of Impaling",
+    27
+   ],
+   [
+    "Contagion",
+    27
+   ],
+   [
+    "Dark Bargain",
+    27
+   ],
+   [
+    "Flameblast",
+    27
+   ],
+   [
+    "Holy Strike",
+    27
+   ],
+   [
+    "Summon Skitterbots",
+    27
+   ],
+   [
+    "Vaal Haste",
+    27
+   ],
+   [
+    "Convocation",
+    26
+   ],
+   [
+    "Exsanguinate of Transmission",
+    26
+   ],
+   [
+    "Glacial Cascade",
+    26
+   ],
+   [
+    "Infernal Blow",
+    26
+   ],
+   [
+    "Searing Bond of Detonation",
+    26
+   ],
+   [
+    "Volatile Dead of Seething",
+    26
+   ],
+   [
+    "Falling Crystal",
+    25
+   ],
+   [
+    "Flammability",
+    25
+   ],
+   [
+    "Lightning Trap of Sparking",
+    25
+   ],
+   [
+    "Scourge Arrow",
+    25
+   ],
+   [
+    "Blink Arrow of Bombarding Clones",
+    24
+   ],
+   [
+    "Tectonic Slam",
+    24
+   ],
+   [
+    "Vulnerability",
+    24
+   ],
+   [
+    "Burning Arrow",
+    23
+   ],
+   [
+    "Perforate of Bloodshed",
+    23
+   ],
+   [
+    "Consecrated Path",
+    22
+   ],
+   [
+    "Perforate of Duality",
+    22
+   ],
+   [
+    "Power Siphon of the Archmage",
+    22
+   ],
+   [
+    "Wither",
+    22
+   ],
+   [
+    "Barrage",
+    21
+   ],
+   [
+    "Holy Hammers of Spirals",
+    21
+   ],
+   [
+    "Prismatic Burst",
+    21
+   ],
+   [
+    "Spark of Unpredictability",
+    21
+   ],
+   [
+    "Essence Drain of Wickedness",
+    20
+   ],
+   [
+    "Explosive Trap of Shrapnel",
+    20
+   ],
+   [
+    "Fire Trap of Blasting",
+    20
+   ],
+   [
+    "Hydrosphere",
+    20
+   ],
+   [
+    "Ice Crash of Cadence",
+    20
+   ],
+   [
+    "Queen's Demand",
+    20
+   ],
+   [
+    "Raise Zombie of Falling",
+    20
+   ],
+   [
+    "Summon Chaos Golem",
+    20
+   ],
+   [
+    "Wall of Force",
+    20
+   ],
+   [
+    "Arc of Surging",
+    19
+   ],
+   [
+    "Bladestorm of Uncertainty",
+    19
+   ],
+   [
+    "Determination",
+    19
+   ],
+   [
+    "Discipline",
+    19
+   ],
+   [
+    "Hexblast of Havoc",
+    19
+   ],
+   [
+    "Protective Link",
+    19
+   ],
+   [
+    "Summon Ice Golem",
+    19
+   ],
+   [
+    "Summon Living Lightning",
+    19
+   ],
+   [
+    "Summon Skeletons of Archers",
+    19
+   ],
+   [
+    "Aspect of Solaris",
+    18
+   ],
+   [
+    "Blade Blast of Dagger Detonation",
+    18
+   ],
+   [
+    "Clarity",
+    18
+   ],
+   [
+    "Destructive Link",
+    18
+   ],
+   [
+    "Divine Blast of Radiance",
+    18
+   ],
+   [
+    "Frostbite",
+    18
+   ],
+   [
+    "Glacial Hammer",
+    18
+   ],
+   [
+    "Icicle Mine",
+    18
+   ],
+   [
+    "Intimidating Cry",
+    18
+   ],
+   [
+    "Summon Ice Golem of Hordes",
+    18
+   ],
+   [
+    "Vaal Power Siphon",
+    18
+   ],
+   [
+    "Ancestral Cry",
+    17
+   ],
+   [
+    "Herald of Purity",
+    17
+   ],
+   [
+    "Seismic Cry",
+    17
+   ],
+   [
+    "Vaal Volcanic Fissure",
+    17
+   ],
+   [
+    "Volcanic Fissure",
+    17
+   ],
+   [
+    "Aspect of the Cat",
+    16
+   ],
+   [
+    "Flameblast of Contraction",
+    16
+   ],
+   [
+    "Frost Bomb",
+    16
+   ],
+   [
+    "Frostbolt",
+    16
+   ],
+   [
+    "Lacerate",
+    16
+   ],
+   [
+    "Perforate",
+    16
+   ],
+   [
+    "Aspect of the Crab",
+    15
+   ],
+   [
+    "Blink Arrow",
+    15
+   ],
+   [
+    "Blink Arrow of Prismatic Clones",
+    15
+   ],
+   [
+    "Holy Sweep of Hammerfalls",
+    15
+   ],
+   [
+    "Summon Reaper",
+    15
+   ],
+   [
+    "Sunder of Trarthus",
+    15
+   ],
+   [
+    "Wild Strike of Extremes",
+    15
+   ],
+   [
+    "Armageddon Brand of Volatility",
+    14
+   ],
+   [
+    "Call the Pyre",
+    14
+   ],
+   [
+    "Double Strike of Impaling",
+    14
+   ],
+   [
+    "Flesh and Stone",
+    14
+   ],
+   [
+    "Frost Shield",
+    14
+   ],
+   [
+    "Ice Nova of Deep Freeze",
+    14
+   ],
+   [
+    "Lancing Steel",
+    14
+   ],
+   [
+    "Purity of Lightning",
+    14
+   ],
+   [
+    "Vaal Burning Arrow",
+    14
+   ],
+   [
+    "Animate Weapon of Self Reflection",
+    13
+   ],
+   [
+    "Bladestorm",
+    13
+   ],
+   [
+    "Manabond",
+    13
+   ],
+   [
+    "Pyroclast Mine",
+    13
+   ],
+   [
+    "Summon Lightning Golem of Hordes",
+    13
+   ],
+   [
+    "Blood Offering",
+    12
+   ],
+   [
+    "Divine Ire of Disintegration",
+    12
+   ],
+   [
+    "Rallying Cry",
+    12
+   ],
+   [
+    "Spectral Helix",
+    12
+   ],
+   [
+    "Blade Trap of Greatswords",
+    11
+   ],
+   [
+    "Dark Bargain of Trarthus",
+    11
+   ],
+   [
+    "Earthquake of Amplification",
+    11
+   ],
+   [
+    "Galvanic Field",
+    11
+   ],
+   [
+    "Galvanic Field of Intensity",
+    11
+   ],
+   [
+    "Kinetic Flux",
+    11
+   ],
+   [
+    "Pact of K'Tash",
+    11
+   ],
+   [
+    "Pestilent Strike",
+    11
+   ],
+   [
+    "Purifying Flame",
+    11
+   ],
+   [
+    "Summon Chaos Golem of Hordes",
+    11
+   ],
+   [
+    "Vaal Blade Flurry",
+    11
+   ],
+   [
+    "War Banner",
+    11
+   ],
+   [
+    "Artillery Ballista of Cross Strafe",
+    10
+   ],
+   [
+    "Blade Vortex of the Scythe",
+    10
+   ],
+   [
+    "Explosive Concoction of Destruction",
+    10
+   ],
+   [
+    "Flesh Offering",
+    10
+   ],
+   [
+    "Kinetic Rain",
+    10
+   ],
+   [
+    "Kinetic Rain of Impact",
+    10
+   ],
+   [
+    "Molten Burst",
+    10
+   ],
+   [
+    "Portal",
+    10
+   ],
+   [
+    "Storm Brand of Indecision",
+    10
+   ],
+   [
+    "Bone Offering",
+    9
+   ],
+   [
+    "Boneshatter of Carnage",
+    9
+   ],
+   [
+    "Chain Hook",
+    9
+   ],
+   [
+    "Chain Hook of Angling",
+    9
+   ],
+   [
+    "Earthshatter of Fragility",
+    9
+   ],
+   [
+    "Holy Flame Totem of Ire",
+    9
+   ],
+   [
+    "Ice Trap of Hollowness",
+    9
+   ],
+   [
+    "Lightning Spire Trap of Overloading",
+    9
+   ],
+   [
+    "Poacher's Mark",
+    9
+   ],
+   [
+    "Pride",
+    9
+   ],
+   [
+    "Seismic Trap",
+    9
+   ],
+   [
+    "Swordstorm",
+    9
+   ],
+   [
+    "Tempest Shield",
+    9
+   ],
+   [
+    "Approaching Flames",
+    8
+   ],
+   [
+    "Berserk",
+    8
+   ],
+   [
+    "Blast Rain of Trarthus",
+    8
+   ],
+   [
+    "Caustic Arrow of Poison",
+    8
+   ],
+   [
+    "Frost Blades of Katabasis",
+    8
+   ],
+   [
+    "Infernal Blow of Immolation",
+    8
+   ],
+   [
+    "Mirror Arrow of Prismatic Clones",
+    8
+   ],
+   [
+    "Orb of Storms of Squalls",
+    8
+   ],
+   [
+    "Summon Stone Golem of Safeguarding",
+    8
+   ],
+   [
+    "Vaal Molten Shell",
+    8
+   ],
+   [
+    "Vaal Rain of Arrows",
+    8
+   ],
+   [
+    "Volatile Dead of Confinement",
+    8
+   ],
+   [
+    "Artillery Ballista of Focus Fire",
+    7
+   ],
+   [
+    "Bursting Toad",
+    7
+   ],
+   [
+    "Contagion of Subsiding",
+    7
+   ],
+   [
+    "Embrace Madness",
+    7
+   ],
+   [
+    "Envy",
+    7
+   ],
+   [
+    "Siphoning Trap of Pain",
+    7
+   ],
+   [
+    "Soul Link",
+    7
+   ],
+   [
+    "Vaal Grace",
+    7
+   ],
+   [
+    "Windburst",
+    7
+   ],
+   [
+    "Brand Recall",
+    6
+   ],
+   [
+    "Cleave of Rage",
+    6
+   ],
+   [
+    "Foulgrasp",
+    6
+   ],
+   [
+    "Frost Bomb of Forthcoming",
+    6
+   ],
+   [
+    "Frost Bomb of Instability",
+    6
+   ],
+   [
+    "Galvanic Arrow",
+    6
+   ],
+   [
+    "Herald of Ash",
+    6
+   ],
+   [
+    "Incinerate",
+    6
+   ],
+   [
+    "Kinetic Bolt of Fragmentation",
+    6
+   ],
+   [
+    "Pact of Ghorr",
+    6
+   ],
+   [
+    "Penance Brand of Conduction",
+    6
+   ],
+   [
+    "Plague Bearer",
+    6
+   ],
+   [
+    "Poisonous Concoction",
+    6
+   ],
+   [
+    "Shield of Light",
+    6
+   ],
+   [
+    "Spectral Helix of Trarthus",
+    6
+   ],
+   [
+    "Summon Hiveborn",
+    6
+   ],
+   [
+    "Summon Holy Relic",
+    6
+   ],
+   [
+    "Summon Spectral Wolf",
+    6
+   ],
+   [
+    "Thunderstorm",
+    6
+   ],
+   [
+    "Tornado Shot of Cloudburst",
+    6
+   ],
+   [
+    "Vaal Discipline",
+    6
+   ],
+   [
+    "Vaal Spectral Throw",
+    6
+   ],
+   [
+    "Blight of Atrophy",
+    5
+   ],
+   [
+    "Charged Dash",
+    5
+   ],
+   [
+    "Cremation",
+    5
+   ],
+   [
+    "Dual Strike",
+    5
+   ],
+   [
+    "Eye of Winter of Transience",
+    5
+   ],
+   [
+    "Impurity of Fire",
+    5
+   ],
+   [
+    "Mirror Arrow",
+    5
+   ],
+   [
+    "Shockwave Totem of Authority",
+    5
+   ],
+   [
+    "Somatic Shell",
+    5
+   ],
+   [
+    "Summon Bestial Snake",
+    5
+   ],
+   [
+    "Vaal Impurity of Fire",
+    5
+   ],
+   [
+    "Arcane Cloak",
+    4
+   ],
+   [
+    "Armageddon Brand",
+    4
+   ],
+   [
+    "Armageddon Brand of Recall",
+    4
+   ],
+   [
+    "Conflagration",
+    4
+   ],
+   [
+    "Earthshatter of Prominence",
+    4
+   ],
+   [
+    "Energy Blade",
+    4
+   ],
+   [
+    "Essence Drain of Desperation",
+    4
+   ],
+   [
+    "Fissure",
+    4
+   ],
+   [
+    "Lightning Arrow of Electrocution",
+    4
+   ],
+   [
+    "Shattering Steel",
+    4
+   ],
+   [
+    "Spectral Shield Throw of Trarthus",
+    4
+   ],
+   [
+    "Spectral Throw of Trarthus",
+    4
+   ],
+   [
+    "Splitting Steel of Ammunition",
+    4
+   ],
+   [
+    "Storm Call of Trarthus",
+    4
+   ],
+   [
+    "Stormbind",
+    4
+   ],
+   [
+    "Vaal Cleave",
+    4
+   ],
+   [
+    "Aspect of the Avian",
+    3
+   ],
+   [
+    "Charged Dash of Projection",
+    3
+   ],
+   [
+    "Cleave",
+    3
+   ],
+   [
+    "Galvanic Arrow of Energy",
+    3
+   ],
+   [
+    "Glacial Shield Swipe",
+    3
+   ],
+   [
+    "Incinerate of Expanse",
+    3
+   ],
+   [
+    "Puncture of Shanking",
+    3
+   ],
+   [
+    "Storm Rain of the Fence",
+    3
+   ],
+   [
+    "Summon Bestial Rhoa",
+    3
+   ],
+   [
+    "Summon Chaos Golem of the Maelström",
+    3
+   ],
+   [
+    "Temporal Rift",
+    3
+   ],
+   [
+    "Toxic Rain of Sporeburst",
+    3
+   ],
+   [
+    "Vaal Glacial Hammer",
+    3
+   ],
+   [
+    "Vaal Lightning Trap",
+    3
+   ],
+   [
+    "Vaal Rejuvenation Totem",
+    3
+   ],
+   [
+    "Alchemist's Mark",
+    2
+   ],
+   [
+    "Arctic Armour",
+    2
+   ],
+   [
+    "Blood and Sand",
+    2
+   ],
+   [
+    "Cremation of Exhuming",
+    2
+   ],
+   [
+    "Explosive Concoction",
+    2
+   ],
+   [
+    "Explosive Trap of Magnitude",
+    2
+   ],
+   [
+    "Flame Dash of Return",
+    2
+   ],
+   [
+    "Flamethrower Trap",
+    2
+   ],
+   [
+    "Infernal Cry",
+    2
+   ],
+   [
+    "Petrified Blood",
+    2
+   ],
+   [
+    "Rain of Arrows of Artillery",
+    2
+   ],
+   [
+    "Seismic Trap of Swells",
+    2
+   ],
+   [
+    "Siege Ballista of Splintering",
+    2
+   ],
+   [
+    "Spirit Offering",
+    2
+   ],
+   [
+    "Split Arrow of Splitting",
+    2
+   ],
+   [
+    "Stormbind of Teleportation",
+    2
+   ],
+   [
+    "Summon Bestial Ursa",
+    2
+   ],
+   [
+    "Summon Flame Golem of the Meteor",
+    2
+   ],
+   [
+    "Summon Reaper of Eviscerating",
+    2
+   ],
+   [
+    "Ambush",
+    1
+   ],
+   [
+    "Bear Trap",
+    1
+   ],
+   [
+    "Blade Flurry of Incision",
+    1
+   ],
+   [
+    "Blade Trap",
+    1
+   ],
+   [
+    "Chain Hook of Trarthus",
+    1
+   ],
+   [
+    "Contagion of Transference",
+    1
+   ],
+   [
+    "Flamethrower Trap of Stability",
+    1
+   ],
+   [
+    "Galvanic Arrow of Surging",
+    1
+   ],
+   [
+    "Icicle Mine of Sabotage",
+    1
+   ],
+   [
+    "Impurity of Ice",
+    1
+   ],
+   [
+    "Kinetic Fusillade of Detonation",
+    1
+   ],
+   [
+    "Lightning Spire Trap",
+    1
+   ],
+   [
+    "Lightning Spire Trap of Zapping",
+    1
+   ],
+   [
+    "Lightning Trap",
+    1
+   ],
+   [
+    "Pyroclast Mine of Sabotage",
+    1
+   ],
+   [
+    "Ravenous",
+    1
+   ],
+   [
+    "Seize the Flesh",
+    1
+   ],
+   [
+    "Siege Ballista of Trarthus",
+    1
+   ],
+   [
+    "Spectral Shield Throw of Shattering",
+    1
+   ],
+   [
+    "Spectral Throw of Materialising",
+    1
+   ],
+   [
+    "Summon Ice Golem of Shattering",
+    1
+   ],
+   [
+    "Vaal Impurity of Ice",
+    1
+   ],
+   [
+    "Vengeful Cry",
+    1
+   ],
+   [
+    "Voidstorm",
+    1
+   ],
+   [
+    "Warlord's Mark",
+    1
+   ]
+  ],
+  "allgems": [
+   [
+    "Faster Attacks Support",
+    63548
+   ],
+   [
+    "Automation",
+    62402
+   ],
+   [
+    "Shield Charge",
+    62043
+   ],
+   [
+    "Frostblink",
+    58534
+   ],
+   [
+    "Enlighten Support",
+    53816
+   ],
+   [
+    "Precision",
+    50034
+   ],
+   [
+    "Purity of Elements",
+    43419
+   ],
+   [
+    "Tempest Shield",
+    40115
+   ],
+   [
+    "Empower Support",
+    37460
+   ],
+   [
+    "Animate Guardian",
+    37121
+   ],
+   [
+    "Raise Spectre",
+    37007
+   ],
+   [
+    "Minion Life Support",
+    35501
+   ],
+   [
+    "Assassin's Mark",
+    35187
+   ],
+   [
+    "Vitality",
+    33967
+   ],
+   [
+    "Meat Shield Support",
+    33331
+   ],
+   [
+    "Convocation",
+    32573
+   ],
+   [
+    "Flesh and Stone",
+    31285
+   ],
+   [
+    "Eternal Blessing Support",
+    30667
+   ],
+   [
+    "Lifetap Support",
+    28840
+   ],
+   [
+    "Increased Critical Damage Support",
+    28234
+   ],
+   [
+    "Cast when Damage Taken Support",
+    25666
+   ],
+   [
+    "Flame Dash",
+    25514
+   ],
+   [
+    "Molten Shell",
+    24372
+   ],
+   [
+    "Discipline",
+    24202
+   ],
+   [
+    "Flame Link",
+    23271
+   ],
+   [
+    "Steelskin",
+    23223
+   ],
+   [
+    "Inspiration Support",
+    23050
+   ],
+   [
+    "Mark On Hit Support",
+    22936
+   ],
+   [
+    "More Duration Support",
+    22911
+   ],
+   [
+    "Summon Stone Golem",
+    22220
+   ],
+   [
+    "Herald of Ice",
+    21953
+   ],
+   [
+    "Arctic Armour",
+    21348
+   ],
+   [
+    "Summon Lightning Golem",
+    19697
+   ],
+   [
+    "Summon Flame Golem",
+    19517
+   ],
+   [
+    "Arrogance Support",
+    19415
+   ],
+   [
+    "Haste",
+    19172
+   ],
+   [
+    "Enhance Support",
+    18991
+   ],
+   [
+    "Immortal Call",
+    18690
+   ],
+   [
+    "Blood Rage",
+    18537
+   ],
+   [
+    "Herald of Purity",
+    18363
+   ],
+   [
+    "Arcane Surge Support",
+    18280
+   ],
+   [
+    "Determination",
+    17765
+   ],
+   [
+    "Clarity",
+    17504
+   ],
+   [
+    "Power Charge On Critical Support",
+    17200
+   ],
+   [
+    "Malevolence",
+    16783
+   ],
+   [
+    "Momentum Support",
+    16681
+   ],
+   [
+    "Infused Channelling Support",
+    16299
+   ],
+   [
+    "Frostblink of Wintry Blast",
+    15882
+   ],
+   [
+    "Swift Affliction Support",
+    15623
+   ],
+   [
+    "Desecrate",
+    15534
+   ],
+   [
+    "Leap Slam",
+    15382
+   ],
+   [
+    "Faster Casting Support",
+    15174
+   ],
+   [
+    "Herald of Ash",
+    14943
+   ],
+   [
+    "Sniper's Mark",
+    14927
+   ],
+   [
+    "Purity of Fire",
+    14836
+   ],
+   [
+    "Void Manipulation Support",
+    14550
+   ],
+   [
+    "Despair",
+    13670
+   ],
+   [
+    "Punishment",
+    13249
+   ],
+   [
+    "Volatility Support",
+    12801
+   ],
+   [
+    "Minefield Support",
+    12280
+   ],
+   [
+    "Zealotry",
+    12247
+   ],
+   [
+    "Withering Step",
+    11810
+   ],
+   [
+    "Elemental Weakness",
+    11802
+   ],
+   [
+    "Burning Damage Support",
+    11796
+   ],
+   [
+    "Stormblast Mine",
+    11475
+   ],
+   [
+    "Frostbite",
+    11370
+   ],
+   [
+    "Efficacy Support",
+    11318
+   ],
+   [
+    "Summon Chaos Golem",
+    10719
+   ],
+   [
+    "Enduring Cry",
+    10582
+   ],
+   [
+    "Greater Spell Echo Support",
+    10531
+   ],
+   [
+    "Petrified Blood",
+    10426
+   ],
+   [
+    "Increased Critical Strikes Support",
+    10425
+   ],
+   [
+    "Herald of Thunder",
+    10354
+   ],
+   [
+    "Arcanist Brand",
+    10299
+   ],
+   [
+    "Concentrated Effect Support",
+    10270
+   ],
+   [
+    "Righteous Fire",
+    10269
+   ],
+   [
+    "Elemental Damage with Attacks Support",
+    10256
+   ],
+   [
+    "Grace",
+    9715
+   ],
+   [
+    "Spell Echo Support",
+    9624
+   ],
+   [
+    "Winter Orb",
+    9415
+   ],
+   [
+    "Brutality Support",
+    9036
+   ],
+   [
+    "Melee Physical Damage Support",
+    9020
+   ],
+   [
+    "Focused Channelling Support",
+    9012
+   ],
+   [
+    "Ice Bite Support",
+    9008
+   ],
+   [
+    "Controlled Destruction Support",
+    8986
+   ],
+   [
+    "Unbound Ailments Support",
+    8970
+   ],
+   [
+    "Herald of the Hive",
+    8968
+   ],
+   [
+    "Wrath",
+    8785
+   ],
+   [
+    "Increased Area of Effect Support",
+    8744
+   ],
+   [
+    "Flammability",
+    8720
+   ],
+   [
+    "Returning Projectiles Support",
+    8672
+   ],
+   [
+    "Summon Ice Golem",
+    8622
+   ],
+   [
+    "Frost Shield",
+    8558
+   ],
+   [
+    "Invert the Rules Support",
+    8485
+   ],
+   [
+    "Elemental Focus Support",
+    8333
+   ],
+   [
+    "Greater Multistrike Support",
+    8214
+   ],
+   [
+    "Minion Damage Support",
+    8110
+   ],
+   [
+    "Cruelty Support",
+    8088
+   ],
+   [
+    "Phase Run",
+    7914
+   ],
+   [
+    "Congregation Support",
+    7860
+   ],
+   [
+    "Pride",
+    7745
+   ],
+   [
+    "Generosity Support",
+    7636
+   ],
+   [
+    "Elemental Army Support",
+    7528
+   ],
+   [
+    "Feeding Frenzy Support",
+    7473
+   ],
+   [
+    "Less Duration Support",
+    7436
+   ],
+   [
+    "Vaal Haste",
+    7380
+   ],
+   [
+    "Pact of Lycia",
+    7324
+   ],
+   [
+    "Summon Skitterbots",
+    7168
+   ],
+   [
+    "Bone Offering",
+    7135
+   ],
+   [
+    "Vaal Molten Shell",
+    7040
+   ],
+   [
+    "Blood and Sand",
+    7039
+   ],
+   [
+    "Call the Pyre",
+    6767
+   ],
+   [
+    "Hypothermia Support",
+    6683
+   ],
+   [
+    "Herald of Agony",
+    6605
+   ],
+   [
+    "Wall of Force",
+    6521
+   ],
+   [
+    "Eclipse Support",
+    6166
+   ],
+   [
+    "Fortify Support",
+    6066
+   ],
+   [
+    "Pulverise Support",
+    6043
+   ],
+   [
+    "Cooldown Recovery Support",
+    5961
+   ],
+   [
+    "Whirling Blades",
+    5928
+   ],
+   [
+    "Autoexertion",
+    5802
+   ],
+   [
+    "Anger",
+    5749
+   ],
+   [
+    "Endurance Charge on Melee Stun Support",
+    5718
+   ],
+   [
+    "Tornado",
+    5703
+   ],
+   [
+    "Culling Strike Support",
+    5564
+   ],
+   [
+    "Scornful Herald Support",
+    5562
+   ],
+   [
+    "Hatred",
+    5519
+   ],
+   [
+    "Cold Penetration Support",
+    5512
+   ],
+   [
+    "Smite",
+    5443
+   ],
+   [
+    "Portal",
+    5406
+   ],
+   [
+    "Flame Surge",
+    5401
+   ],
+   [
+    "Cast On Critical Strike Support",
+    5390
+   ],
+   [
+    "Trinity Support",
+    5377
+   ],
+   [
+    "Greater Multiple Projectiles Support",
+    5254
+   ],
+   [
+    "Mana-Infused Staff",
+    5243
+   ],
+   [
+    "Urgent Orders Support",
+    5228
+   ],
+   [
+    "Multistrike Support",
+    5101
+   ],
+   [
+    "Cyclone",
+    4911
+   ],
+   [
+    "Frenzy",
+    4894
+   ],
+   [
+    "Greater Fork Support",
+    4812
+   ],
+   [
+    "Bonechill Support",
+    4743
+   ],
+   [
+    "Pinpoint Support",
+    4740
+   ],
+   [
+    "Deadly Ailments Support",
+    4702
+   ],
+   [
+    "Purity of Ice",
+    4620
+   ],
+   [
+    "Greater Spell Cascade Support",
+    4603
+   ],
+   [
+    "Battlemage's Cry",
+    4550
+   ],
+   [
+    "Summon Stone Golem of Safeguarding",
+    4548
+   ],
+   [
+    "Multiple Totems Support",
+    4411
+   ],
+   [
+    "Vaal Discipline",
+    4364
+   ],
+   [
+    "Overloaded Intensity Support",
+    4242
+   ],
+   [
+    "Damage on Full Life Support",
+    4214
+   ],
+   [
+    "Pact of Beidat",
+    4168
+   ],
+   [
+    "Frost Bomb",
+    4069
+   ],
+   [
+    "Trap and Mine Damage Support",
+    4050
+   ],
+   [
+    "Enfeeble",
+    4044
+   ],
+   [
+    "Vulnerability",
+    3918
+   ],
+   [
+    "Ethereal Knives",
+    3913
+   ],
+   [
+    "Spell Totem Support",
+    3897
+   ],
+   [
+    "Righteous Fire of Arcane Devotion",
+    3873
+   ],
+   [
+    "Greater Volley Support",
+    3824
+   ],
+   [
+    "Conductivity",
+    3751
+   ],
+   [
+    "Bladefall of Trarthus",
+    3710
+   ],
+   [
+    "Pierce Support",
+    3703
+   ],
+   [
+    "Sigil of Power",
+    3694
+   ],
+   [
+    "Aspect of the Spider",
+    3683
+   ],
+   [
+    "Cast when Stunned Support",
+    3660
+   ],
+   [
+    "Manaforged Arrows Support",
+    3612
+   ],
+   [
+    "Spellslinger",
+    3594
+   ],
+   [
+    "Temporal Chains",
+    3565
+   ],
+   [
+    "Close Combat Support",
+    3544
+   ],
+   [
+    "Purity of Lightning",
+    3544
+   ],
+   [
+    "Vaal Smite",
+    3501
+   ],
+   [
+    "Ruthless Support",
+    3461
+   ],
+   [
+    "Companionship Support",
+    3331
+   ],
+   [
+    "Awakened Empower Support",
+    3254
+   ],
+   [
+    "Greater Ancestral Call Support",
+    3242
+   ],
+   [
+    "Sacred Wisps Support",
+    3238
+   ],
+   [
+    "Flicker Strike",
+    3177
+   ],
+   [
+    "General's Cry",
+    3078
+   ],
+   [
+    "Guardian's Blessing Support",
+    3005
+   ],
+   [
+    "Combustion Support",
+    2921
+   ],
+   [
+    "Penance Brand",
+    2896
+   ],
+   [
+    "Bladefall",
+    2815
+   ],
+   [
+    "Added Chaos Damage Support",
+    2790
+   ],
+   [
+    "Approaching Flames",
+    2741
+   ],
+   [
+    "Vaal Righteous Fire",
+    2739
+   ],
+   [
+    "Awakened Enlighten Support",
+    2721
+   ],
+   [
+    "Aspect of the Cat",
+    2720
+   ],
+   [
+    "Cast while Channelling Support",
+    2655
+   ],
+   [
+    "Awakened Enhance Support",
+    2644
+   ],
+   [
+    "Cyclone of Tumult",
+    2619
+   ],
+   [
+    "Intensify Support",
+    2584
+   ],
+   [
+    "Blade Blast",
+    2577
+   ],
+   [
+    "Fire Trap",
+    2563
+   ],
+   [
+    "Greater Chain Support",
+    2555
+   ],
+   [
+    "Lightning Penetration Support",
+    2524
+   ],
+   [
+    "Volatile Dead of Seething",
+    2469
+   ],
+   [
+    "Void Shockwave",
+    2439
+   ],
+   [
+    "Flesh Offering",
+    2423
+   ],
+   [
+    "Eldritch Blasphemy Support",
+    2421
+   ],
+   [
+    "Mirage Archer Support",
+    2382
+   ],
+   [
+    "Kinetic Blast",
+    2374
+   ],
+   [
+    "Detonate Dead of Scavenging",
+    2359
+   ],
+   [
+    "Kinetic Blast of Clustering",
+    2358
+   ],
+   [
+    "Destructive Link",
+    2351
+   ],
+   [
+    "Intimidating Cry",
+    2324
+   ],
+   [
+    "Hextouch Support",
+    2299
+   ],
+   [
+    "Firestorm of Pelting",
+    2235
+   ],
+   [
+    "Arcane Cloak",
+    2227
+   ],
+   [
+    "Aspect of Lunaris",
+    2217
+   ],
+   [
+    "Spirit Offering",
+    2178
+   ],
+   [
+    "Lancing Steel of Spraying",
+    2161
+   ],
+   [
+    "Death Aura",
+    2150
+   ],
+   [
+    "Rage Support",
+    2121
+   ],
+   [
+    "Seismic Cry",
+    2109
+   ],
+   [
+    "Second Wind Support",
+    2092
+   ],
+   [
+    "Spell Cascade Support",
+    2071
+   ],
+   [
+    "Dash",
+    2062
+   ],
+   [
+    "Withering Touch Support",
+    2036
+   ],
+   [
+    "Detonate Mines",
+    2019
+   ],
+   [
+    "Vicious Projectiles Support",
+    2014
+   ],
+   [
+    "Rallying Cry",
+    1991
+   ],
+   [
+    "Envy",
+    1990
+   ],
+   [
+    "Summon Carrion Golem of Hordes",
+    1985
+   ],
+   [
+    "Scorching Ray of Immolation",
+    1976
+   ],
+   [
+    "Faster Projectiles Support",
+    1968
+   ],
+   [
+    "Charged Mines Support",
+    1942
+   ],
+   [
+    "Berserk",
+    1926
+   ],
+   [
+    "Infernal Cry",
+    1926
+   ],
+   [
+    "Cast on Death Support",
+    1917
+   ],
+   [
+    "Nightblade Support",
+    1898
+   ],
+   [
+    "Blink Arrow",
+    1869
+   ],
+   [
+    "Unholy Trinity Support",
+    1865
+   ],
+   [
+    "Vaal Reap",
+    1838
+   ],
+   [
+    "Corrupting Fever",
+    1816
+   ],
+   [
+    "Physical to Lightning Support",
+    1806
+   ],
+   [
+    "Overexertion Support",
+    1786
+   ],
+   [
+    "Summon Phantasm Support",
+    1784
+   ],
+   [
+    "Item Rarity Support",
+    1782
+   ],
+   [
+    "Flame Wall",
+    1744
+   ],
+   [
+    "Multiple Projectiles Support",
+    1720
+   ],
+   [
+    "Cast on Ward Break Support",
+    1689
+   ],
+   [
+    "Ignite Proliferation Support",
+    1688
+   ],
+   [
+    "Poacher's Mark",
+    1672
+   ],
+   [
+    "Slower Projectiles Support",
+    1645
+   ],
+   [
+    "Hex Bloom Support",
+    1604
+   ],
+   [
+    "Hydrosphere",
+    1590
+   ],
+   [
+    "Decoy Totem",
+    1582
+   ],
+   [
+    "Cold Snap",
+    1578
+   ],
+   [
+    "Pact of Ghorr",
+    1569
+   ],
+   [
+    "War Banner",
+    1527
+   ],
+   [
+    "Added Lightning Damage Support",
+    1522
+   ],
+   [
+    "Lightning Warp",
+    1516
+   ],
+   [
+    "Animate Guardian of Smiting",
+    1512
+   ],
+   [
+    "Volatile Dead",
+    1506
+   ],
+   [
+    "Vaal Clarity",
+    1498
+   ],
+   [
+    "High-Impact Mine Support",
+    1469
+   ],
+   [
+    "Ballista Totem Support",
+    1437
+   ],
+   [
+    "Unhinge",
+    1415
+   ],
+   [
+    "Swift Assembly Support",
+    1400
+   ],
+   [
+    "Blight",
+    1387
+   ],
+   [
+    "Raise Zombie",
+    1385
+   ],
+   [
+    "Ethereal Knives of the Massacre",
+    1356
+   ],
+   [
+    "Storm Rain",
+    1352
+   ],
+   [
+    "Hexpass Support",
+    1343
+   ],
+   [
+    "Fist of War Support",
+    1340
+   ],
+   [
+    "Impale Support",
+    1326
+   ],
+   [
+    "Forbidden Rite of Soul Sacrifice",
+    1315
+   ],
+   [
+    "Flame Surge of Combusting",
+    1300
+   ],
+   [
+    "Purifying Flame of Revelations",
+    1287
+   ],
+   [
+    "Vaal Blight",
+    1285
+   ],
+   [
+    "Lightning Tendrils of Eccentricity",
+    1262
+   ],
+   [
+    "Bane",
+    1246
+   ],
+   [
+    "Wave of Conviction",
+    1238
+   ],
+   [
+    "Life Gain on Hit Support",
+    1236
+   ],
+   [
+    "Ancestral Cry",
+    1228
+   ],
+   [
+    "Animate Weapon of Ranged Arms",
+    1224
+   ],
+   [
+    "Added Cold Damage Support",
+    1222
+   ],
+   [
+    "Aspect of Solaris",
+    1202
+   ],
+   [
+    "Chance to Poison Support",
+    1168
+   ],
+   [
+    "Blasphemy Support",
+    1163
+   ],
+   [
+    "Viper Strike of the Mamba",
+    1158
+   ],
+   [
+    "Greater Unleash Support",
+    1156
+   ],
+   [
+    "Heavy Strike of Trarthus",
+    1146
+   ],
+   [
+    "Elemental Hit of the Spectrum",
+    1140
+   ],
+   [
+    "Vaal Arctic Armour",
+    1129
+   ],
+   [
+    "Maim Support",
+    1119
+   ],
+   [
+    "Reap of Butchery",
+    1116
+   ],
+   [
+    "Essence Drain",
+    1114
+   ],
+   [
+    "Bear Trap",
+    1084
+   ],
+   [
+    "Archmage Support",
+    1072
+   ],
+   [
+    "Purifying Flame",
+    1069
+   ],
+   [
+    "Summon Raging Spirit",
+    1060
+   ],
+   [
+    "Ground Slam of Earthshaking",
+    1052
+   ],
+   [
+    "Kinetic Fusillade",
+    1044
+   ],
+   [
+    "Contagion",
+    1022
+   ],
+   [
+    "Wither",
+    1022
+   ],
+   [
+    "Lightning Arrow",
+    1011
+   ],
+   [
+    "Summon Holy Relic of Conviction",
+    984
+   ],
+   [
+    "Vaal Grace",
+    977
+   ],
+   [
+    "Blight of Contagion",
+    976
+   ],
+   [
+    "Static Strike of Gathering Lightning",
+    973
+   ],
+   [
+    "Reap",
+    940
+   ],
+   [
+    "Storm Burst of Repulsion",
+    933
+   ],
+   [
+    "Chance to Bleed Support",
+    896
+   ],
+   [
+    "Vaal Cold Snap",
+    885
+   ],
+   [
+    "Divine Blessing Support",
+    877
+   ],
+   [
+    "Forbidden Rite",
+    863
+   ],
+   [
+    "Unleash Support",
+    854
+   ],
+   [
+    "Spark of the Nova",
+    853
+   ],
+   [
+    "Fireball",
+    850
+   ],
+   [
+    "Dual Strike of Ambidexterity",
+    849
+   ],
+   [
+    "Absolution",
+    836
+   ],
+   [
+    "Creeping Frost",
+    833
+   ],
+   [
+    "Storm Burst",
+    824
+   ],
+   [
+    "Alchemist's Mark",
+    820
+   ],
+   [
+    "Fire Penetration Support",
+    808
+   ],
+   [
+    "Hexblast of Contradiction",
+    801
+   ],
+   [
+    "Cursed Ground Support",
+    783
+   ],
+   [
+    "Vaal Absolution",
+    778
+   ],
+   [
+    "Smite of Divine Judgement",
+    774
+   ],
+   [
+    "Static Strike",
+    768
+   ],
+   [
+    "Earthshatter",
+    755
+   ],
+   [
+    "Blade Vortex",
+    749
+   ],
+   [
+    "Annihilation Support",
+    741
+   ],
+   [
+    "Frostmage Support",
+    741
+   ],
+   [
+    "Toxic Rain",
+    739
+   ],
+   [
+    "Summon Carrion Golem",
+    737
+   ],
+   [
+    "Tornado Shot",
+    727
+   ],
+   [
+    "Melee Splash Support",
+    720
+   ],
+   [
+    "Trauma Support",
+    716
+   ],
+   [
+    "Penance Brand of Dissipation",
+    712
+   ],
+   [
+    "Molten Strike of the Zenith",
+    711
+   ],
+   [
+    "Minion Speed Support",
+    709
+   ],
+   [
+    "Spellblade Support",
+    707
+   ],
+   [
+    "Added Fire Damage Support",
+    706
+   ],
+   [
+    "Energy Blade",
+    702
+   ],
+   [
+    "Arc of Oscillating",
+    687
+   ],
+   [
+    "Swiftbrand Support",
+    682
+   ],
+   [
+    "Decay Support",
+    679
+   ],
+   [
+    "Cremation of the Volcano",
+    676
+   ],
+   [
+    "Toxic Rain of Withering",
+    674
+   ],
+   [
+    "Ethereal Knives of Lingering Blades",
+    671
+   ],
+   [
+    "Aspect of the Crab",
+    664
+   ],
+   [
+    "Ball Lightning of Static",
+    663
+   ],
+   [
+    "Eviscerate",
+    651
+   ],
+   [
+    "Molten Strike",
+    640
+   ],
+   [
+    "Ensnaring Arrow",
+    638
+   ],
+   [
+    "Lightning Tendrils of Escalation",
+    635
+   ],
+   [
+    "Ancestral Call Support",
+    632
+   ],
+   [
+    "Freezing Pulse",
+    631
+   ],
+   [
+    "Boneshatter of Complex Trauma",
+    616
+   ],
+   [
+    "Defiance Banner",
+    614
+   ],
+   [
+    "Impending Doom Support",
+    614
+   ],
+   [
+    "Impurity of Fire",
+    607
+   ],
+   [
+    "Unearth",
+    607
+   ],
+   [
+    "Vaal Impurity of Fire",
+    607
+   ],
+   [
+    "Poisonous Concoction of Bouncing",
+    606
+   ],
+   [
+    "Crab Totem Support",
+    598
+   ],
+   [
+    "Expert Retaliation Support",
+    597
+   ],
+   [
+    "Scorching Ray",
+    597
+   ],
+   [
+    "Doom Blast",
+    585
+   ],
+   [
+    "Elemental Hit",
+    581
+   ],
+   [
+    "Sunder",
+    579
+   ],
+   [
+    "Vaal Arc",
+    573
+   ],
+   [
+    "Shield Crush",
+    570
+   ],
+   [
+    "Caustic Arrow",
+    561
+   ],
+   [
+    "Dread Banner",
+    556
+   ],
+   [
+    "Immolate Support",
+    556
+   ],
+   [
+    "Puncture",
+    552
+   ],
+   [
+    "Barrage Support",
+    551
+   ],
+   [
+    "Ambush",
+    547
+   ],
+   [
+    "Wave of Conviction of Trarthus",
+    547
+   ],
+   [
+    "Vile Toxins Support",
+    539
+   ],
+   [
+    "Additional Accuracy Support",
+    537
+   ],
+   [
+    "Arc",
+    535
+   ],
+   [
+    "Aspect of Arakaali",
+    535
+   ],
+   [
+    "Double Strike of Momentum",
+    529
+   ],
+   [
+    "Glacial Cascade of the Fissure",
+    529
+   ],
+   [
+    "Pact of K'Tash",
+    527
+   ],
+   [
+    "Arrow Nova Support",
+    517
+   ],
+   [
+    "Lacerate of Haemorrhage",
+    515
+   ],
+   [
+    "Summon Skeletons",
+    512
+   ],
+   [
+    "Charged Traps Support",
+    509
+   ],
+   [
+    "Detonate Dead",
+    509
+   ],
+   [
+    "Signal Prey",
+    507
+   ],
+   [
+    "Exsanguinate",
+    505
+   ],
+   [
+    "Vengeful Cry",
+    505
+   ],
+   [
+    "Plague Bearer",
+    497
+   ],
+   [
+    "Shockwave",
+    497
+   ],
+   [
+    "Vaal Blade Vortex",
+    497
+   ],
+   [
+    "Elemental Penetration Support",
+    496
+   ],
+   [
+    "Rolling Magma",
+    487
+   ],
+   [
+    "Intuitive Link",
+    483
+   ],
+   [
+    "Shock Nova of Procession",
+    478
+   ],
+   [
+    "Greater Devour Support",
+    474
+   ],
+   [
+    "Elemental Proliferation Support",
+    453
+   ],
+   [
+    "Temporal Rift",
+    453
+   ],
+   [
+    "Chain Support",
+    448
+   ],
+   [
+    "Tornado of Elemental Turbulence",
+    443
+   ],
+   [
+    "Warlord's Mark",
+    437
+   ],
+   [
+    "Divine Ire",
+    433
+   ],
+   [
+    "Double Strike",
+    429
+   ],
+   [
+    "Fork Support",
+    426
+   ],
+   [
+    "Raise Zombie of Falling",
+    425
+   ],
+   [
+    "Fresh Meat Support",
+    422
+   ],
+   [
+    "Lacerate of Butchering",
+    417
+   ],
+   [
+    "Blade Blast of Unloading",
+    413
+   ],
+   [
+    "Divine Retribution",
+    411
+   ],
+   [
+    "Focused Ballista Support",
+    410
+   ],
+   [
+    "Void Sphere",
+    410
+   ],
+   [
+    "Cull the Weak Support",
+    409
+   ],
+   [
+    "Discharge",
+    409
+   ],
+   [
+    "Aspect of the Brine King",
+    406
+   ],
+   [
+    "Sacrifice Support",
+    406
+   ],
+   [
+    "Summon Carrion Golem of Scavenging",
+    402
+   ],
+   [
+    "Vaal Flicker Strike",
+    391
+   ],
+   [
+    "Vaal Cyclone",
+    386
+   ],
+   [
+    "Vaal Double Strike",
+    386
+   ],
+   [
+    "Energy Leech Support",
+    385
+   ],
+   [
+    "Rage Vortex of Berserking",
+    384
+   ],
+   [
+    "Excommunicate Support",
+    383
+   ],
+   [
+    "Explosive Arrow",
+    381
+   ],
+   [
+    "Icicle Mine of Fanning",
+    378
+   ],
+   [
+    "Summon Flame Golem of Hordes",
+    377
+   ],
+   [
+    "Frostbolt",
+    375
+   ],
+   [
+    "Sadism Support",
+    374
+   ],
+   [
+    "Rejuvenation Totem",
+    372
+   ],
+   [
+    "Artillery Ballista",
+    368
+   ],
+   [
+    "Venom Gyre",
+    363
+   ],
+   [
+    "Ice Trap",
+    362
+   ],
+   [
+    "Vaal Caustic Arrow",
+    358
+   ],
+   [
+    "Shock Nova",
+    357
+   ],
+   [
+    "Overcharge Support",
+    355
+   ],
+   [
+    "Brand Recall",
+    353
+   ],
+   [
+    "Gluttony Support",
+    352
+   ],
+   [
+    "Vaal Lightning Strike",
+    347
+   ],
+   [
+    "Vortex",
+    346
+   ],
+   [
+    "Storm Brand",
+    345
+   ],
+   [
+    "Cold to Fire Support",
+    341
+   ],
+   [
+    "Soulrend",
+    339
+   ],
+   [
+    "Soulrend of Reaping",
+    336
+   ],
+   [
+    "Frost Blades",
+    332
+   ],
+   [
+    "Lightning Strike",
+    332
+   ],
+   [
+    "Reave of Refraction",
+    326
+   ],
+   [
+    "Dominating Blow of Inspiring",
+    325
+   ],
+   [
+    "Frenzy of Onslaught",
+    322
+   ],
+   [
+    "Vaal Animate Weapon",
+    320
+   ],
+   [
+    "Summon Holy Relic",
+    315
+   ],
+   [
+    "Aspect of the Avian",
+    308
+   ],
+   [
+    "Bladestorm",
+    306
+   ],
+   [
+    "Vaal Venom Gyre",
+    306
+   ],
+   [
+    "Innervate Support",
+    304
+   ],
+   [
+    "Ice Nova of Frostbolts",
+    301
+   ],
+   [
+    "Shrapnel Ballista",
+    298
+   ],
+   [
+    "Coursing Current Support",
+    287
+   ],
+   [
+    "Power Siphon",
+    286
+   ],
+   [
+    "Blazing Salvo",
+    283
+   ],
+   [
+    "Communion Support",
+    283
+   ],
+   [
+    "Void Sphere of Rending",
+    280
+   ],
+   [
+    "Wintertide Brand",
+    278
+   ],
+   [
+    "Spark",
+    277
+   ],
+   [
+    "Leap Slam of Groundbreaking",
+    273
+   ],
+   [
+    "Vaal Summon Skeletons",
+    269
+   ],
+   [
+    "Crackling Lance of Branching",
+    267
+   ],
+   [
+    "Protective Link",
+    267
+   ],
+   [
+    "Crackling Lance",
+    266
+   ],
+   [
+    "Essence Drain of Wickedness",
+    266
+   ],
+   [
+    "Vaal Detonate Dead",
+    266
+   ],
+   [
+    "Summon Chaos Golem of the Maelström",
+    265
+   ],
+   [
+    "Vaal Ice Nova",
+    264
+   ],
+   [
+    "Blessed Call Support",
+    262
+   ],
+   [
+    "Ice Nova",
+    262
+   ],
+   [
+    "Earthquake",
+    253
+   ],
+   [
+    "Ball Lightning of Orbiting",
+    251
+   ],
+   [
+    "Bursting Toad",
+    249
+   ],
+   [
+    "Earthbreaker Support",
+    248
+   ],
+   [
+    "Consecrated Path of Endurance",
+    246
+   ],
+   [
+    "Storm Call",
+    243
+   ],
+   [
+    "Avenging Flame",
+    241
+   ],
+   [
+    "Bane of Condemnation",
+    237
+   ],
+   [
+    "Blade Flurry",
+    237
+   ],
+   [
+    "Firestorm",
+    236
+   ],
+   [
+    "Ice Spear",
+    235
+   ],
+   [
+    "Lightning Strike of Arcing",
+    235
+   ],
+   [
+    "Vaal Temptation Support",
+    234
+   ],
+   [
+    "Soulrend of the Spiral",
+    230
+   ],
+   [
+    "Orb of Storms",
+    226
+   ],
+   [
+    "Vaal Ground Slam",
+    222
+   ],
+   [
+    "Vaal Reave",
+    220
+   ],
+   [
+    "Impurity of Ice",
+    219
+   ],
+   [
+    "Vaal Impurity of Ice",
+    219
+   ],
+   [
+    "Death Wish",
+    218
+   ],
+   [
+    "Summon Stone Golem of Hordes",
+    216
+   ],
+   [
+    "Frigid Bond Support",
+    215
+   ],
+   [
+    "Firestorm of Meteors",
+    214
+   ],
+   [
+    "Creeping Frost of Floes",
+    207
+   ],
+   [
+    "Barrage of Volley Fire",
+    204
+   ],
+   [
+    "Summon Living Lightning",
+    203
+   ],
+   [
+    "Detonate Dead of Chain Reaction",
+    202
+   ],
+   [
+    "Bloodthirst Support",
+    201
+   ],
+   [
+    "Lightning Conduit",
+    198
+   ],
+   [
+    "Mana Leech Support",
+    198
+   ],
+   [
+    "Crushing Fist",
+    197
+   ],
+   [
+    "Rain of Arrows of Saturation",
+    197
+   ],
+   [
+    "Holy Flame Totem",
+    196
+   ],
+   [
+    "Volley Support",
+    193
+   ],
+   [
+    "Thirst for Blood",
+    187
+   ],
+   [
+    "Vaal Earthquake",
+    187
+   ],
+   [
+    "Ball Lightning",
+    185
+   ],
+   [
+    "Crackling Lance of Disintegration",
+    185
+   ],
+   [
+    "Embrace Madness",
+    185
+   ],
+   [
+    "Summon Lightning Golem of Hordes",
+    183
+   ],
+   [
+    "Raise Zombie of Slamming",
+    180
+   ],
+   [
+    "Searing Bond",
+    178
+   ],
+   [
+    "Reave",
+    177
+   ],
+   [
+    "Pyroclast Mine of Sabotage",
+    165
+   ],
+   [
+    "Incinerate of Venting",
+    163
+   ],
+   [
+    "Lightning Tendrils",
+    161
+   ],
+   [
+    "Summon Raging Spirit of Enormity",
+    157
+   ],
+   [
+    "Blast Rain",
+    156
+   ],
+   [
+    "Vaal Firestorm",
+    156
+   ],
+   [
+    "Vaal Lightning Arrow",
+    155
+   ],
+   [
+    "Frost Wall",
+    154
+   ],
+   [
+    "Ice Crash",
+    150
+   ],
+   [
+    "Impurity of Lightning",
+    150
+   ],
+   [
+    "Vaal Impurity of Lightning",
+    150
+   ],
+   [
+    "Divine Sentinel Support",
+    149
+   ],
+   [
+    "Summon Chaos Golem of Hordes",
+    149
+   ],
+   [
+    "Shockwave Totem",
+    148
+   ],
+   [
+    "Iron Will Support",
+    147
+   ],
+   [
+    "Ice Spear of Splitting",
+    146
+   ],
+   [
+    "Ice Shot",
+    145
+   ],
+   [
+    "Cold Snap of Power",
+    142
+   ],
+   [
+    "Rage Vortex",
+    142
+   ],
+   [
+    "Infernal Legion Support",
+    140
+   ],
+   [
+    "Bladefall of Volleys",
+    139
+   ],
+   [
+    "Blind Support",
+    139
+   ],
+   [
+    "Kinetic Bolt",
+    139
+   ],
+   [
+    "Summon Ice Golem of Hordes",
+    138
+   ],
+   [
+    "Eye of Winter",
+    137
+   ],
+   [
+    "Life Leech Support",
+    137
+   ],
+   [
+    "Doryani's Touch",
+    135
+   ],
+   [
+    "Volcanic Fissure of Snaking",
+    129
+   ],
+   [
+    "Ground Slam",
+    122
+   ],
+   [
+    "Shield Crush of the Chieftain",
+    119
+   ],
+   [
+    "Holy Hammers",
+    111
+   ],
+   [
+    "Devour Support",
+    110
+   ],
+   [
+    "Exsanguinate of Transmission",
+    108
+   ],
+   [
+    "Split Arrow",
+    107
+   ],
+   [
+    "Vaal Domination",
+    105
+   ],
+   [
+    "Cobra Lash",
+    102
+   ],
+   [
+    "Vaal Ice Shot",
+    102
+   ],
+   [
+    "Bloodsoaked Banner Support",
+    101
+   ],
+   [
+    "Vaal Rejuvenation Totem",
+    101
+   ],
+   [
+    "Blastchain Mine Support",
+    100
+   ],
+   [
+    "Splitting Steel",
+    99
+   ],
+   [
+    "Soul Link",
+    97
+   ],
+   [
+    "Voltaxic Burst",
+    96
+   ],
+   [
+    "Bodyswap of Sacrifice",
+    94
+   ],
+   [
+    "Ice Shot of Penetration",
+    92
+   ],
+   [
+    "Rain of Arrows",
+    90
+   ],
+   [
+    "Summon Ice Golem of Shattering",
+    89
+   ],
+   [
+    "Locus Mine Support",
+    88
+   ],
+   [
+    "Summon Reaper of Revenants",
+    86
+   ],
+   [
+    "Wild Strike",
+    84
+   ],
+   [
+    "Vaal Storm Call",
+    83
+   ],
+   [
+    "Explosive Trap",
+    82
+   ],
+   [
+    "Vaal Fireball",
+    82
+   ],
+   [
+    "Vaal Spark",
+    82
+   ],
+   [
+    "Corrupting Cry Support",
+    80
+   ],
+   [
+    "Dominating Blow",
+    80
+   ],
+   [
+    "Ice Nova of Deep Freeze",
+    80
+   ],
+   [
+    "Galvanic Field",
+    78
+   ],
+   [
+    "Spectral Shield Throw",
+    78
+   ],
+   [
+    "Blood Sacrament",
+    77
+   ],
+   [
+    "Hexblast",
+    77
+   ],
+   [
+    "Vortex of Projection",
+    77
+   ],
+   [
+    "Lightning Conduit of the Heavens",
+    74
+   ],
+   [
+    "Scourge Arrow of Menace",
+    73
+   ],
+   [
+    "Flame Dash of Return",
+    71
+   ],
+   [
+    "Domination",
+    70
+   ],
+   [
+    "Absolution of Inspiring",
+    69
+   ],
+   [
+    "Bladestorm of Uncertainty",
+    69
+   ],
+   [
+    "Summon Skeletons of Mages",
+    66
+   ],
+   [
+    "Pyroclast Mine",
+    65
+   ],
+   [
+    "Trap Support",
+    65
+   ],
+   [
+    "Bodyswap",
+    64
+   ],
+   [
+    "Flicker Strike of Power",
+    64
+   ],
+   [
+    "Exemplar Support",
+    63
+   ],
+   [
+    "Will of the Lords",
+    61
+   ],
+   [
+    "Animate Weapon",
+    60
+   ],
+   [
+    "Snipe",
+    58
+   ],
+   [
+    "Armageddon Brand",
+    57
+   ],
+   [
+    "Contagion of Transference",
+    56
+   ],
+   [
+    "Divine Ire of Holy Lightning",
+    56
+   ],
+   [
+    "Foulgrasp",
+    56
+   ],
+   [
+    "Storm Rain of the Conduit",
+    56
+   ],
+   [
+    "Volatile Dead of Confinement",
+    56
+   ],
+   [
+    "Heavy Strike",
+    55
+   ],
+   [
+    "Mirror Arrow of Bombarding Clones",
+    55
+   ],
+   [
+    "Advanced Traps Support",
+    54
+   ],
+   [
+    "Prismatic Burst",
+    54
+   ],
+   [
+    "Viper Strike",
+    54
+   ],
+   [
+    "Burning Arrow",
+    53
+   ],
+   [
+    "Icestorm",
+    53
+   ],
+   [
+    "Knockback Support",
+    53
+   ],
+   [
+    "Behead Support",
+    51
+   ],
+   [
+    "Flameblast",
+    51
+   ],
+   [
+    "Icicle Mine",
+    51
+   ],
+   [
+    "Spectral Throw",
+    51
+   ],
+   [
+    "Storm Brand of Indecision",
+    51
+   ],
+   [
+    "Divine Blast",
+    50
+   ],
+   [
+    "Glacial Cascade",
+    50
+   ],
+   [
+    "Chance to Flee Support",
+    49
+   ],
+   [
+    "Consecrated Path",
+    48
+   ],
+   [
+    "Orb of Storms of Squalls",
+    48
+   ],
+   [
+    "Tectonic Slam of Cataclysm",
+    48
+   ],
+   [
+    "Vigilant Strike",
+    48
+   ],
+   [
+    "Siege Ballista",
+    47
+   ],
+   [
+    "Vaal Flameblast",
+    47
+   ],
+   [
+    "Critical Strike Affliction Support",
+    46
+   ],
+   [
+    "Sunder of Earthbreaking",
+    46
+   ],
+   [
+    "Blink Arrow of Bombarding Clones",
+    44
+   ],
+   [
+    "Holy Sweep",
+    44
+   ],
+   [
+    "Hallow Support",
+    43
+   ],
+   [
+    "Flameblast of Celerity",
+    42
+   ],
+   [
+    "Discharge of Misery",
+    41
+   ],
+   [
+    "Dark Bargain",
+    40
+   ],
+   [
+    "Sunder of Trarthus",
+    40
+   ],
+   [
+    "Boneshatter",
+    39
+   ],
+   [
+    "Galvanic Field of Intensity",
+    39
+   ],
+   [
+    "Summon Hiveborn",
+    39
+   ],
+   [
+    "Vaal Molten Strike",
+    39
+   ],
+   [
+    "Seize the Flesh",
+    38
+   ],
+   [
+    "Barrage",
+    37
+   ],
+   [
+    "Bladefall of Impaling",
+    37
+   ],
+   [
+    "Searing Bond of Detonation",
+    37
+   ],
+   [
+    "Stun Support",
+    37
+   ],
+   [
+    "Divine Blast of Radiance",
+    36
+   ],
+   [
+    "Falling Crystal",
+    36
+   ],
+   [
+    "Holy Strike",
+    36
+   ],
+   [
+    "Arc of Surging",
+    35
+   ],
+   [
+    "Glacial Hammer of Shattering",
+    34
+   ],
+   [
+    "Invention Support",
+    34
+   ],
+   [
+    "Summon Reaper",
+    34
+   ],
+   [
+    "Blink Arrow of Prismatic Clones",
+    33
+   ],
+   [
+    "Vaal Power Siphon",
+    32
+   ],
+   [
+    "Cluster Traps Support",
+    31
+   ],
+   [
+    "Burning Arrow of Vigour",
+    30
+   ],
+   [
+    "Hexblast of Havoc",
+    30
+   ],
+   [
+    "Summon Skeletons of Archers",
+    30
+   ],
+   [
+    "Holy Hammers of Spirals",
+    29
+   ],
+   [
+    "Kinetic Rain",
+    29
+   ],
+   [
+    "Perforate of Bloodshed",
+    29
+   ],
+   [
+    "Rupture Support",
+    29
+   ],
+   [
+    "Volcanic Fissure",
+    29
+   ],
+   [
+    "Cast on Melee Kill Support",
+    28
+   ],
+   [
+    "Infernal Blow",
+    28
+   ],
+   [
+    "Lightning Trap",
+    28
+   ],
+   [
+    "Lightning Trap of Sparking",
+    28
+   ],
+   [
+    "Power Siphon of the Archmage",
+    28
+   ],
+   [
+    "Scourge Arrow",
+    28
+   ],
+   [
+    "Tectonic Slam",
+    28
+   ],
+   [
+    "Lancing Steel",
+    27
+   ],
+   [
+    "Machinations Support",
+    27
+   ],
+   [
+    "Mirror Arrow",
+    27
+   ],
+   [
+    "Perforate",
+    27
+   ],
+   [
+    "Cremation",
+    26
+   ],
+   [
+    "Spark of Unpredictability",
+    26
+   ],
+   [
+    "Vaal Volcanic Fissure",
+    26
+   ],
+   [
+    "Armageddon Brand of Volatility",
+    25
+   ],
+   [
+    "Controlled Blaze Support",
+    24
+   ],
+   [
+    "Kinetic Rain of Impact",
+    24
+   ],
+   [
+    "Lacerate",
+    24
+   ],
+   [
+    "Multiple Traps Support",
+    24
+   ],
+   [
+    "Vaal Lightning Trap",
+    24
+   ],
+   [
+    "Kinetic Flux",
+    23
+   ],
+   [
+    "Manabond",
+    23
+   ],
+   [
+    "Smoke Mine",
+    23
+   ],
+   [
+    "Blade Blast of Dagger Detonation",
+    22
+   ],
+   [
+    "Contagion of Subsiding",
+    22
+   ],
+   [
+    "Cremation of Exhuming",
+    22
+   ],
+   [
+    "Fire Trap of Blasting",
+    22
+   ],
+   [
+    "Glacial Hammer",
+    22
+   ],
+   [
+    "Holy Sweep of Hammerfalls",
+    22
+   ],
+   [
+    "Living Lightning Support",
+    22
+   ],
+   [
+    "Perforate of Duality",
+    22
+   ],
+   [
+    "Blade Vortex of the Scythe",
+    21
+   ],
+   [
+    "Explosive Trap of Shrapnel",
+    21
+   ],
+   [
+    "Point Blank Support",
+    21
+   ],
+   [
+    "Queen's Demand",
+    21
+   ],
+   [
+    "Charged Dash",
+    20
+   ],
+   [
+    "Ice Crash of Cadence",
+    20
+   ],
+   [
+    "Vaal Rain of Arrows",
+    20
+   ],
+   [
+    "Blast Rain of Trarthus",
+    19
+   ],
+   [
+    "Chain Hook of Angling",
+    19
+   ],
+   [
+    "Ravenous",
+    19
+   ],
+   [
+    "Windburst",
+    19
+   ],
+   [
+    "Bloodlust Support",
+    18
+   ],
+   [
+    "Double Strike of Impaling",
+    18
+   ],
+   [
+    "Frost Bomb of Forthcoming",
+    18
+   ],
+   [
+    "Glacial Shield Swipe",
+    18
+   ],
+   [
+    "Vaal Burning Arrow",
+    18
+   ],
+   [
+    "Wild Strike of Extremes",
+    18
+   ],
+   [
+    "Blood Offering",
+    17
+   ],
+   [
+    "Chain Hook",
+    17
+   ],
+   [
+    "Flameblast of Contraction",
+    17
+   ],
+   [
+    "Penance Brand of Conduction",
+    17
+   ],
+   [
+    "Swordstorm",
+    17
+   ],
+   [
+    "Pestilent Strike",
+    16
+   ],
+   [
+    "Prismatic Burst Support",
+    16
+   ],
+   [
+    "Raise Spectre of Transience",
+    16
+   ],
+   [
+    "Dark Bargain of Trarthus",
+    15
+   ],
+   [
+    "Divine Ire of Disintegration",
+    15
+   ],
+   [
+    "Holy Flame Totem of Ire",
+    15
+   ],
+   [
+    "Pacifism Support",
+    15
+   ],
+   [
+    "Shield of Light",
+    15
+   ],
+   [
+    "Spectral Helix",
+    15
+   ],
+   [
+    "Storm Call of Trarthus",
+    15
+   ],
+   [
+    "Vaal Blade Flurry",
+    15
+   ],
+   [
+    "Animate Weapon of Self Reflection",
+    14
+   ],
+   [
+    "Artillery Ballista of Cross Strafe",
+    14
+   ],
+   [
+    "Blight of Atrophy",
+    14
+   ],
+   [
+    "Frost Bomb of Instability",
+    14
+   ],
+   [
+    "Iron Grip Support",
+    14
+   ],
+   [
+    "Seismic Trap",
+    14
+   ],
+   [
+    "Summon Spectral Wolf",
+    14
+   ],
+   [
+    "Blade Trap of Greatswords",
+    13
+   ],
+   [
+    "Block Chance Reduction Support",
+    13
+   ],
+   [
+    "Cleave",
+    13
+   ],
+   [
+    "Earthquake of Amplification",
+    13
+   ],
+   [
+    "Essence Drain of Desperation",
+    13
+   ],
+   [
+    "Galvanic Arrow",
+    13
+   ],
+   [
+    "Incinerate",
+    13
+   ],
+   [
+    "Lightning Spire Trap of Overloading",
+    13
+   ],
+   [
+    "Mirror Arrow of Prismatic Clones",
+    13
+   ],
+   [
+    "Caustic Arrow of Poison",
+    12
+   ],
+   [
+    "Fissure",
+    12
+   ],
+   [
+    "Somatic Shell",
+    12
+   ],
+   [
+    "Spectral Shield Throw of Trarthus",
+    12
+   ],
+   [
+    "Frost Blades of Katabasis",
+    11
+   ],
+   [
+    "Molten Burst",
+    11
+   ],
+   [
+    "Siphoning Trap",
+    11
+   ],
+   [
+    "Boneshatter of Carnage",
+    10
+   ],
+   [
+    "Conflagration",
+    10
+   ],
+   [
+    "Explosive Concoction of Destruction",
+    10
+   ],
+   [
+    "Eye of Winter of Transience",
+    10
+   ],
+   [
+    "Flamewood Support",
+    10
+   ],
+   [
+    "Ice Trap of Hollowness",
+    10
+   ],
+   [
+    "Overheat Support",
+    10
+   ],
+   [
+    "Predator Support",
+    10
+   ],
+   [
+    "Siphoning Trap of Pain",
+    10
+   ],
+   [
+    "Spectral Throw of Trarthus",
+    10
+   ],
+   [
+    "Split Arrow of Splitting",
+    10
+   ],
+   [
+    "Vaal Cleave",
+    10
+   ],
+   [
+    "Windburst Support",
+    10
+   ],
+   [
+    "Artillery Ballista of Focus Fire",
+    9
+   ],
+   [
+    "Earthshatter of Fragility",
+    9
+   ],
+   [
+    "Icicle Mine of Sabotage",
+    9
+   ],
+   [
+    "Infernal Blow of Immolation",
+    9
+   ],
+   [
+    "Lightning Arrow of Electrocution",
+    9
+   ],
+   [
+    "Poisonous Concoction",
+    9
+   ],
+   [
+    "Stormbind",
+    9
+   ],
+   [
+    "Summon Flame Golem of the Meteor",
+    9
+   ],
+   [
+    "Vaal Sacrifice Support",
+    9
+   ],
+   [
+    "Chain Hook of Trarthus",
+    8
+   ],
+   [
+    "Earthshatter of Prominence",
+    8
+   ],
+   [
+    "Flamethrower Trap",
+    8
+   ],
+   [
+    "Kinetic Bolt of Fragmentation",
+    8
+   ],
+   [
+    "Lethal Dose Support",
+    8
+   ],
+   [
+    "Shattering Steel",
+    8
+   ],
+   [
+    "Shockwave Totem of Authority",
+    8
+   ],
+   [
+    "Tornado Shot of Cloudburst",
+    8
+   ],
+   [
+    "Vaal Spectral Throw",
+    8
+   ],
+   [
+    "Vampiric Link",
+    8
+   ],
+   [
+    "Armageddon Brand of Recall",
+    7
+   ],
+   [
+    "Devouring Totem",
+    7
+   ],
+   [
+    "Frozen Legion",
+    7
+   ],
+   [
+    "Spectral Helix of Trarthus",
+    7
+   ],
+   [
+    "Storm Rain of the Fence",
+    7
+   ],
+   [
+    "Thunderstorm",
+    7
+   ],
+   [
+    "Toxic Rain of Sporeburst",
+    7
+   ],
+   [
+    "Cleave of Rage",
+    6
+   ],
+   [
+    "Dual Strike",
+    6
+   ],
+   [
+    "Lightning Spire Trap",
+    6
+   ],
+   [
+    "Puncture of Shanking",
+    6
+   ],
+   [
+    "Summon Bestial Rhoa",
+    6
+   ],
+   [
+    "Explosive Concoction",
+    5
+   ],
+   [
+    "Galvanic Arrow of Energy",
+    5
+   ],
+   [
+    "Shockwave Support",
+    5
+   ],
+   [
+    "Splitting Steel of Ammunition",
+    5
+   ],
+   [
+    "Stormbind of Teleportation",
+    5
+   ],
+   [
+    "Summon Bestial Snake",
+    5
+   ],
+   [
+    "Summon Reaper of Eviscerating",
+    5
+   ],
+   [
+    "Voidstorm",
+    5
+   ],
+   [
+    "Blade Flurry of Incision",
+    4
+   ],
+   [
+    "Explosive Trap of Magnitude",
+    4
+   ],
+   [
+    "Seismic Trap of Swells",
+    4
+   ],
+   [
+    "Siege Ballista of Trarthus",
+    4
+   ],
+   [
+    "Summon Doedre's Effigy",
+    4
+   ],
+   [
+    "Blade Trap",
+    3
+   ],
+   [
+    "Charged Dash of Projection",
+    3
+   ],
+   [
+    "Eye of Winter of Finality",
+    3
+   ],
+   [
+    "Incinerate of Expanse",
+    3
+   ],
+   [
+    "Kinetic Fusillade of Detonation",
+    3
+   ],
+   [
+    "Kinetic Instability Support",
+    3
+   ],
+   [
+    "Siege Ballista of Splintering",
+    3
+   ],
+   [
+    "Vaal Glacial Hammer",
+    3
+   ],
+   [
+    "Flamethrower Trap of Stability",
+    2
+   ],
+   [
+    "Galvanic Arrow of Surging",
+    2
+   ],
+   [
+    "Lightning Spire Trap of Zapping",
+    2
+   ],
+   [
+    "Petrification Statue",
+    2
+   ],
+   [
+    "Rain of Arrows of Artillery",
+    2
+   ],
+   [
+    "Spectral Shield Throw of Shattering",
+    2
+   ],
+   [
+    "Summon Bestial Ursa",
+    2
+   ],
+   [
+    "Brandsurge",
+    1
+   ],
+   [
+    "Conversion Trap",
+    1
+   ],
+   [
+    "Frozen Legion of Rallying",
+    1
+   ],
+   [
+    "Gluttony of Elements",
+    1
+   ],
+   [
+    "Shattering Steel of Ammunition",
+    1
+   ],
+   [
+    "Spectral Throw of Materialising",
+    1
+   ]
+  ]
+ },
+ "poe2": {
+  "total": 124098,
+  "class": [
+   [
+    "",
+    45921
+   ],
+   [
+    "",
+    11883
+   ],
+   [
+    "",
+    11100
+   ],
+   [
+    "of KitavaSor",
+    10207
+   ],
+   [
+    "",
+    8918
+   ],
+   [
+    "",
+    7886
+   ],
+   [
+    "",
+    4196
+   ],
+   [
+    "ceressS",
+    3427
+   ],
+   [
+    "verTa",
+    2576
+   ],
+   [
+    "",
+    2423
+   ],
+   [
+    "pirit WalkerStormwea",
+    1944
+   ],
+   [
+    "",
+    1885
+   ],
+   [
+    "",
+    1772
+   ],
+   [
+    "onkOraclePat",
+    1615
+   ],
+   [
+    "hhunter",
+    1361
+   ],
+   [
+    "hfinderRangerRitua",
+    1162
+   ],
+   [
+    "",
+    1148
+   ],
+   [
+    "",
+    1136
+   ],
+   [
+    "cticianTitanWarbrin",
+    937
+   ],
+   [
+    "",
+    933
+   ],
+   [
+    "listSh",
+    828
+   ],
+   [
+    "",
+    594
+   ],
+   [
+    "\u0004\u000e\t\u0004\u0006\n\u0006\t\u0006\u000f\t\r\u000b\t\u0005\n\u0007\u0005\u000bAbyssal LichAcolyte of ChayulaAmazonBlood MageChronomancerDeadeyeDisciple of VarashtaDruidGemling LegionnaireHuntressInfernalistInvokerLichMartial ",
+    200
+   ],
+   [
+    "",
+    15
+   ],
+   [
+    "orWitchWitc",
+    8
+   ],
+   [
+    "",
+    6
+   ],
+   [
+    "ArtistMercenaryM",
+    5
+   ],
+   [
+    "",
+    4
+   ],
+   [
+    "",
+    3
+   ],
+   [
+    "amanSmith ",
+    3
+   ],
+   [
+    "gerWarri",
+    2
+   ]
+  ],
+  "skills": [
+   [
+    "Frost Bomb",
+    24300
+   ],
+   [
+    "Barrage",
+    22845
+   ],
+   [
+    "Elemental Weakness",
+    22449
+   ],
+   [
+    "Herald of Ice",
+    22132
+   ],
+   [
+    "Whirling Slash",
+    18731
+   ],
+   [
+    "Oil Grenade",
+    17251
+   ],
+   [
+    "Twister",
+    16679
+   ],
+   [
+    "Flameblast",
+    15548
+   ],
+   [
+    "Wolf Pack",
+    15304
+   ],
+   [
+    "Herald of Thunder",
+    13369
+   ],
+   [
+    "Tornado",
+    13089
+   ],
+   [
+    "Spark",
+    11859
+   ],
+   [
+    "Entangle",
+    11007
+   ],
+   [
+    "Mana Tempest",
+    10344
+   ],
+   [
+    "Freezing Mark",
+    10309
+   ],
+   [
+    "Comet",
+    10305
+   ],
+   [
+    "Kelari's Brutality",
+    10301
+   ],
+   [
+    "Kelari, the Tainted Sands",
+    10301
+   ],
+   [
+    "Ice-Tipped Arrows",
+    10207
+   ],
+   [
+    "Kelari's Deception",
+    10137
+   ],
+   [
+    "Pounce",
+    9959
+   ],
+   [
+    "Wild Protector",
+    9782
+   ],
+   [
+    "Crossbow Shot",
+    9752
+   ],
+   [
+    "Arc",
+    9678
+   ],
+   [
+    "Ice Shot",
+    8670
+   ],
+   [
+    "Sniper's Mark",
+    8503
+   ],
+   [
+    "Hollow Focus",
+    8399
+   ],
+   [
+    "Sigil of Power",
+    8347
+   ],
+   [
+    "Tornado Shot",
+    8105
+   ],
+   [
+    "Grim Pillars",
+    7622
+   ],
+   [
+    "Frost Wall",
+    7408
+   ],
+   [
+    "Snipe",
+    7137
+   ],
+   [
+    "Hollow Form",
+    6979
+   ],
+   [
+    "Navira's Embrace",
+    6963
+   ],
+   [
+    "Navira, the Last Mirage",
+    6963
+   ],
+   [
+    "Rend",
+    6846
+   ],
+   [
+    "Azmerian Wolf",
+    6279
+   ],
+   [
+    "Navira's Fracturing",
+    6237
+   ],
+   [
+    "Explosive Grenade",
+    6103
+   ],
+   [
+    "Spear Stab",
+    6043
+   ],
+   [
+    "Ice Nova",
+    5918
+   ],
+   [
+    "Pain Offering",
+    5638
+   ],
+   [
+    "Contagion",
+    5490
+   ],
+   [
+    "Despair",
+    5406
+   ],
+   [
+    "Companion: Zekoa, the Headcrusher",
+    5371
+   ],
+   [
+    "Infernal Cry",
+    5312
+   ],
+   [
+    "Powered by Verisium",
+    5246
+   ],
+   [
+    "Cluster Grenade",
+    5150
+   ],
+   [
+    "Spear Throw",
+    5113
+   ],
+   [
+    "Charged Staff",
+    4773
+   ],
+   [
+    "Shockwave Totem",
+    4715
+   ],
+   [
+    "Refutation",
+    4289
+   ],
+   [
+    "Orb of Storms",
+    4238
+   ],
+   [
+    "Flash Grenade",
+    4180
+   ],
+   [
+    "Gas Grenade",
+    4118
+   ],
+   [
+    "Seismic Cry",
+    4095
+   ],
+   [
+    "Ruzhan's Brand",
+    3977
+   ],
+   [
+    "Ruzhan, the Blazing Sword",
+    3977
+   ],
+   [
+    "Devour",
+    3930
+   ],
+   [
+    "Falling Thunder",
+    3554
+   ],
+   [
+    "Tempest Bell",
+    3522
+   ],
+   [
+    "Flame Wall",
+    3108
+   ],
+   [
+    "Thunderstorm",
+    3103
+   ],
+   [
+    "Ruzhan's Trap",
+    3015
+   ],
+   [
+    "Whirling Assault",
+    3009
+   ],
+   [
+    "Companion: Diretusk Boar",
+    2920
+   ],
+   [
+    "Killing Palm",
+    2771
+   ],
+   [
+    "Herald of Blood",
+    2761
+   ],
+   [
+    "Shattering Palm",
+    2737
+   ],
+   [
+    "Pinnacle of Power",
+    2726
+   ],
+   [
+    "Thrashing Vines",
+    2557
+   ],
+   [
+    "Mace Strike",
+    2546
+   ],
+   [
+    "Firestorm",
+    2505
+   ],
+   [
+    "Frostbolt",
+    2445
+   ],
+   [
+    "Vivid Stampede",
+    2397
+   ],
+   [
+    "Dark Consequences",
+    2313
+   ],
+   [
+    "Ice Shards",
+    2173
+   ],
+   [
+    "Companion: Plague Harvester",
+    2079
+   ],
+   [
+    "Mantra of Destruction",
+    2068
+   ],
+   [
+    "Living Bomb",
+    1987
+   ],
+   [
+    "Hollow Resonance",
+    1952
+   ],
+   [
+    "Elemental Storm",
+    1937
+   ],
+   [
+    "Flicker Strike",
+    1900
+   ],
+   [
+    "Galvanic Shards",
+    1900
+   ],
+   [
+    "Companion: Mighty Silverfist",
+    1773
+   ],
+   [
+    "Quarterstaff Strike",
+    1767
+   ],
+   [
+    "Companion: Quadrilla",
+    1750
+   ],
+   [
+    "Shield Wall",
+    1663
+   ],
+   [
+    "Bow Shot",
+    1634
+   ],
+   [
+    "Rite of Restoration",
+    1623
+   ],
+   [
+    "Ball Lightning",
+    1567
+   ],
+   [
+    "Lightning Warp",
+    1534
+   ],
+   [
+    "Hand of Chayula",
+    1423
+   ],
+   [
+    "Enfeeble",
+    1414
+   ],
+   [
+    "Grenade",
+    1403
+   ],
+   [
+    "Fragmentation Rounds",
+    1395
+   ],
+   [
+    "Punch",
+    1323
+   ],
+   [
+    "Essence Drain",
+    1289
+   ],
+   [
+    "Stormblast Bolts",
+    1287
+   ],
+   [
+    "Doom Blast",
+    1259
+   ],
+   [
+    "The Stars Answer",
+    1241
+   ],
+   [
+    "Fortifying Cry",
+    1233
+   ],
+   [
+    "Oil Barrage",
+    1219
+   ],
+   [
+    "Archon of Chayula",
+    1213
+   ],
+   [
+    "Voltaic Mark",
+    1212
+   ],
+   [
+    "Companion: Quill Crab",
+    1203
+   ],
+   [
+    "Dark Effigy",
+    1198
+   ],
+   [
+    "Explosive Shot",
+    1198
+   ],
+   [
+    "Glacial Bolt",
+    1190
+   ],
+   [
+    "Cull The Weak",
+    1185
+   ],
+   [
+    "Profane Ritual",
+    1175
+   ],
+   [
+    "Bonestorm",
+    1169
+   ],
+   [
+    "Shred",
+    1165
+   ],
+   [
+    "Raise Shield",
+    1134
+   ],
+   [
+    "Ancestral Cry",
+    1116
+   ],
+   [
+    "Poisonburst Arrow",
+    1098
+   ],
+   [
+    "Resonating Shield",
+    1089
+   ],
+   [
+    "Earthshatter",
+    1060
+   ],
+   [
+    "Bloodhound's Mark",
+    1057
+   ],
+   [
+    "Companion: Antlion Charger",
+    1057
+   ],
+   [
+    "Voltaic Grenade",
+    1046
+   ],
+   [
+    "Ember Fusillade",
+    1043
+   ],
+   [
+    "Toxic Growth",
+    1036
+   ],
+   [
+    "Companion: Werewolf Prowler",
+    1031
+   ],
+   [
+    "Leap Slam",
+    1028
+   ],
+   [
+    "Lightning Bolt",
+    998
+   ],
+   [
+    "Lightning Spear",
+    992
+   ],
+   [
+    "Summon Infernal Hound",
+    957
+   ],
+   [
+    "Permafrost Bolts",
+    912
+   ],
+   [
+    "Power Siphon",
+    911
+   ],
+   [
+    "Boneshatter",
+    907
+   ],
+   [
+    "Vine Arrow",
+    867
+   ],
+   [
+    "Unearth",
+    842
+   ],
+   [
+    "Temporal Chains",
+    834
+   ],
+   [
+    "Called Shots",
+    824
+   ],
+   [
+    "Righteous Descent",
+    794
+   ],
+   [
+    "Bone Cage",
+    763
+   ],
+   [
+    "Walking Calamity",
+    729
+   ],
+   [
+    "Maul",
+    725
+   ],
+   [
+    "Companion: Crag Leaper",
+    720
+   ],
+   [
+    "Spearfield",
+    718
+   ],
+   [
+    "Sunder",
+    707
+   ],
+   [
+    "Supporting Fire",
+    697
+   ],
+   [
+    "Vulnerability",
+    694
+   ],
+   [
+    "Forge Hammer",
+    682
+   ],
+   [
+    "Harbinger of Madness",
+    681
+   ],
+   [
+    "Companion: Coconut Crab",
+    679
+   ],
+   [
+    "Shield Charge",
+    667
+   ],
+   [
+    "Incendiary Shot",
+    661
+   ],
+   [
+    "Detonate Dead",
+    655
+   ],
+   [
+    "Storm Lance",
+    649
+   ],
+   [
+    "Ice Strike",
+    641
+   ],
+   [
+    "Snap",
+    601
+   ],
+   [
+    "Rapid Shot",
+    597
+   ],
+   [
+    "Companion: Rabid Dog",
+    591
+   ],
+   [
+    "Fireball",
+    591
+   ],
+   [
+    "Volcanic Fissure",
+    591
+   ],
+   [
+    "Explosive Spear",
+    583
+   ],
+   [
+    "Companion: Pack Werewolf",
+    573
+   ],
+   [
+    "Lunar Assault",
+    568
+   ],
+   [
+    "Chaos Bolt",
+    560
+   ],
+   [
+    "Galvanic Field",
+    552
+   ],
+   [
+    "Ravenous Swarm",
+    544
+   ],
+   [
+    "Navira's Well",
+    540
+   ],
+   [
+    "Armour Piercing Rounds",
+    535
+   ],
+   [
+    "Consecrate",
+    527
+   ],
+   [
+    "Molten Shower",
+    526
+   ],
+   [
+    "Ancestral Spirits",
+    520
+   ],
+   [
+    "Emergency Reload",
+    513
+   ],
+   [
+    "Rampage",
+    487
+   ],
+   [
+    "Plasma Blast",
+    477
+   ],
+   [
+    "Blood Hunt",
+    462
+   ],
+   [
+    "Molten Crash",
+    456
+   ],
+   [
+    "Unleash",
+    454
+   ],
+   [
+    "Parry",
+    452
+   ],
+   [
+    "Solar Orb",
+    449
+   ],
+   [
+    "Lightning Arrow",
+    448
+   ],
+   [
+    "Glacial Lance",
+    427
+   ],
+   [
+    "Perfect Strike",
+    416
+   ],
+   [
+    "Firebolt",
+    414
+   ],
+   [
+    "Demon Form",
+    404
+   ],
+   [
+    "Companion: Bloodthief Wasp",
+    394
+   ],
+   [
+    "Lunar Blessing",
+    394
+   ],
+   [
+    "Gas Arrow",
+    391
+   ],
+   [
+    "Furious Slam",
+    388
+   ],
+   [
+    "Cross Slash",
+    387
+   ],
+   [
+    "Companion: Caustic Crab",
+    383
+   ],
+   [
+    "Hammer of the Gods",
+    375
+   ],
+   [
+    "Lightning Rod",
+    372
+   ],
+   [
+    "Thunderous Leap",
+    371
+   ],
+   [
+    "Rake",
+    367
+   ],
+   [
+    "His Scattering Calamity",
+    366
+   ],
+   [
+    "Frost Darts",
+    362
+   ],
+   [
+    "Companion: Venomous Crab Matriarch",
+    348
+   ],
+   [
+    "Escape Shot",
+    342
+   ],
+   [
+    "Volcano",
+    341
+   ],
+   [
+    "Companion: Gargantuan Wasp",
+    335
+   ],
+   [
+    "High Velocity Rounds",
+    333
+   ],
+   [
+    "Disengage",
+    312
+   ],
+   [
+    "Companion: Starlit Harvester",
+    306
+   ],
+   [
+    "Reap",
+    303
+   ],
+   [
+    "Soul Offering",
+    298
+   ],
+   [
+    "Armour Breaker",
+    296
+   ],
+   [
+    "Siege Ballista",
+    285
+   ],
+   [
+    "Arctic Howl",
+    281
+   ],
+   [
+    "Time Freeze",
+    281
+   ],
+   [
+    "Companion: Porcupine Crab",
+    280
+   ],
+   [
+    "Storm Wave",
+    280
+   ],
+   [
+    "Mana Drain",
+    279
+   ],
+   [
+    "Molten Blast",
+    277
+   ],
+   [
+    "Shockburst Rounds",
+    275
+   ],
+   [
+    "Midnight Zenith",
+    273
+   ],
+   [
+    "Artillery Ballista",
+    269
+   ],
+   [
+    "Freezing Salvo",
+    268
+   ],
+   [
+    "Tempest Flurry",
+    268
+   ],
+   [
+    "Companion: Voracious Werewolf",
+    263
+   ],
+   [
+    "Wind Serpent's Fury",
+    257
+   ],
+   [
+    "Voltaic Barrier",
+    256
+   ],
+   [
+    "Raise Zombie",
+    252
+   ],
+   [
+    "Azmerian Swarms",
+    249
+   ],
+   [
+    "Coiling Bolts",
+    249
+   ],
+   [
+    "Icestorm",
+    248
+   ],
+   [
+    "Staggering Palm",
+    247
+   ],
+   [
+    "Companion: River Drake",
+    236
+   ],
+   [
+    "Primal Strikes",
+    227
+   ],
+   [
+    "Companion: Bramble Rhoa",
+    225
+   ],
+   [
+    "Supercharged Slam",
+    224
+   ],
+   [
+    "Bitter Dead",
+    223
+   ],
+   [
+    "Rolling Slam",
+    222
+   ],
+   [
+    "Companion: Rasp Scavenger",
+    221
+   ],
+   [
+    "Whirlwind Lance",
+    218
+   ],
+   [
+    "Companion: Black Strider",
+    216
+   ],
+   [
+    "Companion: Slitherspitter",
+    210
+   ],
+   [
+    "Companion: Alpha Primate",
+    206
+   ],
+   [
+    "Companion: Bramble Hulk",
+    206
+   ],
+   [
+    "Gemini Surge",
+    205
+   ],
+   [
+    "Eye of Winter",
+    202
+   ],
+   [
+    "Companion: Nameless Hulk",
+    201
+   ],
+   [
+    "Incinerate",
+    201
+   ],
+   [
+    "Cackling Companions",
+    196
+   ],
+   [
+    "Companion: Brimstone Crab",
+    193
+   ],
+   [
+    "Soaring Midnight",
+    193
+   ],
+   [
+    "Time Snap",
+    192
+   ],
+   [
+    "Stormcaller Arrow",
+    189
+   ],
+   [
+    "Shattering Spite",
+    187
+   ],
+   [
+    "Fangs of Frost",
+    186
+   ],
+   [
+    "Inevitable Agony",
+    181
+   ],
+   [
+    "Enervating Nova",
+    179
+   ],
+   [
+    "Companion: Vile Vulture",
+    177
+   ],
+   [
+    "Lightning Conduit",
+    176
+   ],
+   [
+    "Toxic Domain",
+    176
+   ],
+   [
+    "Stampede",
+    171
+   ],
+   [
+    "Companion: Elephant Tortoise",
+    170
+   ],
+   [
+    "Removed Skill",
+    170
+   ],
+   [
+    "Rapid Assault",
+    168
+   ],
+   [
+    "Companion: Quadrilla Sergeant",
+    164
+   ],
+   [
+    "Frozen Locus",
+    162
+   ],
+   [
+    "Crushing Fear",
+    160
+   ],
+   [
+    "Feast of Flesh",
+    159
+   ],
+   [
+    "Fury of the Mountain",
+    157
+   ],
+   [
+    "Companion: Plague Nymph",
+    153
+   ],
+   [
+    "Siege Cascade",
+    150
+   ],
+   [
+    "Companion: Winged Fiend",
+    148
+   ],
+   [
+    "Freezing Shards",
+    145
+   ],
+   [
+    "Skyfall",
+    145
+   ],
+   [
+    "Earthquake",
+    141
+   ],
+   [
+    "Rhoa Mount",
+    140
+   ],
+   [
+    "Animus Exchange",
+    132
+   ],
+   [
+    "Flame Breath",
+    127
+   ],
+   [
+    "Wardbound Minions",
+    126
+   ],
+   [
+    "Companion: Winged Horror",
+    125
+   ],
+   [
+    "Companion: Nameless Lurker",
+    123
+   ],
+   [
+    "Companion: Blood-fevered Tuskbeast",
+    121
+   ],
+   [
+    "Companion: Sun Clan Scavenger",
+    120
+   ],
+   [
+    "Hailstorm Rounds",
+    120
+   ],
+   [
+    "Companion: Venomous Crab",
+    119
+   ],
+   [
+    "Companion: Hyena Demon",
+    118
+   ],
+   [
+    "Encase in Jade",
+    116
+   ],
+   [
+    "Spiral Volley",
+    110
+   ],
+   [
+    "Companion: Chaw Mongrel",
+    108
+   ],
+   [
+    "Spiraling Conspiracy",
+    108
+   ],
+   [
+    "Companion: Scorpion Monkey",
+    107
+   ],
+   [
+    "Detonate Living",
+    107
+   ],
+   [
+    "Companion: Tombshrieker",
+    103
+   ],
+   [
+    "Raging Spirits",
+    103
+   ],
+   [
+    "Companion: Fungal Wolf",
+    99
+   ],
+   [
+    "Companion: Nameless Dweller",
+    98
+   ],
+   [
+    "Companion: Brine Maiden",
+    95
+   ],
+   [
+    "Spear of Solaris",
+    92
+   ],
+   [
+    "Companion: Rhex",
+    89
+   ],
+   [
+    "Requiem",
+    89
+   ],
+   [
+    "Bone Blast",
+    87
+   ],
+   [
+    "Tame Beast",
+    86
+   ],
+   [
+    "Companion: Nymph Wasp",
+    85
+   ],
+   [
+    "Companion: Prowling Chimeral",
+    84
+   ],
+   [
+    "Companion: Bramble Ape",
+    83
+   ],
+   [
+    "Companion: Tendril Prowler",
+    80
+   ],
+   [
+    "Hexblast",
+    80
+   ],
+   [
+    "Companion: Vilespit Gull",
+    77
+   ],
+   [
+    "Repulsion",
+    76
+   ],
+   [
+    "Primal Bounty",
+    74
+   ],
+   [
+    "Companion: Porcupine Goliath",
+    73
+   ],
+   [
+    "Companion: Tarnished Beetle",
+    71
+   ],
+   [
+    "Eternal March",
+    71
+   ],
+   [
+    "Siphoning Strike",
+    71
+   ],
+   [
+    "Rain of Arrows",
+    70
+   ],
+   [
+    "Decompose",
+    68
+   ],
+   [
+    "Companion: Hungry Wolf",
+    67
+   ],
+   [
+    "Gathering Storm",
+    67
+   ],
+   [
+    "Rain of Blades",
+    66
+   ],
+   [
+    "Companion: Nameless Burrower",
+    65
+   ],
+   [
+    "Companion: Scarecrow Beast",
+    65
+   ],
+   [
+    "Volatile Dead",
+    65
+   ],
+   [
+    "Electrocuting Arrow",
+    64
+   ],
+   [
+    "Companion: Adorned Scarab",
+    63
+   ],
+   [
+    "Frostflame Nova",
+    63
+   ],
+   [
+    "Wing Blast",
+    63
+   ],
+   [
+    "Elemental Surge",
+    61
+   ],
+   [
+    "Companion: Feral Primate",
+    60
+   ],
+   [
+    "Companion: Stoneclad Gorilla",
+    60
+   ],
+   [
+    "Glacial Cascade",
+    60
+   ],
+   [
+    "Manifest Weapon",
+    60
+   ],
+   [
+    "Starborn Onslaught",
+    59
+   ],
+   [
+    "Apocalypse",
+    56
+   ],
+   [
+    "Companion: Cultivated Grove",
+    56
+   ],
+   [
+    "Elemental Sundering",
+    51
+   ],
+   [
+    "Fragments Of The Past",
+    51
+   ],
+   [
+    "His Vile Intrusion",
+    50
+   ],
+   [
+    "Companion: Stoneback Rhoa",
+    49
+   ],
+   [
+    "Untether",
+    49
+   ],
+   [
+    "Companion: Spiked Scuttler",
+    48
+   ],
+   [
+    "Valako's Charge",
+    48
+   ],
+   [
+    "Companion: Chyme Skitterer",
+    46
+   ],
+   [
+    "Companion: Treant Fungalreaver",
+    46
+   ],
+   [
+    "Companion: Drudge Osseodon",
+    45
+   ],
+   [
+    "Companion: Vault Lurker",
+    45
+   ],
+   [
+    "Companion: Clawcrunch",
+    44
+   ],
+   [
+    "Gelid Palm",
+    44
+   ],
+   [
+    "Companion: Krell Fleshgouger",
+    43
+   ],
+   [
+    "Companion: Mantis Rat",
+    43
+   ],
+   [
+    "Companion: Tarnished Scarab",
+    43
+   ],
+   [
+    "Companion: Skittering Jellycrab",
+    41
+   ],
+   [
+    "Companion: Armoured Rhex",
+    39
+   ],
+   [
+    "Companion: Fungal Artillery",
+    39
+   ],
+   [
+    "Elemental Expression",
+    39
+   ],
+   [
+    "Bone Offering",
+    38
+   ],
+   [
+    "Companion: Rotting Crow",
+    37
+   ],
+   [
+    "Vaulting Impact",
+    37
+   ],
+   [
+    "Companion: Goliath Shrike",
+    36
+   ],
+   [
+    "Companion: Adorned Beetle",
+    35
+   ],
+   [
+    "Companion: Spiked Ray",
+    35
+   ],
+   [
+    "Wave of Frost",
+    35
+   ],
+   [
+    "Companion: Dezzic Soldier",
+    34
+   ],
+   [
+    "Companion: Nameless Imp",
+    33
+   ],
+   [
+    "Companion: The Abominable Yeti",
+    33
+   ],
+   [
+    "Ritual Sacrifice",
+    33
+   ],
+   [
+    "Companion: Flesh Larva",
+    32
+   ],
+   [
+    "Companion: Nameless Horror",
+    32
+   ],
+   [
+    "Companion: Bramble Burrower",
+    31
+   ],
+   [
+    "Wind Blast",
+    31
+   ],
+   [
+    "Companion: Rotten Wolf",
+    30
+   ],
+   [
+    "Companion: Amphibious Prowler",
+    29
+   ],
+   [
+    "Chaotic Surge",
+    26
+   ],
+   [
+    "Shockchain Arrow",
+    26
+   ],
+   [
+    "Companion: Guardian Lizard",
+    25
+   ],
+   [
+    "Companion: The Frostborn Fiend",
+    25
+   ],
+   [
+    "His Foul Emergence",
+    25
+   ],
+   [
+    "Kelari's Malediction",
+    25
+   ],
+   [
+    "Companion: Sabre Spider",
+    24
+   ],
+   [
+    "Black Powder Blitz",
+    23
+   ],
+   [
+    "Companion: Bane Sapling",
+    22
+   ],
+   [
+    "Rolling Magma",
+    22
+   ],
+   [
+    "Arctic Armour",
+    21
+   ],
+   [
+    "Meditate",
+    21
+   ],
+   [
+    "Temper Weapon",
+    21
+   ],
+   [
+    "Detonating Arrow",
+    20
+   ],
+   [
+    "Kelari's Judgment",
+    20
+   ],
+   [
+    "Phantasmal Arrow",
+    20
+   ],
+   [
+    "Companion: Snakethroat Shambler",
+    19
+   ],
+   [
+    "Companion: Regurgitating Vulture",
+    18
+   ],
+   [
+    "Herald of the Royal Queen",
+    18
+   ],
+   [
+    "Ruzhan's Reckoning",
+    16
+   ],
+   [
+    "Unbound Avatar",
+    16
+   ],
+   [
+    "Companion: Guardian Turtle",
+    15
+   ],
+   [
+    "Runic Tempering",
+    15
+   ],
+   [
+    "Triskelion Cascade",
+    15
+   ],
+   [
+    "Magnetic Salvo",
+    14
+   ],
+   [
+    "Companion: Ylth Spewer",
+    13
+   ],
+   [
+    "Conductive Runes",
+    11
+   ],
+   [
+    "Crackling Palm",
+    11
+   ],
+   [
+    "Companion: Fettered Spider",
+    10
+   ],
+   [
+    "Companion: Entrailhome Shambler",
+    9
+   ],
+   [
+    "Companion: Manshrike",
+    9
+   ],
+   [
+    "Moment of Vulnerability",
+    9
+   ],
+   [
+    "Companion: Dune Lurker",
+    8
+   ],
+   [
+    "Bursting Fen Toad",
+    7
+   ],
+   [
+    "His Winnowing Flame",
+    7
+   ],
+   [
+    "Companion: Dezzic Nettler",
+    6
+   ],
+   [
+    "Runic Reprieve",
+    6
+   ],
+   [
+    "Acidic Concoction",
+    5
+   ],
+   [
+    "Companion: Bahlak, the Sky Seer",
+    5
+   ],
+   [
+    "Companion: Great White One",
+    5
+   ],
+   [
+    "Companion: Luminous Spinefish",
+    5
+   ],
+   [
+    "Companion: Starlit Nymph",
+    5
+   ],
+   [
+    "Navira's Oasis",
+    5
+   ],
+   [
+    "Companion: Caedron, the Hyena Lord",
+    4
+   ],
+   [
+    "Companion: Chetza, the Feathered Plague",
+    4
+   ],
+   [
+    "Companion: Gressor-Kul, the Apex",
+    4
+   ],
+   [
+    "Companion: The Sandstrider",
+    4
+   ],
+   [
+    "Companion: Thraeven, Wing of Winter",
+    4
+   ],
+   [
+    "Hollow Shell",
+    4
+   ],
+   [
+    "Companion: Akthi, the Final Sting",
+    3
+   ],
+   [
+    "Companion: Carrion Gull",
+    3
+   ],
+   [
+    "Companion: Dezzic Burstbug",
+    3
+   ],
+   [
+    "Companion: Scourge of the Skies",
+    3
+   ],
+   [
+    "Companion: Vesper Bat",
+    3
+   ],
+   [
+    "Companion: Xilozoma, the Maw-Beast",
+    3
+   ],
+   [
+    "Explosive Concoction",
+    3
+   ],
+   [
+    "Ruzhan's Fury",
+    3
+   ],
+   [
+    "Bleeding Concoction",
+    2
+   ],
+   [
+    "Companion: Experimental Boar",
+    2
+   ],
+   [
+    "Companion: Loyal Jaguar",
+    2
+   ],
+   [
+    "Companion: Morvak, the Infernal",
+    2
+   ],
+   [
+    "Companion: The Crowbell",
+    2
+   ],
+   [
+    "Companion: Ylth Grabber",
+    2
+   ],
+   [
+    "Fulminating Concoction",
+    2
+   ],
+   [
+    "Shattering Concoction",
+    2
+   ],
+   [
+    "Bind Spectre",
+    1
+   ],
+   [
+    "Companion: Captive Stoneback Rhoa",
+    1
+   ],
+   [
+    "Companion: Cecaelian Angler",
+    1
+   ],
+   [
+    "Companion: Cecaelian Crab",
+    1
+   ],
+   [
+    "Companion: Experimental Cobra",
+    1
+   ],
+   [
+    "Companion: Karash, The Dune Dweller",
+    1
+   ],
+   [
+    "Companion: The Black Crow",
+    1
+   ],
+   [
+    "Companion: The Ravenous Fang",
+    1
+   ],
+   [
+    "Companion: Unchained Beast",
+    1
+   ],
+   [
+    "Companion: Uxmal, the Beastlord",
+    1
+   ],
+   [
+    "Companion: Xyclucian, the Chimera",
+    1
+   ]
+  ],
+  "allskills": [
+   [
+    "Magnified Area II",
+    103736
+   ],
+   [
+    "Prolonged Duration II",
+    86877
+   ],
+   [
+    "Cooldown Recovery II",
+    86491
+   ],
+   [
+    "Efficiency II",
+    64116
+   ],
+   [
+    "Elemental Armament II",
+    49829
+   ],
+   [
+    "Rapid Casting II",
+    49201
+   ],
+   [
+    "Virtuous Barrier",
+    45921
+   ],
+   [
+    "Concentrated Area",
+    44137
+   ],
+   [
+    "Harmonic Remnants II",
+    38566
+   ],
+   [
+    "Rapid Attacks II",
+    37095
+   ],
+   [
+    "Rage III",
+    36977
+   ],
+   [
+    "Blind II",
+    36339
+   ],
+   [
+    "Clarity II",
+    34287
+   ],
+   [
+    "Wind Dancer",
+    33210
+   ],
+   [
+    "Heightened Curse",
+    32606
+   ],
+   [
+    "Rapid Attacks III",
+    32100
+   ],
+   [
+    "Mana Remnants",
+    31915
+   ],
+   [
+    "Deliberation",
+    31531
+   ],
+   [
+    "Charge Regulation",
+    30757
+   ],
+   [
+    "Ghost Dance",
+    30741
+   ],
+   [
+    "Cold Mastery",
+    30107
+   ],
+   [
+    "Perpetual Charge",
+    29377
+   ],
+   [
+    "Elemental Weakness",
+    29031
+   ],
+   [
+    "Knockback",
+    28965
+   ],
+   [
+    "Projectile Acceleration III",
+    27804
+   ],
+   [
+    "Charge Profusion II",
+    27163
+   ],
+   [
+    "Frost Bomb",
+    27068
+   ],
+   [
+    "Elemental Focus",
+    27000
+   ],
+   [
+    "Heightened Charges",
+    26629
+   ],
+   [
+    "Multishot II",
+    26194
+   ],
+   [
+    "Boundless Energy II",
+    25928
+   ],
+   [
+    "Overabundance II",
+    25524
+   ],
+   [
+    "Short Fuse II",
+    25493
+   ],
+   [
+    "Barrage",
+    25301
+   ],
+   [
+    "Armour Demolisher II",
+    24885
+   ],
+   [
+    "Blasphemy",
+    24536
+   ],
+   [
+    "Herald of Ice",
+    24515
+   ],
+   [
+    "Ritualistic Curse",
+    23066
+   ],
+   [
+    "Potent Exposure",
+    22786
+   ],
+   [
+    "Considered Casting",
+    22727
+   ],
+   [
+    "Lightning Mastery",
+    22672
+   ],
+   [
+    "Pinpoint Critical",
+    22553
+   ],
+   [
+    "Rakiata's Flow",
+    22323
+   ],
+   [
+    "Remnant Potency I",
+    22164
+   ],
+   [
+    "Vitality II",
+    21907
+   ],
+   [
+    "Fire Mastery",
+    21803
+   ],
+   [
+    "Maim",
+    21798
+   ],
+   [
+    "Encroaching Ground",
+    21753
+   ],
+   [
+    "Spear Throw",
+    21686
+   ],
+   [
+    "Armour Break III",
+    20919
+   ],
+   [
+    "Living Lightning II",
+    20811
+   ],
+   [
+    "Blazing Critical",
+    20257
+   ],
+   [
+    "Nova Projectiles I",
+    20054
+   ],
+   [
+    "Clarity I",
+    19742
+   ],
+   [
+    "Purity of Fire",
+    19521
+   ],
+   [
+    "Eternal Mark",
+    19298
+   ],
+   [
+    "Muster",
+    19251
+   ],
+   [
+    "Whirling Slash",
+    19066
+   ],
+   [
+    "Charged Mark",
+    18769
+   ],
+   [
+    "Mobility",
+    18282
+   ],
+   [
+    "Oil Grenade",
+    17706
+   ],
+   [
+    "Advancing Storm",
+    17596
+   ],
+   [
+    "Temporal Chains",
+    17509
+   ],
+   [
+    "Trinity",
+    17502
+   ],
+   [
+    "Spell Cascade",
+    17221
+   ],
+   [
+    "Cold Attunement",
+    17202
+   ],
+   [
+    "Combat Frenzy",
+    17199
+   ],
+   [
+    "Heft",
+    17164
+   ],
+   [
+    "Urgent Totems III",
+    16965
+   ],
+   [
+    "Slow Potency",
+    16948
+   ],
+   [
+    "Twister",
+    16800
+   ],
+   [
+    "Longshot II",
+    16615
+   ],
+   [
+    "Wolf Pack",
+    16530
+   ],
+   [
+    "Spell Echo",
+    16453
+   ],
+   [
+    "Romira's Requital",
+    16170
+   ],
+   [
+    "Cool Headed",
+    16158
+   ],
+   [
+    "Arctic Armour",
+    16063
+   ],
+   [
+    "Freezing Mark",
+    15828
+   ],
+   [
+    "Uruk's Smelting",
+    15802
+   ],
+   [
+    "Searing Flame II",
+    15684
+   ],
+   [
+    "Flameblast",
+    15676
+   ],
+   [
+    "Close Combat II",
+    15378
+   ],
+   [
+    "Herald of Thunder",
+    15343
+   ],
+   [
+    "Hulking Minions",
+    15337
+   ],
+   [
+    "Convalescence",
+    15025
+   ],
+   [
+    "Meat Shield II",
+    15025
+   ],
+   [
+    "Sigil of Power",
+    15019
+   ],
+   [
+    "Second Wind III",
+    14924
+   ],
+   [
+    "Cursed Ground",
+    14719
+   ],
+   [
+    "Culling Strike II",
+    14632
+   ],
+   [
+    "Rapid Attacks I",
+    14618
+   ],
+   [
+    "Burgeon II",
+    14536
+   ],
+   [
+    "Zenith II",
+    14512
+   ],
+   [
+    "Khatal's Rejuvenation",
+    14262
+   ],
+   [
+    "Tornado",
+    14201
+   ],
+   [
+    "Pierce III",
+    13879
+   ],
+   [
+    "Cast on Critical",
+    13810
+   ],
+   [
+    "Spell Totem",
+    13640
+   ],
+   [
+    "Spark",
+    13560
+   ],
+   [
+    "Magnified Area I",
+    13559
+   ],
+   [
+    "Last Gasp",
+    13151
+   ],
+   [
+    "Freeze",
+    13076
+   ],
+   [
+    "Feeding Frenzy II",
+    13050
+   ],
+   [
+    "Cast on Elemental Ailment",
+    12988
+   ],
+   [
+    "Remnant Potency III",
+    12971
+   ],
+   [
+    "Cast on Dodge",
+    12845
+   ],
+   [
+    "Pounce",
+    12783
+   ],
+   [
+    "Vorana's Siege",
+    12730
+   ],
+   [
+    "Cannibalism II",
+    12666
+   ],
+   [
+    "Salvo",
+    12644
+   ],
+   [
+    "Mana Tempest",
+    12640
+   ],
+   [
+    "Uhtred's Constellation",
+    12552
+   ],
+   [
+    "Controlled Destruction",
+    12531
+   ],
+   [
+    "Shock",
+    12521
+   ],
+   [
+    "Loyalty",
+    12470
+   ],
+   [
+    "Warm Blooded",
+    12432
+   ],
+   [
+    "Blindside",
+    12429
+   ],
+   [
+    "Brutus' Brain",
+    12396
+   ],
+   [
+    "Archmage",
+    12346
+   ],
+   [
+    "Skeletal Cleric",
+    12267
+   ],
+   [
+    "Sniper's Mark",
+    12197
+   ],
+   [
+    "Mark of Siphoning II",
+    12082
+   ],
+   [
+    "Eternal Rage",
+    12000
+   ],
+   [
+    "Skeletal Sniper",
+    11958
+   ],
+   [
+    "Fork",
+    11899
+   ],
+   [
+    "Comet",
+    11830
+   ],
+   [
+    "Minion Mastery",
+    11827
+   ],
+   [
+    "Crossbow Shot",
+    11460
+   ],
+   [
+    "Entangle",
+    11452
+   ],
+   [
+    "Ice-Tipped Arrows",
+    11359
+   ],
+   [
+    "Ice Bite II",
+    11332
+   ],
+   [
+    "Prolonged Duration I",
+    11330
+   ],
+   [
+    "Focused Curse",
+    11316
+   ],
+   [
+    "Skeletal Reaver",
+    11138
+   ],
+   [
+    "Armour Demolisher I",
+    11088
+   ],
+   [
+    "Ignite III",
+    11065
+   ],
+   [
+    "Mirage Archer",
+    10800
+   ],
+   [
+    "Raise Shield",
+    10472
+   ],
+   [
+    "Discipline",
+    10458
+   ],
+   [
+    "Arc",
+    10414
+   ],
+   [
+    "Kelari, the Tainted Sands",
+    10342
+   ],
+   [
+    "Lightning Attunement",
+    10337
+   ],
+   [
+    "Execute III",
+    10317
+   ],
+   [
+    "Kelari's Brutality",
+    10301
+   ],
+   [
+    "Bidding II",
+    10222
+   ],
+   [
+    "Wild Protector",
+    10177
+   ],
+   [
+    "Kelari's Deception",
+    10159
+   ],
+   [
+    "Expand",
+    10150
+   ],
+   [
+    "Short Fuse I",
+    10081
+   ],
+   [
+    "Berserk",
+    10023
+   ],
+   [
+    "Skeletal Storm Mage",
+    9865
+   ],
+   [
+    "Frost Nexus",
+    9836
+   ],
+   [
+    "Elemental Armament I",
+    9835
+   ],
+   [
+    "Spirit Vessel",
+    9700
+   ],
+   [
+    "Brutality III",
+    9693
+   ],
+   [
+    "Skeletal Arsonist",
+    9600
+   ],
+   [
+    "Mark for Death II",
+    9587
+   ],
+   [
+    "Kurgal's Leash",
+    9334
+   ],
+   [
+    "Dominus' Grasp",
+    9201
+   ],
+   [
+    "Energy Retention",
+    9146
+   ],
+   [
+    "Spear Stab",
+    9093
+   ],
+   [
+    "Herald of Ash",
+    9091
+   ],
+   [
+    "Hollow Focus",
+    8931
+   ],
+   [
+    "Skeletal Frost Mage",
+    8907
+   ],
+   [
+    "Spellslinger",
+    8905
+   ],
+   [
+    "Sione's Temper",
+    8838
+   ],
+   [
+    "Whirling Assault",
+    8793
+   ],
+   [
+    "Branching Fissures II",
+    8791
+   ],
+   [
+    "Bounty II",
+    8787
+   ],
+   [
+    "Ice Shot",
+    8742
+   ],
+   [
+    "Skeletal Warrior",
+    8726
+   ],
+   [
+    "Righteous Descent",
+    8673
+   ],
+   [
+    "Embitter",
+    8566
+   ],
+   [
+    "Overabundance I",
+    8561
+   ],
+   [
+    "Despair",
+    8514
+   ],
+   [
+    "Elemental Conflux",
+    8503
+   ],
+   [
+    "Infernal Cry",
+    8496
+   ],
+   [
+    "Tornado Shot",
+    8477
+   ],
+   [
+    "Siphon Elements",
+    8365
+   ],
+   [
+    "Purity of Ice",
+    8333
+   ],
+   [
+    "Olroth's Conviction",
+    8305
+   ],
+   [
+    "Powered by Verisium",
+    8290
+   ],
+   [
+    "Fire Attunement",
+    8271
+   ],
+   [
+    "Armour Explosion",
+    8241
+   ],
+   [
+    "Frost Wall",
+    8188
+   ],
+   [
+    "Unleash",
+    8161
+   ],
+   [
+    "Chaos Mastery",
+    8064
+   ],
+   [
+    "Ice Nova",
+    8048
+   ],
+   [
+    "Grim Pillars",
+    8040
+   ],
+   [
+    "Durability",
+    7930
+   ],
+   [
+    "Culmination II",
+    7879
+   ],
+   [
+    "Ailith's Chimes",
+    7834
+   ],
+   [
+    "Vitality I",
+    7832
+   ],
+   [
+    "Precision II",
+    7736
+   ],
+   [
+    "Multishot I",
+    7711
+   ],
+   [
+    "Heavy Swing",
+    7612
+   ],
+   [
+    "Rend",
+    7593
+   ],
+   [
+    "Bleed III",
+    7528
+   ],
+   [
+    "Mysticism II",
+    7503
+   ],
+   [
+    "Dialla's Desire",
+    7488
+   ],
+   [
+    "Ambush",
+    7366
+   ],
+   [
+    "Cannibalism I",
+    7346
+   ],
+   [
+    "Snipe",
+    7309
+   ],
+   [
+    "Uhtred's Omen",
+    7306
+   ],
+   [
+    "Pain Offering",
+    7290
+   ],
+   [
+    "Rigwald's Ferocity",
+    7262
+   ],
+   [
+    "Hollow Form",
+    7254
+   ],
+   [
+    "Navira, the Last Mirage",
+    7224
+   ],
+   [
+    "Minion Instability",
+    7056
+   ],
+   [
+    "Mirage Deadeye",
+    7010
+   ],
+   [
+    "Cooldown Recovery I",
+    6992
+   ],
+   [
+    "Navira's Embrace",
+    6963
+   ],
+   [
+    "Overcharge",
+    6814
+   ],
+   [
+    "Retreat II",
+    6804
+   ],
+   [
+    "Precision I",
+    6720
+   ],
+   [
+    "Strong Hearted",
+    6711
+   ],
+   [
+    "Elemental Army",
+    6691
+   ],
+   [
+    "Devour",
+    6636
+   ],
+   [
+    "Explosive Grenade",
+    6593
+   ],
+   [
+    "Second Wind II",
+    6563
+   ],
+   [
+    "Azmerian Wolf",
+    6555
+   ],
+   [
+    "Amanamu's Tithe",
+    6534
+   ],
+   [
+    "Swift Affliction II",
+    6518
+   ],
+   [
+    "Bleed I",
+    6478
+   ],
+   [
+    "Garukhan's Resolve",
+    6475
+   ],
+   [
+    "Arbiter's Ignition",
+    6465
+   ],
+   [
+    "Fire Penetration II",
+    6438
+   ],
+   [
+    "Contagion",
+    6391
+   ],
+   [
+    "Atziri's Communion",
+    6356
+   ],
+   [
+    "Refutation",
+    6298
+   ],
+   [
+    "Shockwave Totem",
+    6295
+   ],
+   [
+    "Navira's Fracturing",
+    6291
+   ],
+   [
+    "Vilenta's Propulsion",
+    6175
+   ],
+   [
+    "Thrill of the Kill II",
+    6069
+   ],
+   [
+    "Remnants of Kalguur",
+    6029
+   ],
+   [
+    "Armour Break I",
+    6028
+   ],
+   [
+    "Verglas",
+    5993
+   ],
+   [
+    "Cold Penetration",
+    5963
+   ],
+   [
+    "Window of Opportunity II",
+    5959
+   ],
+   [
+    "Minion Splash II",
+    5921
+   ],
+   [
+    "Herbalism II",
+    5900
+   ],
+   [
+    "Power Siphon",
+    5854
+   ],
+   [
+    "Raging Cry",
+    5839
+   ],
+   [
+    "Purity of Lightning",
+    5798
+   ],
+   [
+    "Withering Presence",
+    5743
+   ],
+   [
+    "Rage II",
+    5703
+   ],
+   [
+    "Wildshards II",
+    5613
+   ],
+   [
+    "Seismic Cry",
+    5560
+   ],
+   [
+    "Physical Mastery",
+    5516
+   ],
+   [
+    "Glacier",
+    5491
+   ],
+   [
+    "Infernal Legion I",
+    5480
+   ],
+   [
+    "Time of Need",
+    5473
+   ],
+   [
+    "Cluster Grenade",
+    5450
+   ],
+   [
+    "Innervate",
+    5434
+   ],
+   [
+    "Companion: Zekoa, the Headcrusher",
+    5412
+   ],
+   [
+    "Cast on Minion Death",
+    5386
+   ],
+   [
+    "Bidding III",
+    5371
+   ],
+   [
+    "Pin I",
+    5329
+   ],
+   [
+    "Corrosion",
+    5326
+   ],
+   [
+    "Ancestral Call II",
+    5283
+   ],
+   [
+    "Astral Projection",
+    5263
+   ],
+   [
+    "Compressed Duration II",
+    5199
+   ],
+   [
+    "Tame Beast",
+    5160
+   ],
+   [
+    "Charged Staff",
+    5091
+   ],
+   [
+    "Danse Macabre",
+    5068
+   ],
+   [
+    "Oil Barrage",
+    5007
+   ],
+   [
+    "Spectre: Powered Zealot",
+    4979
+   ],
+   [
+    "Rage I",
+    4957
+   ],
+   [
+    "Orb of Storms",
+    4878
+   ],
+   [
+    "Lifetap",
+    4876
+   ],
+   [
+    "Life Leech III",
+    4861
+   ],
+   [
+    "Flash Grenade",
+    4827
+   ],
+   [
+    "Mark for Death",
+    4817
+   ],
+   [
+    "Gas Grenade",
+    4790
+   ],
+   [
+    "Long Fuse II",
+    4765
+   ],
+   [
+    "Living Bomb",
+    4734
+   ],
+   [
+    "Ruzhan, the Blazing Sword",
+    4645
+   ],
+   [
+    "Essence Harvest",
+    4640
+   ],
+   [
+    "Flame Wall",
+    4590
+   ],
+   [
+    "Execute II",
+    4560
+   ],
+   [
+    "Tecrod's Revenge",
+    4551
+   ],
+   [
+    "Punch Through",
+    4528
+   ],
+   [
+    "Repulsion",
+    4476
+   ],
+   [
+    "Upwelling II",
+    4431
+   ],
+   [
+    "Her Declaration",
+    4407
+   ],
+   [
+    "Hit and Run",
+    4373
+   ],
+   [
+    "Thunderstorm",
+    4356
+   ],
+   [
+    "Mórrigan's Insight",
+    4339
+   ],
+   [
+    "Enfeeble",
+    4293
+   ],
+   [
+    "Brutality I",
+    4277
+   ],
+   [
+    "Payload",
+    4235
+   ],
+   [
+    "Mace Strike",
+    4221
+   ],
+   [
+    "Ricochet II",
+    4215
+   ],
+   [
+    "The Stars Answer",
+    4183
+   ],
+   [
+    "Uhtred's Augury",
+    4174
+   ],
+   [
+    "Catha's Brilliance",
+    4170
+   ],
+   [
+    "Stun II",
+    4133
+   ],
+   [
+    "Malice",
+    4073
+   ],
+   [
+    "Uhtred's Rite",
+    4011
+   ],
+   [
+    "Ruzhan's Brand",
+    3977
+   ],
+   [
+    "Charge Profusion I",
+    3974
+   ],
+   [
+    "Rageforged II",
+    3974
+   ],
+   [
+    "Feeding Frenzy I",
+    3947
+   ],
+   [
+    "Herbalism I",
+    3905
+   ],
+   [
+    "Efficiency I",
+    3893
+   ],
+   [
+    "Bounty I",
+    3803
+   ],
+   [
+    "Poison III",
+    3791
+   ],
+   [
+    "Tempest Bell",
+    3773
+   ],
+   [
+    "Persistent Ground III",
+    3742
+   ],
+   [
+    "Firestorm",
+    3734
+   ],
+   [
+    "Enraged Warcry II",
+    3710
+   ],
+   [
+    "Cast on Block",
+    3708
+   ],
+   [
+    "Lightning Exposure",
+    3707
+   ],
+   [
+    "Falling Thunder",
+    3675
+   ],
+   [
+    "Retreat III",
+    3663
+   ],
+   [
+    "Elemental Armament III",
+    3624
+   ],
+   [
+    "Atalui's Bloodletting",
+    3620
+   ],
+   [
+    "Oisín's Oath",
+    3615
+   ],
+   [
+    "Kaom's Madness",
+    3605
+   ],
+   [
+    "Skeletal Brute",
+    3602
+   ],
+   [
+    "Sacrificial Offering",
+    3581
+   ],
+   [
+    "War Banner",
+    3565
+   ],
+   [
+    "Empowered Sparks II",
+    3557
+   ],
+   [
+    "Biting Frost II",
+    3496
+   ],
+   [
+    "Punch",
+    3468
+   ],
+   [
+    "Mortar Cannon",
+    3461
+   ],
+   [
+    "Quarterstaff Strike",
+    3441
+   ],
+   [
+    "Biting Frost I",
+    3435
+   ],
+   [
+    "Arcane Surge",
+    3398
+   ],
+   [
+    "Rapid Casting I",
+    3398
+   ],
+   [
+    "Blink",
+    3386
+   ],
+   [
+    "Tireless",
+    3349
+   ],
+   [
+    "Herald of Blood",
+    3319
+   ],
+   [
+    "Blind I",
+    3312
+   ],
+   [
+    "Projectile Acceleration II",
+    3287
+   ],
+   [
+    "Killing Palm",
+    3279
+   ],
+   [
+    "Pinnacle of Power",
+    3261
+   ],
+   [
+    "Companion: Diretusk Boar",
+    3250
+   ],
+   [
+    "Esh's Prowess",
+    3234
+   ],
+   [
+    "Infernal Legion II",
+    3188
+   ],
+   [
+    "Ahn's Citadel",
+    3187
+   ],
+   [
+    "Bow Shot",
+    3171
+   ],
+   [
+    "Direstrike II",
+    3142
+   ],
+   [
+    "Defy II",
+    3134
+   ],
+   [
+    "Ruzhan's Trap",
+    3084
+   ],
+   [
+    "Bursting Plague",
+    3076
+   ],
+   [
+    "Deep Freeze",
+    3061
+   ],
+   [
+    "Companion: Plague Harvester",
+    2944
+   ],
+   [
+    "Pin II",
+    2938
+   ],
+   [
+    "Escalating Poison",
+    2934
+   ],
+   [
+    "Scavenged Plating",
+    2900
+   ],
+   [
+    "Stun III",
+    2899
+   ],
+   [
+    "Holy Descent",
+    2894
+   ],
+   [
+    "Lightning Penetration",
+    2857
+   ],
+   [
+    "Branching Fissures I",
+    2836
+   ],
+   [
+    "Shattering Palm",
+    2833
+   ],
+   [
+    "Vivid Stampede",
+    2828
+   ],
+   [
+    "Mana Drain",
+    2817
+   ],
+   [
+    "Primal Bounty",
+    2808
+   ],
+   [
+    "Consecrate",
+    2795
+   ],
+   [
+    "Thrashing Vines",
+    2792
+   ],
+   [
+    "Life Leech II",
+    2765
+   ],
+   [
+    "Commiserate",
+    2758
+   ],
+   [
+    "Fire Exposure",
+    2755
+   ],
+   [
+    "Heightened Accuracy II",
+    2753
+   ],
+   [
+    "Frostbolt",
+    2710
+   ],
+   [
+    "Explosive Transmutation",
+    2709
+   ],
+   [
+    "Life Remnants",
+    2703
+   ],
+   [
+    "Ferocious Roar",
+    2696
+   ],
+   [
+    "Withering Touch",
+    2680
+   ],
+   [
+    "Gambleshot",
+    2678
+   ],
+   [
+    "Inexorable Critical I",
+    2644
+   ],
+   [
+    "Cull The Weak",
+    2637
+   ],
+   [
+    "Rapid Casting III",
+    2630
+   ],
+   [
+    "Rite of Restoration",
+    2628
+   ],
+   [
+    "Living Lightning",
+    2580
+   ],
+   [
+    "Eonyr's Thunder",
+    2532
+   ],
+   [
+    "Parry",
+    2494
+   ],
+   [
+    "Echoing Cry",
+    2485
+   ],
+   [
+    "Mysticism I",
+    2483
+   ],
+   [
+    "Brutality II",
+    2472
+   ],
+   [
+    "Cold Exposure",
+    2462
+   ],
+   [
+    "Magma Barrier",
+    2426
+   ],
+   [
+    "Accelerated Growth II",
+    2421
+   ],
+   [
+    "Supercritical",
+    2402
+   ],
+   [
+    "Explosive Shot",
+    2395
+   ],
+   [
+    "Ice Shards",
+    2384
+   ],
+   [
+    "Direstrike I",
+    2365
+   ],
+   [
+    "Delayed Gratification",
+    2349
+   ],
+   [
+    "Expanse",
+    2345
+   ],
+   [
+    "Mantra of Destruction",
+    2335
+   ],
+   [
+    "Cackling Companions",
+    2331
+   ],
+   [
+    "Doedre's Undoing",
+    2331
+   ],
+   [
+    "Dark Consequences",
+    2313
+   ],
+   [
+    "Solar Orb",
+    2299
+   ],
+   [
+    "Herald of Plague",
+    2291
+   ],
+   [
+    "Morgana's Tempest",
+    2288
+   ],
+   [
+    "Ball Lightning",
+    2272
+   ],
+   [
+    "Culling Strike I",
+    2267
+   ],
+   [
+    "Pierce II",
+    2228
+   ],
+   [
+    "Mana Leech",
+    2227
+   ],
+   [
+    "Overwhelming Presence",
+    2215
+   ],
+   [
+    "Profane Ritual",
+    2215
+   ],
+   [
+    "Shield Wall",
+    2207
+   ],
+   [
+    "Hardy Totems II",
+    2200
+   ],
+   [
+    "Deadly Herald",
+    2175
+   ],
+   [
+    "Inhibitor",
+    2172
+   ],
+   [
+    "Rising Tempest",
+    2141
+   ],
+   [
+    "Firebolt",
+    2133
+   ],
+   [
+    "Voltaic Mark",
+    2128
+   ],
+   [
+    "Galvanic Field",
+    2114
+   ],
+   [
+    "Reinforced Totems II",
+    2079
+   ],
+   [
+    "Hollow Resonance",
+    2045
+   ],
+   [
+    "Elemental Storm",
+    2042
+   ],
+   [
+    "Galvanic Shards",
+    2024
+   ],
+   [
+    "Thrill of the Kill",
+    2017
+   ],
+   [
+    "Mark of Siphoning",
+    2005
+   ],
+   [
+    "Second Wind I",
+    2003
+   ],
+   [
+    "Flicker Strike",
+    2000
+   ],
+   [
+    "Swift Affliction I",
+    1999
+   ],
+   [
+    "Close Combat I",
+    1998
+   ],
+   [
+    "Lightning Spear",
+    1996
+   ],
+   [
+    "Deadly Poison II",
+    1976
+   ],
+   [
+    "Companion: Quadrilla",
+    1971
+   ],
+   [
+    "Shred",
+    1971
+   ],
+   [
+    "Ice Bite I",
+    1969
+   ],
+   [
+    "Stoicism II",
+    1965
+   ],
+   [
+    "Stun I",
+    1962
+   ],
+   [
+    "Lightning Warp",
+    1961
+   ],
+   [
+    "Pierce I",
+    1956
+   ],
+   [
+    "Deathmarch",
+    1940
+   ],
+   [
+    "Momentum",
+    1927
+   ],
+   [
+    "Aftershock II",
+    1917
+   ],
+   [
+    "Seraph's Heart",
+    1911
+   ],
+   [
+    "Life Leech I",
+    1894
+   ],
+   [
+    "Lightning Bolt",
+    1887
+   ],
+   [
+    "Into the Breach",
+    1880
+   ],
+   [
+    "Fragmentation Rounds",
+    1877
+   ],
+   [
+    "Fluke",
+    1835
+   ],
+   [
+    "Chain III",
+    1831
+   ],
+   [
+    "Companion: Mighty Silverfist",
+    1811
+   ],
+   [
+    "Daresso's Passion",
+    1807
+   ],
+   [
+    "Ancestral Cry",
+    1795
+   ],
+   [
+    "Sacrificial Lamb II",
+    1768
+   ],
+   [
+    "Impale",
+    1755
+   ],
+   [
+    "Trickster's Shard",
+    1749
+   ],
+   [
+    "Lunar Blessing",
+    1738
+   ],
+   [
+    "Grenade",
+    1724
+   ],
+   [
+    "Bleed II",
+    1722
+   ],
+   [
+    "Bloodhound's Mark",
+    1708
+   ],
+   [
+    "Leap Slam",
+    1671
+   ],
+   [
+    "Hex Bloom",
+    1659
+   ],
+   [
+    "Arakaali's Lust",
+    1645
+   ],
+   [
+    "Coursing Current",
+    1637
+   ],
+   [
+    "Acrimony",
+    1635
+   ],
+   [
+    "Swift Affliction III",
+    1613
+   ],
+   [
+    "Summon Infernal Hound",
+    1603
+   ],
+   [
+    "Hand of Chayula",
+    1601
+   ],
+   [
+    "Ignite II",
+    1600
+   ],
+   [
+    "Furious Slam",
+    1592
+   ],
+   [
+    "Bitter Dead",
+    1578
+   ],
+   [
+    "Shock Conduction",
+    1566
+   ],
+   [
+    "Vulnerability",
+    1551
+   ],
+   [
+    "Tangmazu's Thurible",
+    1549
+   ],
+   [
+    "Breachlord's Amalgam",
+    1530
+   ],
+   [
+    "Impurity",
+    1524
+   ],
+   [
+    "Projectile Acceleration I",
+    1506
+   ],
+   [
+    "Essence Drain",
+    1493
+   ],
+   [
+    "Longshot I",
+    1490
+   ],
+   [
+    "Bleed IV",
+    1475
+   ],
+   [
+    "Retreat I",
+    1457
+   ],
+   [
+    "Exploit Weakness",
+    1447
+   ],
+   [
+    "Bhatair's Vengeance",
+    1434
+   ],
+   [
+    "Fist of War III",
+    1416
+   ],
+   [
+    "Chain I",
+    1403
+   ],
+   [
+    "Walking Calamity",
+    1403
+   ],
+   [
+    "Remnant Potency II",
+    1401
+   ],
+   [
+    "Fulmination",
+    1399
+   ],
+   [
+    "Life Drain",
+    1371
+   ],
+   [
+    "Runic Extraction",
+    1368
+   ],
+   [
+    "Fortifying Cry",
+    1367
+   ],
+   [
+    "Stormblast Bolts",
+    1361
+   ],
+   [
+    "Sunder",
+    1360
+   ],
+   [
+    "Admixture",
+    1355
+   ],
+   [
+    "Companion: Quill Crab",
+    1333
+   ],
+   [
+    "Fortress I",
+    1332
+   ],
+   [
+    "Bonestorm",
+    1326
+   ],
+   [
+    "Companion: Antlion Charger",
+    1326
+   ],
+   [
+    "Ammo Conservation II",
+    1325
+   ],
+   [
+    "Upwelling I",
+    1314
+   ],
+   [
+    "Chaos Bolt",
+    1311
+   ],
+   [
+    "Unearth",
+    1297
+   ],
+   [
+    "Chaos Attunement",
+    1289
+   ],
+   [
+    "Scouring Flame",
+    1288
+   ],
+   [
+    "Ratha's Assault",
+    1286
+   ],
+   [
+    "Fist of War II",
+    1285
+   ],
+   [
+    "Glacial Bolt",
+    1280
+   ],
+   [
+    "Window of Opportunity I",
+    1279
+   ],
+   [
+    "Boneshatter",
+    1268
+   ],
+   [
+    "Medved's Felling",
+    1267
+   ],
+   [
+    "Impending Doom",
+    1266
+   ],
+   [
+    "Helbrym's Hide",
+    1264
+   ],
+   [
+    "Uul-Netol's Embrace",
+    1264
+   ],
+   [
+    "Arctic Howl",
+    1263
+   ],
+   [
+    "Armour Break II",
+    1259
+   ],
+   [
+    "Doom Blast",
+    1259
+   ],
+   [
+    "Lunar Assault",
+    1253
+   ],
+   [
+    "Zerphi's Infamy",
+    1253
+   ],
+   [
+    "Archon of Chayula",
+    1250
+   ],
+   [
+    "Demon Form",
+    1246
+   ],
+   [
+    "Voltaic Grenade",
+    1246
+   ],
+   [
+    "Chaotic Freeze",
+    1237
+   ],
+   [
+    "Sorcery Ward",
+    1236
+   ],
+   [
+    "Dark Effigy",
+    1233
+   ],
+   [
+    "Crushing Fear",
+    1231
+   ],
+   [
+    "Fortress II",
+    1231
+   ],
+   [
+    "Profanity II",
+    1227
+   ],
+   [
+    "Enervating Nova",
+    1220
+   ],
+   [
+    "Ember Fusillade",
+    1213
+   ],
+   [
+    "Resonating Shield",
+    1210
+   ],
+   [
+    "Hourglass",
+    1206
+   ],
+   [
+    "Clash",
+    1201
+   ],
+   [
+    "Companion: Swarming Wasp",
+    1194
+   ],
+   [
+    "Overreach",
+    1193
+   ],
+   [
+    "Poisonburst Arrow",
+    1191
+   ],
+   [
+    "Explosive Spear",
+    1183
+   ],
+   [
+    "Fiery Death",
+    1176
+   ],
+   [
+    "Permafrost Bolts",
+    1166
+   ],
+   [
+    "Shield Charge",
+    1164
+   ],
+   [
+    "Companion: Werewolf Prowler",
+    1160
+   ],
+   [
+    "Earthshatter",
+    1155
+   ],
+   [
+    "Snap",
+    1147
+   ],
+   [
+    "Mirror of Refraction",
+    1143
+   ],
+   [
+    "Rageforged I",
+    1142
+   ],
+   [
+    "Extraction",
+    1136
+   ],
+   [
+    "Nova Projectiles II",
+    1135
+   ],
+   [
+    "Corrupting Cry II",
+    1134
+   ],
+   [
+    "Tul's Stillness",
+    1130
+   ],
+   [
+    "Ignite I",
+    1129
+   ],
+   [
+    "Storm Lance",
+    1128
+   ],
+   [
+    "Atziri's Impatience",
+    1124
+   ],
+   [
+    "Incendiary Shot",
+    1106
+   ],
+   [
+    "Meat Shield I",
+    1103
+   ],
+   [
+    "Soul Drain",
+    1101
+   ],
+   [
+    "Toxic Growth",
+    1099
+   ],
+   [
+    "Decaying Hex",
+    1098
+   ],
+   [
+    "Minion Pact I",
+    1096
+   ],
+   [
+    "Cadence",
+    1087
+   ],
+   [
+    "Ixchel's Torment",
+    1085
+   ],
+   [
+    "Midnight Zenith",
+    1079
+   ],
+   [
+    "Thunderous Leap",
+    1063
+   ],
+   [
+    "Tacati's Ire",
+    1058
+   ],
+   [
+    "Spectre: Bloodthief Wasp",
+    1055
+   ],
+   [
+    "Fire Penetration I",
+    1045
+   ],
+   [
+    "Freezing Shards",
+    1045
+   ],
+   [
+    "Execute I",
+    1044
+   ],
+   [
+    "Breachlord's Rift",
+    1043
+   ],
+   [
+    "Esh's Radiance",
+    1039
+   ],
+   [
+    "Uhtred's Exodus",
+    1036
+   ],
+   [
+    "Steadfast II",
+    1027
+   ],
+   [
+    "Burning Inscription",
+    1023
+   ],
+   [
+    "Electrocute",
+    1021
+   ],
+   [
+    "Enduring Impact II",
+    1016
+   ],
+   [
+    "Rearm II",
+    1004
+   ],
+   [
+    "Emergency Reload",
+    999
+   ],
+   [
+    "Nimble Reload",
+    998
+   ],
+   [
+    "Poison II",
+    998
+   ],
+   [
+    "Frenzied Riposte",
+    995
+   ],
+   [
+    "Maul",
+    995
+   ],
+   [
+    "Verisium Manifestations",
+    992
+   ],
+   [
+    "Eternal Flame I",
+    986
+   ],
+   [
+    "Vine Arrow",
+    974
+   ],
+   [
+    "Exposing Cry",
+    971
+   ],
+   [
+    "Persistent Ground II",
+    958
+   ],
+   [
+    "Reap",
+    957
+   ],
+   [
+    "Battershout",
+    955
+   ],
+   [
+    "Sacrificial Lamb I",
+    941
+   ],
+   [
+    "Harmonic Remnants I",
+    936
+   ],
+   [
+    "Persistent Ground I",
+    936
+   ],
+   [
+    "Bone Cage",
+    933
+   ],
+   [
+    "Plague Bearer",
+    924
+   ],
+   [
+    "Inexorable Critical II",
+    922
+   ],
+   [
+    "Attrition",
+    910
+   ],
+   [
+    "Frozen Spite",
+    909
+   ],
+   [
+    "Xoph's Pyre",
+    903
+   ],
+   [
+    "Double Barrel II",
+    899
+   ],
+   [
+    "Barkskin",
+    894
+   ],
+   [
+    "Ravenous Swarm",
+    883
+   ],
+   [
+    "Called Shots",
+    867
+   ],
+   [
+    "Spearfield",
+    867
+   ],
+   [
+    "Detonate Dead",
+    860
+   ],
+   [
+    "Shattering Spite",
+    855
+   ],
+   [
+    "Pin III",
+    827
+   ],
+   [
+    "Poison I",
+    826
+   ],
+   [
+    "Compressed Duration I",
+    823
+   ],
+   [
+    "Selfless Remnants",
+    820
+   ],
+   [
+    "Fireball",
+    818
+   ],
+   [
+    "Enduring Impact I",
+    807
+   ],
+   [
+    "Ancestral Call I",
+    804
+   ],
+   [
+    "Bidding I",
+    801
+   ],
+   [
+    "Practiced Combo",
+    788
+   ],
+   [
+    "Rake",
+    786
+   ],
+   [
+    "Supporting Fire",
+    785
+   ],
+   [
+    "Double Barrel I",
+    774
+   ],
+   [
+    "Harbinger of Madness",
+    772
+   ],
+   [
+    "Atziri's Allure",
+    769
+   ],
+   [
+    "Companion: Crag Leaper",
+    761
+   ],
+   [
+    "Refraction II",
+    753
+   ],
+   [
+    "Forge Hammer",
+    749
+   ],
+   [
+    "Deep Cuts II",
+    746
+   ],
+   [
+    "Alchemist's Boon",
+    733
+   ],
+   [
+    "Paquate's Pact",
+    730
+   ],
+   [
+    "Companion: Rabid Dog",
+    727
+   ],
+   [
+    "Rapid Shot",
+    726
+   ],
+   [
+    "Companion: Coconut Crab",
+    720
+   ],
+   [
+    "Molten Crash",
+    714
+   ],
+   [
+    "Behead II",
+    709
+   ],
+   [
+    "Chain II",
+    704
+   ],
+   [
+    "Crescendo II",
+    691
+   ],
+   [
+    "Ice Strike",
+    687
+   ],
+   [
+    "Disengage",
+    684
+   ],
+   [
+    "Lingering Illusion",
+    679
+   ],
+   [
+    "Volcanic Fissure",
+    676
+   ],
+   [
+    "Haemocrystals",
+    675
+   ],
+   [
+    "Crystalline Shards",
+    672
+   ],
+   [
+    "Tasalio's Rhythm",
+    672
+   ],
+   [
+    "Companion: Pack Werewolf",
+    663
+   ],
+   [
+    "Armour Piercing Rounds",
+    661
+   ],
+   [
+    "Sanguine Revelry",
+    660
+   ],
+   [
+    "Volcano",
+    648
+   ],
+   [
+    "Glacial Lance",
+    641
+   ],
+   [
+    "Blood Boil",
+    640
+   ],
+   [
+    "Fangs of Frost",
+    625
+   ],
+   [
+    "Refraction III",
+    625
+   ],
+   [
+    "Savage Fury",
+    624
+   ],
+   [
+    "Defiance Banner",
+    622
+   ],
+   [
+    "Streamlined Rounds",
+    621
+   ],
+   [
+    "Escape Shot",
+    620
+   ],
+   [
+    "Immolate",
+    619
+   ],
+   [
+    "Zenith I",
+    613
+   ],
+   [
+    "Navira's Well",
+    609
+   ],
+   [
+    "Arjun's Medal",
+    601
+   ],
+   [
+    "Encase in Jade",
+    600
+   ],
+   [
+    "Blood Hunt",
+    591
+   ],
+   [
+    "Eternal Flame II",
+    583
+   ],
+   [
+    "Plasma Blast",
+    580
+   ],
+   [
+    "Double Barrel III",
+    577
+   ],
+   [
+    "Lightning Arrow",
+    573
+   ],
+   [
+    "Zarokh's Refrain",
+    561
+   ],
+   [
+    "Minion Pact II",
+    551
+   ],
+   [
+    "Molten Shower",
+    546
+   ],
+   [
+    "Rampage",
+    546
+   ],
+   [
+    "Ancestral Spirits",
+    544
+   ],
+   [
+    "Heightened Accuracy I",
+    536
+   ],
+   [
+    "Bone Blast",
+    527
+   ],
+   [
+    "Feast of Flesh",
+    525
+   ],
+   [
+    "Long Fuse I",
+    522
+   ],
+   [
+    "Perfect Strike",
+    518
+   ],
+   [
+    "Corpse Conservation",
+    508
+   ],
+   [
+    "Frost Darts",
+    504
+   ],
+   [
+    "Kalisa's Crescendo",
+    504
+   ],
+   [
+    "Gorge",
+    499
+   ],
+   [
+    "Dread Banner",
+    497
+   ],
+   [
+    "Einhar's Beastrite",
+    493
+   ],
+   [
+    "Cross Slash",
+    471
+   ],
+   [
+    "Adhesive Grenades II",
+    470
+   ],
+   [
+    "Stomping Ground",
+    468
+   ],
+   [
+    "Rhoa Mount",
+    465
+   ],
+   [
+    "Urgent Totems I",
+    464
+   ],
+   [
+    "Wind Serpent's Fury",
+    464
+   ],
+   [
+    "Volatile Dead",
+    461
+   ],
+   [
+    "Splinter Totem II",
+    457
+   ],
+   [
+    "Hammer of the Gods",
+    456
+   ],
+   [
+    "Sacrifice",
+    456
+   ],
+   [
+    "Poison Spores",
+    454
+   ],
+   [
+    "Lightning Rod",
+    446
+   ],
+   [
+    "Companion: Plague Swarm",
+    444
+   ],
+   [
+    "Gas Arrow",
+    441
+   ],
+   [
+    "Vruun's Inevitability",
+    441
+   ],
+   [
+    "Impact Shockwave",
+    439
+   ],
+   [
+    "Intense Agony",
+    439
+   ],
+   [
+    "Fury of the Mountain",
+    436
+   ],
+   [
+    "Companion: Caustic Crab",
+    433
+   ],
+   [
+    "Quill Burst",
+    433
+   ],
+   [
+    "Font of Blood",
+    431
+   ],
+   [
+    "High Velocity Rounds",
+    427
+   ],
+   [
+    "Fire Spell on Hit",
+    426
+   ],
+   [
+    "Wing Blast",
+    425
+   ],
+   [
+    "Armour Breaker",
+    418
+   ],
+   [
+    "Freezing Salvo",
+    418
+   ],
+   [
+    "Companion: Bloodthief Wasp",
+    416
+   ],
+   [
+    "Siege Ballista",
+    413
+   ],
+   [
+    "Ambrosia II",
+    406
+   ],
+   [
+    "Companion: Starlit Harvester",
+    397
+   ],
+   [
+    "Neural Overload",
+    396
+   ],
+   [
+    "His Scattering Calamity",
+    392
+   ],
+   [
+    "Fresh Clip I",
+    388
+   ],
+   [
+    "Companion: Venomous Crab Matriarch",
+    385
+   ],
+   [
+    "Soul Offering",
+    384
+   ],
+   [
+    "Icicle",
+    383
+   ],
+   [
+    "Wildfire",
+    383
+   ],
+   [
+    "Companion: Gargantuan Wasp",
+    380
+   ],
+   [
+    "Rolling Slam",
+    379
+   ],
+   [
+    "Heart of Ice",
+    377
+   ],
+   [
+    "Icestorm",
+    377
+   ],
+   [
+    "Volt",
+    377
+   ],
+   [
+    "Ammo Conservation III",
+    373
+   ],
+   [
+    "Adhesive Grenades I",
+    370
+   ],
+   [
+    "Artillery Ballista",
+    370
+   ],
+   [
+    "Upheaval II",
+    370
+   ],
+   [
+    "Minion Splash I",
+    369
+   ],
+   [
+    "Whirlwind Lance",
+    361
+   ],
+   [
+    "Profanity I",
+    360
+   ],
+   [
+    "Opening Move",
+    354
+   ],
+   [
+    "Behead I",
+    352
+   ],
+   [
+    "Skyfall",
+    352
+   ],
+   [
+    "Vruun's Aftermath",
+    351
+   ],
+   [
+    "Fresh Clip II",
+    350
+   ],
+   [
+    "Empowered Sparks I",
+    349
+   ],
+   [
+    "Caltrops",
+    347
+   ],
+   [
+    "Lightning Conduit",
+    346
+   ],
+   [
+    "Crater",
+    344
+   ],
+   [
+    "Time Snap",
+    344
+   ],
+   [
+    "Ricochet I",
+    343
+   ],
+   [
+    "Ammo Conservation I",
+    342
+   ],
+   [
+    "Primal Strikes",
+    339
+   ],
+   [
+    "Electromagnetism",
+    338
+   ],
+   [
+    "Shockburst Rounds",
+    336
+   ],
+   [
+    "Molten Blast",
+    333
+   ],
+   [
+    "Shocking Leap",
+    333
+   ],
+   [
+    "Concoct II",
+    332
+   ],
+   [
+    "Toxic Domain",
+    332
+   ],
+   [
+    "Shard Scavenger",
+    331
+   ],
+   [
+    "Wildshards I",
+    330
+   ],
+   [
+    "Lasting Shock",
+    328
+   ],
+   [
+    "Removed Skill",
+    328
+   ],
+   [
+    "Tempest Flurry",
+    328
+   ],
+   [
+    "Brambleslam",
+    327
+   ],
+   [
+    "Enraged Warcry I",
+    327
+   ],
+   [
+    "Grim Feast",
+    327
+   ],
+   [
+    "Storm Wave",
+    325
+   ],
+   [
+    "Concussive Runes",
+    321
+   ],
+   [
+    "Eye of Winter",
+    321
+   ],
+   [
+    "Spectre: Quill Crab",
+    317
+   ],
+   [
+    "Time Freeze",
+    315
+   ],
+   [
+    "Burgeon I",
+    311
+   ],
+   [
+    "Incision",
+    311
+   ],
+   [
+    "Arbiter's Reach",
+    310
+   ],
+   [
+    "Companion: Porcupine Crab",
+    307
+   ],
+   [
+    "Elemental Invocation",
+    302
+   ],
+   [
+    "Companion: Voracious Werewolf",
+    298
+   ],
+   [
+    "Mana Flare",
+    297
+   ],
+   [
+    "Catalysing Elements",
+    294
+   ],
+   [
+    "Azmerian Swarms",
+    290
+   ],
+   [
+    "Steadfast I",
+    290
+   ],
+   [
+    "Controlled Hazard",
+    289
+   ],
+   [
+    "Practical Magic II",
+    289
+   ],
+   [
+    "Volcanic Eruption",
+    289
+   ],
+   [
+    "Raise Zombie",
+    285
+   ],
+   [
+    "Earthquake",
+    284
+   ],
+   [
+    "Incinerate",
+    284
+   ],
+   [
+    "Projectile Deceleration II",
+    284
+   ],
+   [
+    "Stormfire",
+    284
+   ],
+   [
+    "Hayoxi's Fulmination",
+    283
+   ],
+   [
+    "Spectre: Vaal Guard",
+    282
+   ],
+   [
+    "Staggering Palm",
+    279
+   ],
+   [
+    "Voltaic Barrier",
+    273
+   ],
+   [
+    "Elemental Discharge",
+    272
+   ],
+   [
+    "Companion: River Drake",
+    270
+   ],
+   [
+    "Guatelitzi's Ablation",
+    268
+   ],
+   [
+    "Fist of War I",
+    264
+   ],
+   [
+    "Accelerated Growth",
+    263
+   ],
+   [
+    "Ancestral Warrior Totem",
+    262
+   ],
+   [
+    "Companion: Black Strider",
+    261
+   ],
+   [
+    "Coiling Bolts",
+    259
+   ],
+   [
+    "Jagged Ground II",
+    259
+   ],
+   [
+    "Rapid Assault",
+    258
+   ],
+   [
+    "Brittle Armour",
+    257
+   ],
+   [
+    "Soaring Midnight",
+    257
+   ],
+   [
+    "Companion: Bramble Rhoa",
+    255
+   ],
+   [
+    "Corrupting Cry I",
+    253
+   ],
+   [
+    "Companion: Rasp Scavenger",
+    251
+   ],
+   [
+    "Boundless Energy I",
+    250
+   ],
+   [
+    "Animus Exchange",
+    249
+   ],
+   [
+    "Brink I",
+    248
+   ],
+   [
+    "Charged Shots II",
+    246
+   ],
+   [
+    "Crescendo I",
+    244
+   ],
+   [
+    "Supercharged Slam",
+    244
+   ],
+   [
+    "Companion: Alpha Primate",
+    239
+   ],
+   [
+    "Companion: Slitherspitter",
+    237
+   ],
+   [
+    "Stampede",
+    236
+   ],
+   [
+    "Companion: Nameless Hulk",
+    233
+   ],
+   [
+    "Stormcaller Arrow",
+    233
+   ],
+   [
+    "Frozen Locus",
+    231
+   ],
+   [
+    "Companion: Bramble Hulk",
+    230
+   ],
+   [
+    "Iron Ward",
+    228
+   ],
+   [
+    "Ritual Sacrifice",
+    228
+   ],
+   [
+    "Brink II",
+    226
+   ],
+   [
+    "Companion: Brimstone Crab",
+    222
+   ],
+   [
+    "Gemini Surge",
+    222
+   ],
+   [
+    "Spectre: Blood Elemental",
+    222
+   ],
+   [
+    "Inevitable Agony",
+    221
+   ],
+   [
+    "Siege Cascade",
+    220
+   ],
+   [
+    "Static Shocks",
+    216
+   ],
+   [
+    "Align Fate",
+    215
+   ],
+   [
+    "Companion: Vile Vulture",
+    214
+   ],
+   [
+    "Searing Flame I",
+    208
+   ],
+   [
+    "Temporal Rift",
+    207
+   ],
+   [
+    "Eternal Flame III",
+    206
+   ],
+   [
+    "Zarokh's Revolt",
+    206
+   ],
+   [
+    "Thundergod's Wrath",
+    204
+   ],
+   [
+    "Crescendo III",
+    203
+   ],
+   [
+    "Barbs II",
+    202
+   ],
+   [
+    "Rupture",
+    202
+   ],
+   [
+    "Projectile Deceleration I",
+    198
+   ],
+   [
+    "Flame Breath",
+    194
+   ],
+   [
+    "Companion: Elephant Tortoise",
+    193
+   ],
+   [
+    "Deadly Resolve",
+    190
+   ],
+   [
+    "Spear of Solaris",
+    190
+   ],
+   [
+    "Perfection",
+    183
+   ],
+   [
+    "Pursuit III",
+    183
+   ],
+   [
+    "Companion: Plague Nymph",
+    178
+   ],
+   [
+    "Retaliate II",
+    176
+   ],
+   [
+    "Urgent Totems II",
+    174
+   ],
+   [
+    "Companion: Quadrilla Sergeant",
+    172
+   ],
+   [
+    "Hailstorm Rounds",
+    172
+   ],
+   [
+    "Deadly Poison I",
+    170
+   ],
+   [
+    "Spectre: Gargantuan Wasp",
+    169
+   ],
+   [
+    "Thornskin II",
+    166
+   ],
+   [
+    "Xibaqua's Rending",
+    166
+   ],
+   [
+    "Detonate Living",
+    164
+   ],
+   [
+    "Companion: Winged Fiend",
+    163
+   ],
+   [
+    "Crazed Minions",
+    161
+   ],
+   [
+    "Vanguard II",
+    160
+   ],
+   [
+    "Creeping Chill",
+    156
+   ],
+   [
+    "Jagged Ground I",
+    156
+   ],
+   [
+    "Pursuit II",
+    156
+   ],
+   [
+    "Upheaval I",
+    156
+   ],
+   [
+    "Decompose",
+    155
+   ],
+   [
+    "Siphoning Strike",
+    153
+   ],
+   [
+    "Thornskin I",
+    152
+   ],
+   [
+    "Wardbound Minions",
+    151
+   ],
+   [
+    "Bind Spectre",
+    150
+   ],
+   [
+    "Hexblast",
+    150
+   ],
+   [
+    "Perfected Endurance",
+    150
+   ],
+   [
+    "Catharsis",
+    146
+   ],
+   [
+    "Companion: Winged Horror",
+    144
+   ],
+   [
+    "Companion: Sun Clan Scavenger",
+    143
+   ],
+   [
+    "Reinforced Totems I",
+    142
+   ],
+   [
+    "Frostflame Nova",
+    140
+   ],
+   [
+    "Rearm I",
+    140
+   ],
+   [
+    "Spectre: Plague Swarm",
+    140
+   ],
+   [
+    "Concussive Spells",
+    139
+   ],
+   [
+    "Companion: Nameless Lurker",
+    137
+   ],
+   [
+    "Spiral Volley",
+    136
+   ],
+   [
+    "Companion: Blood-fevered Tuskbeast",
+    132
+   ],
+   [
+    "Abiding Hex",
+    130
+   ],
+   [
+    "Electrocuting Arrow",
+    126
+   ],
+   [
+    "Reaper's Invocation",
+    126
+   ],
+   [
+    "Companion: Hyena Demon",
+    125
+   ],
+   [
+    "Companion: Venomous Crab",
+    125
+   ],
+   [
+    "Prototype Seventeen",
+    125
+   ],
+   [
+    "Spiraling Conspiracy",
+    125
+   ],
+   [
+    "Raging Spirits",
+    124
+   ],
+   [
+    "Combo Finisher I",
+    122
+   ],
+   [
+    "Elemental Sundering",
+    120
+   ],
+   [
+    "Companion: Chaw Mongrel",
+    116
+   ],
+   [
+    "Trail of Caltrops",
+    116
+   ],
+   [
+    "Companion: Tombshrieker",
+    115
+   ],
+   [
+    "Stoicism I",
+    114
+   ],
+   [
+    "Varashta's Blessing",
+    114
+   ],
+   [
+    "Excise",
+    113
+   ],
+   [
+    "Olroth's Hubris",
+    113
+   ],
+   [
+    "Ambrosia",
+    111
+   ],
+   [
+    "Companion: Scorpion Monkey",
+    111
+   ],
+   [
+    "Culmination I",
+    111
+   ],
+   [
+    "Wildwood's Gifts",
+    111
+   ],
+   [
+    "Companion: Brine Maiden",
+    109
+   ],
+   [
+    "Eternal March",
+    108
+   ],
+   [
+    "Energy Capacitor",
+    107
+   ],
+   [
+    "Starborn Onslaught",
+    106
+   ],
+   [
+    "Companion: Nameless Dweller",
+    105
+   ],
+   [
+    "Tectonic Slams",
+    105
+   ],
+   [
+    "Companion: Fungal Wolf",
+    104
+   ],
+   [
+    "Companion: Rhex",
+    104
+   ],
+   [
+    "Syzygy",
+    104
+   ],
+   [
+    "Void Illusion",
+    104
+   ],
+   [
+    "Bone Shrapnel",
+    102
+   ],
+   [
+    "Companion: Prowling Chimeral",
+    102
+   ],
+   [
+    "Requiem",
+    102
+   ],
+   [
+    "Chaotic Surge",
+    100
+   ],
+   [
+    "Aftershock I",
+    99
+   ],
+   [
+    "Tear",
+    99
+   ],
+   [
+    "Runic Infusion",
+    98
+   ],
+   [
+    "Rending Apex",
+    96
+   ],
+   [
+    "Glacial Cascade",
+    95
+   ],
+   [
+    "Companion: Scarecrow Beast",
+    94
+   ],
+   [
+    "Companion: Tendril Prowler",
+    94
+   ],
+   [
+    "Delayed Reaction",
+    94
+   ],
+   [
+    "Rain of Arrows",
+    94
+   ],
+   [
+    "Barbs I",
+    92
+   ],
+   [
+    "Companion: Nymph Wasp",
+    92
+   ],
+   [
+    "Frostfire",
+    92
+   ],
+   [
+    "Companion: Bramble Ape",
+    91
+   ],
+   [
+    "Companion: Vilespit Gull",
+    91
+   ],
+   [
+    "Kulemak's Dominion",
+    91
+   ],
+   [
+    "Font of Mana",
+    88
+   ],
+   [
+    "Tawhoa's Tending",
+    85
+   ],
+   [
+    "Untether",
+    85
+   ],
+   [
+    "Companion: Nameless Burrower",
+    84
+   ],
+   [
+    "Rain of Blades",
+    84
+   ],
+   [
+    "Companion: Porcupine Goliath",
+    83
+   ],
+   [
+    "Elemental Surge",
+    81
+   ],
+   [
+    "Gathering Storm",
+    81
+   ],
+   [
+    "Manifest Weapon",
+    79
+   ],
+   [
+    "Splinter Totem I",
+    79
+   ],
+   [
+    "Spectral Volley",
+    76
+   ],
+   [
+    "Companion: Tarnished Beetle",
+    75
+   ],
+   [
+    "Companion: Krell Fleshgouger",
+    74
+   ],
+   [
+    "Deep Cuts I",
+    74
+   ],
+   [
+    "Cast on Charm Use",
+    73
+   ],
+   [
+    "Companion: Scute Lizard",
+    73
+   ],
+   [
+    "Companion: Spiked Scuttler",
+    73
+   ],
+   [
+    "Companion: Hungry Wolf",
+    72
+   ],
+   [
+    "Companion: Stoneclad Gorilla",
+    72
+   ],
+   [
+    "Wind Blast",
+    72
+   ],
+   [
+    "Companion: Adorned Scarab",
+    70
+   ],
+   [
+    "Derange",
+    69
+   ],
+   [
+    "Vaulting Impact",
+    69
+   ],
+   [
+    "Valako's Charge",
+    68
+   ],
+   [
+    "Companion: Drudge Osseodon",
+    65
+   ],
+   [
+    "Companion: Feral Primate",
+    65
+   ],
+   [
+    "Retaliate I",
+    65
+   ],
+   [
+    "Apocalypse",
+    64
+   ],
+   [
+    "Rolling Magma",
+    64
+   ],
+   [
+    "Spectre: Plague Harvester",
+    64
+   ],
+   [
+    "Companion: Cultivated Grove",
+    63
+   ],
+   [
+    "Defy I",
+    62
+   ],
+   [
+    "Animus Splinters",
+    60
+   ],
+   [
+    "Companion: Treant Fungalreaver",
+    60
+   ],
+   [
+    "Pursuit I",
+    60
+   ],
+   [
+    "Fragments Of The Past",
+    59
+   ],
+   [
+    "Fan The Flames II",
+    57
+   ],
+   [
+    "His Vile Intrusion",
+    57
+   ],
+   [
+    "Companion: Clawcrunch",
+    56
+   ],
+   [
+    "Companion: Stoneback Rhoa",
+    54
+   ],
+   [
+    "Drain Ailments",
+    54
+   ],
+   [
+    "Bone Offering",
+    53
+   ],
+   [
+    "Companion: Tarnished Scarab",
+    52
+   ],
+   [
+    "Execrate",
+    52
+   ],
+   [
+    "Gelid Palm",
+    52
+   ],
+   [
+    "Runic Tempering",
+    52
+   ],
+   [
+    "Black Powder Blitz",
+    51
+   ],
+   [
+    "Companion: Dezzic Soldier",
+    51
+   ],
+   [
+    "Companion: Fungal Artillery",
+    51
+   ],
+   [
+    "Companion: Chyme Skitterer",
+    50
+   ],
+   [
+    "Companion: Goliath Shrike",
+    50
+   ],
+   [
+    "Companion: Mantis Rat",
+    48
+   ],
+   [
+    "Companion: Rotting Crow",
+    48
+   ],
+   [
+    "Companion: Vault Lurker",
+    48
+   ],
+   [
+    "Hardy Totems I",
+    48
+   ],
+   [
+    "Barrier Invocation",
+    47
+   ],
+   [
+    "Spectre: Eaten Rat",
+    47
+   ],
+   [
+    "Wave of Frost",
+    47
+   ],
+   [
+    "Crackling Barrier",
+    46
+   ],
+   [
+    "Companion: Bramble Burrower",
+    45
+   ],
+   [
+    "Companion: Skittering Jellycrab",
+    45
+   ],
+   [
+    "Concoct I",
+    45
+   ],
+   [
+    "Combo Finisher II",
+    44
+   ],
+   [
+    "Elemental Expression",
+    44
+   ],
+   [
+    "Companion: Armoured Rhex",
+    43
+   ],
+   [
+    "Shockchain Arrow",
+    43
+   ],
+   [
+    "Companion: Spiked Ray",
+    42
+   ],
+   [
+    "Spectre: Surgical Experimentalist",
+    42
+   ],
+   [
+    "Companion: Cerberic Bat",
+    41
+   ],
+   [
+    "Mist Raven",
+    41
+   ],
+   [
+    "Vanguard I",
+    41
+   ],
+   [
+    "Volatility",
+    41
+   ],
+   [
+    "Charged Shots I",
+    40
+   ],
+   [
+    "Companion: Adorned Beetle",
+    40
+   ],
+   [
+    "Companion: Nameless Imp",
+    40
+   ],
+   [
+    "Companion: Ylth Spewer",
+    39
+   ],
+   [
+    "Companion: Flesh Larva",
+    38
+   ],
+   [
+    "Meditate",
+    38
+   ],
+   [
+    "Phantasmal Arrow",
+    37
+   ],
+   [
+    "Unbound Avatar",
+    36
+   ],
+   [
+    "Companion: Bane Sapling",
+    35
+   ],
+   [
+    "Companion: Nameless Horror",
+    35
+   ],
+   [
+    "Companion: The Abominable Yeti",
+    35
+   ],
+   [
+    "His Foul Emergence",
+    35
+   ],
+   [
+    "Herald of the Royal Queen",
+    34
+   ],
+   [
+    "Spectre: Bannerbearing Zealot",
+    34
+   ],
+   [
+    "Spectre: Swarming Wasp",
+    34
+   ],
+   [
+    "Barbs III",
+    33
+   ],
+   [
+    "Companion: Amphibious Prowler",
+    33
+   ],
+   [
+    "Healing Runes",
+    33
+   ],
+   [
+    "Companion: Rotten Wolf",
+    32
+   ],
+   [
+    "Kelari's Malediction",
+    32
+   ],
+   [
+    "Temper Weapon",
+    32
+   ],
+   [
+    "Alignment II",
+    31
+   ],
+   [
+    "Spectre: Chaos Zealot",
+    31
+   ],
+   [
+    "Alignment I",
+    30
+   ],
+   [
+    "Spectre: Ribrattle",
+    30
+   ],
+   [
+    "Companion: Guardian Lizard",
+    29
+   ],
+   [
+    "Detonating Arrow",
+    29
+   ],
+   [
+    "Fist Of Kalguur",
+    29
+   ],
+   [
+    "Companion: Crested Behemoth",
+    27
+   ],
+   [
+    "Companion: Sabre Spider",
+    27
+   ],
+   [
+    "Companion: The Frostborn Fiend",
+    26
+   ],
+   [
+    "Smash to Smithereens",
+    26
+   ],
+   [
+    "Spectre: Cultist Archer",
+    26
+   ],
+   [
+    "Triskelion Cascade",
+    26
+   ],
+   [
+    "Alignment III",
+    25
+   ],
+   [
+    "Rip",
+    25
+   ],
+   [
+    "Runeforged Blades",
+    25
+   ],
+   [
+    "His Grave Command",
+    24
+   ],
+   [
+    "Magnetic Salvo",
+    24
+   ],
+   [
+    "Briarpatch",
+    23
+   ],
+   [
+    "Companion: Guardian Turtle",
+    23
+   ],
+   [
+    "Companion: Snakethroat Shambler",
+    23
+   ],
+   [
+    "Conductive Runes",
+    23
+   ],
+   [
+    "Companion: Petulant Stonemaw",
+    21
+   ],
+   [
+    "Tul's Avalanche",
+    21
+   ],
+   [
+    "Kelari's Judgment",
+    20
+   ],
+   [
+    "Companion: Regurgitating Vulture",
+    18
+   ],
+   [
+    "Moment of Vulnerability",
+    18
+   ],
+   [
+    "Refraction I",
+    17
+   ],
+   [
+    "Ruzhan's Reckoning",
+    17
+   ],
+   [
+    "Companion: Dune Lurker",
+    16
+   ],
+   [
+    "Crackling Palm",
+    16
+   ],
+   [
+    "Leylines",
+    16
+   ],
+   [
+    "His Winnowing Flame",
+    15
+   ],
+   [
+    "Hollow Shell",
+    15
+   ],
+   [
+    "Cirel's Cultivation",
+    14
+   ],
+   [
+    "Spectre: Coconut Crab",
+    14
+   ],
+   [
+    "Companion: Fettered Spider",
+    13
+   ],
+   [
+    "Skittering Stone II",
+    13
+   ],
+   [
+    "Spectre: Chyme Skitterer",
+    13
+   ],
+   [
+    "Spectre: Flesh Larva",
+    13
+   ],
+   [
+    "Spectre: Gelid Zealot",
+    13
+   ],
+   [
+    "Companion: Entrailhome Shambler",
+    11
+   ],
+   [
+    "Spectre: Hound of the Pit",
+    11
+   ],
+   [
+    "Companion: Bahlak, the Sky Seer",
+    10
+   ],
+   [
+    "Fan The Flames",
+    10
+   ],
+   [
+    "Spectre: Rotting Crow",
+    10
+   ],
+   [
+    "Bursting Fen Toad",
+    9
+   ],
+   [
+    "Companion: Caedron, the Hyena Lord",
+    9
+   ],
+   [
+    "Companion: Chetza, the Feathered Plague",
+    9
+   ],
+   [
+    "Companion: Manshrike",
+    9
+   ],
+   [
+    "Practical Magic I",
+    9
+   ],
+   [
+    "Spectre: Feral Primate",
+    9
+   ],
+   [
+    "Spectre: Quadrilla",
+    9
+   ],
+   [
+    "Spectre: Skitter Golem",
+    9
+   ],
+   [
+    "Abyssal Apparition",
+    8
+   ],
+   [
+    "Companion: Great White One",
+    8
+   ],
+   [
+    "Navira's Oasis",
+    8
+   ],
+   [
+    "Runic Reprieve",
+    8
+   ],
+   [
+    "Spectre: Blood Zealot",
+    8
+   ],
+   [
+    "Spectre: Skullslinger",
+    8
+   ],
+   [
+    "Skittering Stone I",
+    7
+   ],
+   [
+    "Spectre: Crag Leaper",
+    7
+   ],
+   [
+    "Spectre: Experimental Boar",
+    7
+   ],
+   [
+    "Spectre: Nettle Ant",
+    7
+   ],
+   [
+    "Spectre: Twilight Order Officer",
+    7
+   ],
+   [
+    "Spectre: Vile Vulture",
+    7
+   ],
+   [
+    "Acidic Concoction",
+    6
+   ],
+   [
+    "Companion: Akthi, the Final Sting",
+    6
+   ],
+   [
+    "Companion: Dezzic Nettler",
+    6
+   ],
+   [
+    "Companion: Luminous Spinefish",
+    6
+   ],
+   [
+    "Companion: Scourge of the Skies",
+    6
+   ],
+   [
+    "Companion: Thraeven, Wing of Winter",
+    6
+   ],
+   [
+    "Companion: Xilozoma, the Maw-Beast",
+    6
+   ],
+   [
+    "Spectre: Brine Maiden",
+    6
+   ],
+   [
+    "Spectre: Desiccated Lich",
+    6
+   ],
+   [
+    "Spectre: Faridun Impaler",
+    6
+   ],
+   [
+    "Spectre: Risen Rattler",
+    6
+   ],
+   [
+    "Spectre: Undead Vaal Guard",
+    6
+   ],
+   [
+    "Companion: Carrion Gull",
+    5
+   ],
+   [
+    "Companion: Giant Maw",
+    5
+   ],
+   [
+    "Companion: Gressor-Kul, the Apex",
+    5
+   ],
+   [
+    "Companion: Starlit Nymph",
+    5
+   ],
+   [
+    "Companion: The Sandstrider",
+    5
+   ],
+   [
+    "Ruzhan's Fury",
+    5
+   ],
+   [
+    "Spectre: Death Knight",
+    5
+   ],
+   [
+    "Spectre: Feral Kin",
+    5
+   ],
+   [
+    "Spectre: Starlit Harvester",
+    5
+   ],
+   [
+    "Spectre: Twilight Order Oathsworn",
+    5
+   ],
+   [
+    "Spectre: Unearthed Urchin",
+    5
+   ],
+   [
+    "Spectre: Venomous Crab",
+    5
+   ],
+   [
+    "Spectre: Vile Imp",
+    5
+   ],
+   [
+    "Companion: Morvak, the Infernal",
+    4
+   ],
+   [
+    "Companion: The Crowbell",
+    4
+   ],
+   [
+    "Companion: The Ravenous Fang",
+    4
+   ],
+   [
+    "Feral Invocation",
+    4
+   ],
+   [
+    "Spectre: Chaotic Zealot",
+    4
+   ],
+   [
+    "Spectre: Cultist Warrior",
+    4
+   ],
+   [
+    "Spectre: Lightning Wraith",
+    4
+   ],
+   [
+    "Spectre: Pale-stitched Stalker",
+    4
+   ],
+   [
+    "Spectre: Priest of the Chalice",
+    4
+   ],
+   [
+    "Spectre: Sandflesh Mage",
+    4
+   ],
+   [
+    "Spectre: Strider of the Pit",
+    4
+   ],
+   [
+    "Bleeding Concoction",
+    3
+   ],
+   [
+    "Companion: Dezzic Burstbug",
+    3
+   ],
+   [
+    "Companion: Karash, The Dune Dweller",
+    3
+   ],
+   [
+    "Companion: The Black Crow",
+    3
+   ],
+   [
+    "Companion: Vesper Bat",
+    3
+   ],
+   [
+    "Companion: Ylth Grabber",
+    3
+   ],
+   [
+    "Explosive Concoction",
+    3
+   ],
+   [
+    "Spectre: Azak Spearthrower",
+    3
+   ],
+   [
+    "Spectre: Bloom Serpent",
+    3
+   ],
+   [
+    "Spectre: Bogfelled Commoner",
+    3
+   ],
+   [
+    "Spectre: Constricted Spitter",
+    3
+   ],
+   [
+    "Spectre: Doryani's Elite",
+    3
+   ],
+   [
+    "Spectre: Elephant Tortoise",
+    3
+   ],
+   [
+    "Spectre: Faridun Neophyte",
+    3
+   ],
+   [
+    "Spectre: Faridun Spearwoman",
+    3
+   ],
+   [
+    "Spectre: Fiery Zealot",
+    3
+   ],
+   [
+    "Spectre: It That Hates",
+    3
+   ],
+   [
+    "Spectre: Lightless Abomination",
+    3
+   ],
+   [
+    "Spectre: Rotted Rat",
+    3
+   ],
+   [
+    "Spectre: Serpent Shaman",
+    3
+   ],
+   [
+    "Spectre: Terracotta Soldier",
+    3
+   ],
+   [
+    "Spectre: Twilight Order Priest",
+    3
+   ],
+   [
+    "Spectre: Winged Fiend",
+    3
+   ],
+   [
+    "Companion: Experimental Boar",
+    2
+   ],
+   [
+    "Companion: Experimental Cobra",
+    2
+   ],
+   [
+    "Companion: Loyal Jaguar",
+    2
+   ],
+   [
+    "Companion: Rathbreaker",
+    2
+   ],
+   [
+    "Companion: Unchained Beast",
+    2
+   ],
+   [
+    "Companion: Uxmal, the Beastlord",
+    2
+   ],
+   [
+    "Fulminating Concoction",
+    2
+   ],
+   [
+    "Future-Past",
+    2
+   ],
+   [
+    "Shattering Concoction",
+    2
+   ],
+   [
+    "Spectre: Abyss Fish",
+    2
+   ],
+   [
+    "Spectre: Ancestral Channeler",
+    2
+   ],
+   [
+    "Spectre: Azak Fleshstabber",
+    2
+   ],
+   [
+    "Spectre: Azak Throatcutter",
+    2
+   ],
+   [
+    "Spectre: Blackblooded Elite",
+    2
+   ],
+   [
+    "Spectre: Blackblooded Tarhulk",
+    2
+   ],
+   [
+    "Spectre: Bladelash Transcendent",
+    2
+   ],
+   [
+    "Spectre: Blood-fevered Hookman",
+    2
+   ],
+   [
+    "Spectre: Bloodrite Guard",
+    2
+   ],
+   [
+    "Spectre: Bogfelled Slave",
+    2
+   ],
+   [
+    "Spectre: Bramble Ape",
+    2
+   ],
+   [
+    "Spectre: Brimstone Crab",
+    2
+   ],
+   [
+    "Spectre: Carrion Gull",
+    2
+   ],
+   [
+    "Spectre: Clawcrunch",
+    2
+   ],
+   [
+    "Spectre: Decrepit Mercenary",
+    2
+   ],
+   [
+    "Spectre: Diretusk Boar",
+    2
+   ],
+   [
+    "Spectre: Faridun Fledgling",
+    2
+   ],
+   [
+    "Spectre: Faridun Heavy Infantry",
+    2
+   ],
+   [
+    "Spectre: Fettered Snake",
+    2
+   ],
+   [
+    "Spectre: Forsaken Miner",
+    2
+   ],
+   [
+    "Spectre: Frost Wraith",
+    2
+   ],
+   [
+    "Spectre: Gold-Melted Shambler",
+    2
+   ],
+   [
+    "Spectre: Harano, the Meat Carver",
+    2
+   ],
+   [
+    "Spectre: Hyena Demon",
+    2
+   ],
+   [
+    "Spectre: Lost-men Zealot",
+    2
+   ],
+   [
+    "Spectre: Nameless Vermin",
+    2
+   ],
+   [
+    "Spectre: Porcupine Crab",
+    2
+   ],
+   [
+    "Spectre: Priest of the Sun",
+    2
+   ],
+   [
+    "Spectre: Ravenous Brute",
+    2
+   ],
+   [
+    "Spectre: Risen Maraketh",
+    2
+   ],
+   [
+    "Spectre: River Drake",
+    2
+   ],
+   [
+    "Spectre: Sabre Spider",
+    2
+   ],
+   [
+    "Spectre: Scorpion Monkey",
+    2
+   ],
+   [
+    "Spectre: Shaman Kin",
+    2
+   ],
+   [
+    "Spectre: Spinesnatcher",
+    2
+   ],
+   [
+    "Spectre: Vaal Embalmed Archer",
+    2
+   ],
+   [
+    "Spectre: Vaal Embalmed Bearer",
+    2
+   ],
+   [
+    "Spectre: Viper Legionnaire",
+    2
+   ],
+   [
+    "Companion: Captive Stoneback Rhoa",
+    1
+   ],
+   [
+    "Companion: Cecaelian Angler",
+    1
+   ],
+   [
+    "Companion: Cecaelian Crab",
+    1
+   ],
+   [
+    "Companion: Gorian, the Moving Earth",
+    1
+   ],
+   [
+    "Companion: Vornas, the Fell Flame",
+    1
+   ],
+   [
+    "Companion: Xyclucian, the Chimera",
+    1
+   ],
+   [
+    "Companion: Ylth Eater",
+    1
+   ],
+   [
+    "Soul Crystal: Knight of the Sun",
+    1
+   ],
+   [
+    "Soul Crystal: Pale Abductor",
+    1
+   ],
+   [
+    "Soul Crystal: Risen Maraketh",
+    1
+   ],
+   [
+    "Soul Crystal: Rotting Soulcatcher",
+    1
+   ],
+   [
+    "Spectre: Abyssal Shambler",
+    1
+   ],
+   [
+    "Spectre: Ancestral Archer",
+    1
+   ],
+   [
+    "Spectre: Blackbark Demolisher",
+    1
+   ],
+   [
+    "Spectre: Bloated Anchorman",
+    1
+   ],
+   [
+    "Spectre: Blood Priest",
+    1
+   ],
+   [
+    "Spectre: Blood-fevered Axeman",
+    1
+   ],
+   [
+    "Spectre: Bone Stalker",
+    1
+   ],
+   [
+    "Spectre: Bramble Hulk",
+    1
+   ],
+   [
+    "Spectre: Burning Dead",
+    1
+   ],
+   [
+    "Spectre: Caustic Crab",
+    1
+   ],
+   [
+    "Spectre: Cecaelian Crab",
+    1
+   ],
+   [
+    "Spectre: Chaw Mongrel",
+    1
+   ],
+   [
+    "Spectre: Coztic, the Forgehand",
+    1
+   ],
+   [
+    "Spectre: Crawler Sentinel",
+    1
+   ],
+   [
+    "Spectre: Crested Behemoth",
+    1
+   ],
+   [
+    "Spectre: Dezzic Soldier",
+    1
+   ],
+   [
+    "Spectre: Dread Servant",
+    1
+   ],
+   [
+    "Spectre: Drowned Explorer",
+    1
+   ],
+   [
+    "Spectre: Eternal Prisoner",
+    1
+   ],
+   [
+    "Spectre: Faridun Bladedancer",
+    1
+   ],
+   [
+    "Spectre: Faridun Crawler",
+    1
+   ],
+   [
+    "Spectre: Fettered Hook",
+    1
+   ],
+   [
+    "Spectre: Fettered Monstrosity",
+    1
+   ],
+   [
+    "Spectre: Flathead Warrior",
+    1
+   ],
+   [
+    "Spectre: Flathead Youngling",
+    1
+   ],
+   [
+    "Spectre: Forgotten Crawler",
+    1
+   ],
+   [
+    "Spectre: Fungal Zombie",
+    1
+   ],
+   [
+    "Spectre: Goliath",
+    1
+   ],
+   [
+    "Spectre: Guardian Turtle",
+    1
+   ],
+   [
+    "Spectre: Gull Shrike",
+    1
+   ],
+   [
+    "Spectre: Hungering Stalker",
+    1
+   ],
+   [
+    "Spectre: Hungry Wolf",
+    1
+   ],
+   [
+    "Spectre: Iron Spearman",
+    1
+   ],
+   [
+    "Spectre: Iron Thaumaturgist",
+    1
+   ],
+   [
+    "Spectre: It That Controls",
+    1
+   ],
+   [
+    "Spectre: Krell Fleshgouger",
+    1
+   ],
+   [
+    "Spectre: Lightless Moray",
+    1
+   ],
+   [
+    "Spectre: Lightless Serpent",
+    1
+   ],
+   [
+    "Spectre: Lightless Vengewing",
+    1
+   ],
+   [
+    "Spectre: Mantis Rat",
+    1
+   ],
+   [
+    "Spectre: Mar Acolyte",
+    1
+   ],
+   [
+    "Spectre: Maw Demon",
+    1
+   ],
+   [
+    "Spectre: Nameless Hulk",
+    1
+   ],
+   [
+    "Spectre: Order Ostiary",
+    1
+   ],
+   [
+    "Spectre: Orok Hunter",
+    1
+   ],
+   [
+    "Spectre: Orok Shaman",
+    1
+   ],
+   [
+    "Spectre: Pale Abductor",
+    1
+   ],
+   [
+    "Spectre: Pale Seraphim",
+    1
+   ],
+   [
+    "Spectre: Petulant Stonemaw",
+    1
+   ],
+   [
+    "Spectre: Prospector Kin",
+    1
+   ],
+   [
+    "Spectre: Quake Golem",
+    1
+   ],
+   [
+    "Spectre: Rabid Dog",
+    1
+   ],
+   [
+    "Spectre: Rasp Scavenger",
+    1
+   ],
+   [
+    "Spectre: Raven Shrike",
+    1
+   ],
+   [
+    "Spectre: Ravenous Macerator",
+    1
+   ],
+   [
+    "Spectre: Risen Tale-woman",
+    1
+   ],
+   [
+    "Spectre: Rotten Wolf",
+    1
+   ],
+   [
+    "Spectre: Rotting Demolitionist",
+    1
+   ],
+   [
+    "Spectre: Rotting Soulcatcher",
+    1
+   ],
+   [
+    "Spectre: Searot Skeleton",
+    1
+   ],
+   [
+    "Spectre: Shielded Transcendent",
+    1
+   ],
+   [
+    "Spectre: Skulltop Kin",
+    1
+   ],
+   [
+    "Spectre: Slitherspitter",
+    1
+   ],
+   [
+    "Spectre: Snakethroat Shambler",
+    1
+   ],
+   [
+    "Spectre: Spiked Ray",
+    1
+   ],
+   [
+    "Spectre: Spiked Scuttler",
+    1
+   ],
+   [
+    "Spectre: Starlit Nymph",
+    1
+   ],
+   [
+    "Spectre: Stoneclad Gorilla",
+    1
+   ],
+   [
+    "Spectre: Tarnished Beetle",
+    1
+   ],
+   [
+    "Spectre: Tendril Prowler",
+    1
+   ],
+   [
+    "Spectre: Torchbearer Kin",
+    1
+   ],
+   [
+    "Spectre: Treant Foulspawn",
+    1
+   ],
+   [
+    "Spectre: Treant Splitbeast",
+    1
+   ],
+   [
+    "Spectre: Tuskbearer Kin",
+    1
+   ],
+   [
+    "Spectre: Undertaker",
+    1
+   ],
+   [
+    "Spectre: Unearthed Soldier",
+    1
+   ],
+   [
+    "Spectre: Vaal Axeman",
+    1
+   ],
+   [
+    "Spectre: Vaal Embalmed Rogue",
+    1
+   ],
+   [
+    "Spectre: Vaal Excoriator",
+    1
+   ],
+   [
+    "Spectre: Vaal Skeletal Priest",
+    1
+   ],
+   [
+    "Spectre: Venomous Crab Matriarch",
+    1
+   ],
+   [
+    "Spectre: Vilespit Gull",
+    1
+   ],
+   [
+    "Spectre: Walking Goliath",
+    1
+   ],
+   [
+    "Spectre: Wardrum Kin",
+    1
+   ],
+   [
+    "Spectre: Warrior Transcendent",
+    1
+   ],
+   [
+    "Spectre: Winged Horror",
+    1
+   ],
+   [
+    "Spectre: Ylth Spewer",
+    1
+   ],
+   [
+    "Spectre: Zealous Pillarcrusher",
+    1
+   ]
+  ],
+  "spiritgems": [
+   [
+    "Virtuous Barrier",
+    45921
+   ],
+   [
+    "Wind Dancer",
+    33210
+   ],
+   [
+    "Mana Remnants",
+    31915
+   ],
+   [
+    "Charge Regulation",
+    30757
+   ],
+   [
+    "Ghost Dance",
+    30741
+   ],
+   [
+    "Blasphemy",
+    24536
+   ],
+   [
+    "Herald of Ice",
+    24515
+   ],
+   [
+    "Purity of Fire",
+    19521
+   ],
+   [
+    "Trinity",
+    17502
+   ],
+   [
+    "Combat Frenzy",
+    17199
+   ],
+   [
+    "Wolf Pack",
+    16530
+   ],
+   [
+    "Arctic Armour",
+    16063
+   ],
+   [
+    "Herald of Thunder",
+    15343
+   ],
+   [
+    "Convalescence",
+    15025
+   ],
+   [
+    "Cast on Critical",
+    13810
+   ],
+   [
+    "Spell Totem",
+    13640
+   ],
+   [
+    "Cast on Elemental Ailment",
+    12988
+   ],
+   [
+    "Cast on Dodge",
+    12845
+   ],
+   [
+    "Archmage",
+    12346
+   ],
+   [
+    "Skeletal Cleric",
+    12267
+   ],
+   [
+    "Eternal Rage",
+    12000
+   ],
+   [
+    "Skeletal Sniper",
+    11958
+   ],
+   [
+    "Skeletal Reaver",
+    11138
+   ],
+   [
+    "Mirage Archer",
+    10800
+   ],
+   [
+    "Discipline",
+    10458
+   ],
+   [
+    "Wild Protector",
+    10177
+   ],
+   [
+    "Berserk",
+    10023
+   ],
+   [
+    "Skeletal Storm Mage",
+    9865
+   ],
+   [
+    "Spirit Vessel",
+    9700
+   ],
+   [
+    "Skeletal Arsonist",
+    9600
+   ],
+   [
+    "Herald of Ash",
+    9091
+   ],
+   [
+    "Hollow Focus",
+    8931
+   ],
+   [
+    "Skeletal Frost Mage",
+    8907
+   ],
+   [
+    "Spellslinger",
+    8905
+   ],
+   [
+    "Skeletal Warrior",
+    8726
+   ],
+   [
+    "Elemental Conflux",
+    8503
+   ],
+   [
+    "Siphon Elements",
+    8365
+   ],
+   [
+    "Purity of Ice",
+    8333
+   ],
+   [
+    "Hollow Form",
+    7254
+   ],
+   [
+    "Mirage Deadeye",
+    7010
+   ],
+   [
+    "Azmerian Wolf",
+    6555
+   ],
+   [
+    "Remnants of Kalguur",
+    6029
+   ],
+   [
+    "Purity of Lightning",
+    5798
+   ],
+   [
+    "Withering Presence",
+    5743
+   ],
+   [
+    "Time of Need",
+    5473
+   ],
+   [
+    "Companion: Zekoa, the Headcrusher",
+    5412
+   ],
+   [
+    "Cast on Minion Death",
+    5386
+   ],
+   [
+    "Spectre: Powered Zealot",
+    4979
+   ],
+   [
+    "Malice",
+    4073
+   ],
+   [
+    "Cast on Block",
+    3708
+   ],
+   [
+    "Skeletal Brute",
+    3602
+   ],
+   [
+    "War Banner",
+    3565
+   ],
+   [
+    "Mortar Cannon",
+    3461
+   ],
+   [
+    "Blink",
+    3386
+   ],
+   [
+    "Herald of Blood",
+    3319
+   ],
+   [
+    "Companion: Diretusk Boar",
+    3250
+   ],
+   [
+    "Companion: Plague Harvester",
+    2944
+   ],
+   [
+    "Scavenged Plating",
+    2900
+   ],
+   [
+    "Explosive Transmutation",
+    2709
+   ],
+   [
+    "Life Remnants",
+    2703
+   ],
+   [
+    "Ferocious Roar",
+    2696
+   ],
+   [
+    "Magma Barrier",
+    2426
+   ],
+   [
+    "Cackling Companions",
+    2331
+   ],
+   [
+    "Herald of Plague",
+    2291
+   ],
+   [
+    "Overwhelming Presence",
+    2215
+   ],
+   [
+    "Companion: Quadrilla",
+    1971
+   ],
+   [
+    "Into the Breach",
+    1880
+   ],
+   [
+    "Companion: Mighty Silverfist",
+    1811
+   ],
+   [
+    "Summon Infernal Hound",
+    1603
+   ],
+   [
+    "Hand of Chayula",
+    1601
+   ],
+   [
+    "Impurity",
+    1524
+   ],
+   [
+    "Fulmination",
+    1399
+   ],
+   [
+    "Companion: Quill Crab",
+    1333
+   ],
+   [
+    "Companion: Antlion Charger",
+    1326
+   ],
+   [
+    "Sorcery Ward",
+    1236
+   ],
+   [
+    "Companion: Swarming Wasp",
+    1194
+   ],
+   [
+    "Companion: Werewolf Prowler",
+    1160
+   ],
+   [
+    "Mirror of Refraction",
+    1143
+   ],
+   [
+    "Midnight Zenith",
+    1079
+   ],
+   [
+    "Spectre: Bloodthief Wasp",
+    1055
+   ],
+   [
+    "Verisium Manifestations",
+    992
+   ],
+   [
+    "Plague Bearer",
+    924
+   ],
+   [
+    "Attrition",
+    910
+   ],
+   [
+    "Barkskin",
+    894
+   ],
+   [
+    "Ravenous Swarm",
+    883
+   ],
+   [
+    "Supporting Fire",
+    785
+   ],
+   [
+    "Harbinger of Madness",
+    772
+   ],
+   [
+    "Companion: Crag Leaper",
+    761
+   ],
+   [
+    "Alchemist's Boon",
+    733
+   ],
+   [
+    "Companion: Rabid Dog",
+    727
+   ],
+   [
+    "Companion: Coconut Crab",
+    720
+   ],
+   [
+    "Lingering Illusion",
+    679
+   ],
+   [
+    "Companion: Pack Werewolf",
+    663
+   ],
+   [
+    "Sanguine Revelry",
+    660
+   ],
+   [
+    "Blood Boil",
+    640
+   ],
+   [
+    "Savage Fury",
+    624
+   ],
+   [
+    "Defiance Banner",
+    622
+   ],
+   [
+    "Dread Banner",
+    497
+   ],
+   [
+    "Rhoa Mount",
+    465
+   ],
+   [
+    "Sacrifice",
+    456
+   ],
+   [
+    "Companion: Plague Swarm",
+    444
+   ],
+   [
+    "Companion: Caustic Crab",
+    433
+   ],
+   [
+    "Fire Spell on Hit",
+    426
+   ],
+   [
+    "Companion: Bloodthief Wasp",
+    416
+   ],
+   [
+    "Companion: Starlit Harvester",
+    397
+   ],
+   [
+    "Companion: Venomous Crab Matriarch",
+    385
+   ],
+   [
+    "Companion: Gargantuan Wasp",
+    380
+   ],
+   [
+    "Heart of Ice",
+    377
+   ],
+   [
+    "Shard Scavenger",
+    331
+   ],
+   [
+    "Grim Feast",
+    327
+   ],
+   [
+    "Spectre: Quill Crab",
+    317
+   ],
+   [
+    "Companion: Porcupine Crab",
+    307
+   ],
+   [
+    "Elemental Invocation",
+    302
+   ],
+   [
+    "Companion: Voracious Werewolf",
+    298
+   ],
+   [
+    "Azmerian Swarms",
+    290
+   ],
+   [
+    "Spectre: Vaal Guard",
+    282
+   ],
+   [
+    "Companion: River Drake",
+    270
+   ],
+   [
+    "Ancestral Warrior Totem",
+    262
+   ],
+   [
+    "Companion: Black Strider",
+    261
+   ],
+   [
+    "Companion: Bramble Rhoa",
+    255
+   ],
+   [
+    "Companion: Rasp Scavenger",
+    251
+   ],
+   [
+    "Companion: Alpha Primate",
+    239
+   ],
+   [
+    "Companion: Slitherspitter",
+    237
+   ],
+   [
+    "Companion: Nameless Hulk",
+    233
+   ],
+   [
+    "Companion: Bramble Hulk",
+    230
+   ],
+   [
+    "Iron Ward",
+    228
+   ],
+   [
+    "Companion: Brimstone Crab",
+    222
+   ],
+   [
+    "Spectre: Blood Elemental",
+    222
+   ],
+   [
+    "Align Fate",
+    215
+   ],
+   [
+    "Companion: Vile Vulture",
+    214
+   ],
+   [
+    "Temporal Rift",
+    207
+   ],
+   [
+    "Thundergod's Wrath",
+    204
+   ],
+   [
+    "Companion: Elephant Tortoise",
+    193
+   ],
+   [
+    "Companion: Plague Nymph",
+    178
+   ],
+   [
+    "Companion: Quadrilla Sergeant",
+    172
+   ],
+   [
+    "Spectre: Gargantuan Wasp",
+    169
+   ],
+   [
+    "Companion: Winged Fiend",
+    163
+   ],
+   [
+    "Companion: Winged Horror",
+    144
+   ],
+   [
+    "Companion: Sun Clan Scavenger",
+    143
+   ],
+   [
+    "Spectre: Plague Swarm",
+    140
+   ],
+   [
+    "Companion: Nameless Lurker",
+    137
+   ],
+   [
+    "Companion: Blood-fevered Tuskbeast",
+    132
+   ],
+   [
+    "Reaper's Invocation",
+    126
+   ],
+   [
+    "Companion: Hyena Demon",
+    125
+   ],
+   [
+    "Companion: Venomous Crab",
+    125
+   ],
+   [
+    "Spiraling Conspiracy",
+    125
+   ],
+   [
+    "Raging Spirits",
+    124
+   ],
+   [
+    "Companion: Chaw Mongrel",
+    116
+   ],
+   [
+    "Trail of Caltrops",
+    116
+   ],
+   [
+    "Companion: Tombshrieker",
+    115
+   ],
+   [
+    "Companion: Scorpion Monkey",
+    111
+   ],
+   [
+    "Wildwood's Gifts",
+    111
+   ],
+   [
+    "Companion: Brine Maiden",
+    109
+   ],
+   [
+    "Companion: Nameless Dweller",
+    105
+   ],
+   [
+    "Companion: Fungal Wolf",
+    104
+   ],
+   [
+    "Companion: Rhex",
+    104
+   ],
+   [
+    "Void Illusion",
+    104
+   ],
+   [
+    "Companion: Prowling Chimeral",
+    102
+   ],
+   [
+    "Companion: Scarecrow Beast",
+    94
+   ],
+   [
+    "Companion: Tendril Prowler",
+    94
+   ],
+   [
+    "Companion: Nymph Wasp",
+    92
+   ],
+   [
+    "Companion: Bramble Ape",
+    91
+   ],
+   [
+    "Companion: Vilespit Gull",
+    91
+   ],
+   [
+    "Companion: Nameless Burrower",
+    84
+   ],
+   [
+    "Companion: Porcupine Goliath",
+    83
+   ],
+   [
+    "Manifest Weapon",
+    79
+   ],
+   [
+    "Companion: Tarnished Beetle",
+    75
+   ],
+   [
+    "Companion: Krell Fleshgouger",
+    74
+   ],
+   [
+    "Cast on Charm Use",
+    73
+   ],
+   [
+    "Companion: Scute Lizard",
+    73
+   ],
+   [
+    "Companion: Spiked Scuttler",
+    73
+   ],
+   [
+    "Companion: Hungry Wolf",
+    72
+   ],
+   [
+    "Companion: Stoneclad Gorilla",
+    72
+   ],
+   [
+    "Companion: Adorned Scarab",
+    70
+   ],
+   [
+    "Companion: Drudge Osseodon",
+    65
+   ],
+   [
+    "Companion: Feral Primate",
+    65
+   ],
+   [
+    "Spectre: Plague Harvester",
+    64
+   ],
+   [
+    "Companion: Cultivated Grove",
+    63
+   ],
+   [
+    "Animus Splinters",
+    60
+   ],
+   [
+    "Companion: Treant Fungalreaver",
+    60
+   ],
+   [
+    "Companion: Clawcrunch",
+    56
+   ],
+   [
+    "Companion: Stoneback Rhoa",
+    54
+   ],
+   [
+    "Companion: Tarnished Scarab",
+    52
+   ],
+   [
+    "Gelid Palm",
+    52
+   ],
+   [
+    "Black Powder Blitz",
+    51
+   ],
+   [
+    "Companion: Dezzic Soldier",
+    51
+   ],
+   [
+    "Companion: Fungal Artillery",
+    51
+   ],
+   [
+    "Companion: Chyme Skitterer",
+    50
+   ],
+   [
+    "Companion: Goliath Shrike",
+    50
+   ],
+   [
+    "Companion: Mantis Rat",
+    48
+   ],
+   [
+    "Companion: Rotting Crow",
+    48
+   ],
+   [
+    "Companion: Vault Lurker",
+    48
+   ],
+   [
+    "Barrier Invocation",
+    47
+   ],
+   [
+    "Spectre: Eaten Rat",
+    47
+   ],
+   [
+    "Companion: Bramble Burrower",
+    45
+   ],
+   [
+    "Companion: Skittering Jellycrab",
+    45
+   ],
+   [
+    "Companion: Armoured Rhex",
+    43
+   ],
+   [
+    "Companion: Spiked Ray",
+    42
+   ],
+   [
+    "Spectre: Surgical Experimentalist",
+    42
+   ],
+   [
+    "Companion: Cerberic Bat",
+    41
+   ],
+   [
+    "Mist Raven",
+    41
+   ],
+   [
+    "Companion: Adorned Beetle",
+    40
+   ],
+   [
+    "Companion: Nameless Imp",
+    40
+   ],
+   [
+    "Companion: Ylth Spewer",
+    39
+   ],
+   [
+    "Companion: Flesh Larva",
+    38
+   ],
+   [
+    "Companion: Bane Sapling",
+    35
+   ],
+   [
+    "Companion: Nameless Horror",
+    35
+   ],
+   [
+    "Companion: The Abominable Yeti",
+    35
+   ],
+   [
+    "Herald of the Royal Queen",
+    34
+   ],
+   [
+    "Spectre: Bannerbearing Zealot",
+    34
+   ],
+   [
+    "Spectre: Swarming Wasp",
+    34
+   ],
+   [
+    "Companion: Amphibious Prowler",
+    33
+   ],
+   [
+    "Companion: Rotten Wolf",
+    32
+   ],
+   [
+    "Spectre: Chaos Zealot",
+    31
+   ],
+   [
+    "Spectre: Ribrattle",
+    30
+   ],
+   [
+    "Companion: Guardian Lizard",
+    29
+   ],
+   [
+    "Companion: Crested Behemoth",
+    27
+   ],
+   [
+    "Companion: Sabre Spider",
+    27
+   ],
+   [
+    "Companion: The Frostborn Fiend",
+    26
+   ],
+   [
+    "Spectre: Cultist Archer",
+    26
+   ],
+   [
+    "Briarpatch",
+    23
+   ],
+   [
+    "Companion: Guardian Turtle",
+    23
+   ],
+   [
+    "Companion: Snakethroat Shambler",
+    23
+   ],
+   [
+    "Companion: Petulant Stonemaw",
+    21
+   ],
+   [
+    "Companion: Regurgitating Vulture",
+    18
+   ],
+   [
+    "Companion: Dune Lurker",
+    16
+   ],
+   [
+    "Crackling Palm",
+    16
+   ],
+   [
+    "Leylines",
+    16
+   ],
+   [
+    "Spectre: Coconut Crab",
+    14
+   ],
+   [
+    "Companion: Fettered Spider",
+    13
+   ],
+   [
+    "Spectre: Chyme Skitterer",
+    13
+   ],
+   [
+    "Spectre: Flesh Larva",
+    13
+   ],
+   [
+    "Spectre: Gelid Zealot",
+    13
+   ],
+   [
+    "Companion: Entrailhome Shambler",
+    11
+   ],
+   [
+    "Spectre: Hound of the Pit",
+    11
+   ],
+   [
+    "Companion: Bahlak, the Sky Seer",
+    10
+   ],
+   [
+    "Spectre: Rotting Crow",
+    10
+   ],
+   [
+    "Companion: Caedron, the Hyena Lord",
+    9
+   ],
+   [
+    "Companion: Chetza, the Feathered Plague",
+    9
+   ],
+   [
+    "Companion: Manshrike",
+    9
+   ],
+   [
+    "Spectre: Feral Primate",
+    9
+   ],
+   [
+    "Spectre: Quadrilla",
+    9
+   ],
+   [
+    "Spectre: Skitter Golem",
+    9
+   ],
+   [
+    "Companion: Great White One",
+    8
+   ],
+   [
+    "Spectre: Blood Zealot",
+    8
+   ],
+   [
+    "Spectre: Skullslinger",
+    8
+   ],
+   [
+    "Spectre: Crag Leaper",
+    7
+   ],
+   [
+    "Spectre: Experimental Boar",
+    7
+   ],
+   [
+    "Spectre: Nettle Ant",
+    7
+   ],
+   [
+    "Spectre: Twilight Order Officer",
+    7
+   ],
+   [
+    "Spectre: Vile Vulture",
+    7
+   ],
+   [
+    "Companion: Akthi, the Final Sting",
+    6
+   ],
+   [
+    "Companion: Dezzic Nettler",
+    6
+   ],
+   [
+    "Companion: Luminous Spinefish",
+    6
+   ],
+   [
+    "Companion: Scourge of the Skies",
+    6
+   ],
+   [
+    "Companion: Thraeven, Wing of Winter",
+    6
+   ],
+   [
+    "Companion: Xilozoma, the Maw-Beast",
+    6
+   ],
+   [
+    "Spectre: Brine Maiden",
+    6
+   ],
+   [
+    "Spectre: Desiccated Lich",
+    6
+   ],
+   [
+    "Spectre: Faridun Impaler",
+    6
+   ],
+   [
+    "Spectre: Risen Rattler",
+    6
+   ],
+   [
+    "Spectre: Undead Vaal Guard",
+    6
+   ],
+   [
+    "Companion: Carrion Gull",
+    5
+   ],
+   [
+    "Companion: Giant Maw",
+    5
+   ],
+   [
+    "Companion: Gressor-Kul, the Apex",
+    5
+   ],
+   [
+    "Companion: Starlit Nymph",
+    5
+   ],
+   [
+    "Companion: The Sandstrider",
+    5
+   ],
+   [
+    "Spectre: Death Knight",
+    5
+   ],
+   [
+    "Spectre: Feral Kin",
+    5
+   ],
+   [
+    "Spectre: Starlit Harvester",
+    5
+   ],
+   [
+    "Spectre: Twilight Order Oathsworn",
+    5
+   ],
+   [
+    "Spectre: Unearthed Urchin",
+    5
+   ],
+   [
+    "Spectre: Venomous Crab",
+    5
+   ],
+   [
+    "Spectre: Vile Imp",
+    5
+   ],
+   [
+    "Companion: Morvak, the Infernal",
+    4
+   ],
+   [
+    "Companion: The Crowbell",
+    4
+   ],
+   [
+    "Companion: The Ravenous Fang",
+    4
+   ],
+   [
+    "Feral Invocation",
+    4
+   ],
+   [
+    "Spectre: Chaotic Zealot",
+    4
+   ],
+   [
+    "Spectre: Cultist Warrior",
+    4
+   ],
+   [
+    "Spectre: Lightning Wraith",
+    4
+   ],
+   [
+    "Spectre: Pale-stitched Stalker",
+    4
+   ],
+   [
+    "Spectre: Priest of the Chalice",
+    4
+   ],
+   [
+    "Spectre: Sandflesh Mage",
+    4
+   ],
+   [
+    "Spectre: Strider of the Pit",
+    4
+   ],
+   [
+    "Companion: Dezzic Burstbug",
+    3
+   ],
+   [
+    "Companion: Karash, The Dune Dweller",
+    3
+   ],
+   [
+    "Companion: The Black Crow",
+    3
+   ],
+   [
+    "Companion: Vesper Bat",
+    3
+   ],
+   [
+    "Companion: Ylth Grabber",
+    3
+   ],
+   [
+    "Spectre: Azak Spearthrower",
+    3
+   ],
+   [
+    "Spectre: Bloom Serpent",
+    3
+   ],
+   [
+    "Spectre: Bogfelled Commoner",
+    3
+   ],
+   [
+    "Spectre: Constricted Spitter",
+    3
+   ],
+   [
+    "Spectre: Doryani's Elite",
+    3
+   ],
+   [
+    "Spectre: Elephant Tortoise",
+    3
+   ],
+   [
+    "Spectre: Faridun Neophyte",
+    3
+   ],
+   [
+    "Spectre: Faridun Spearwoman",
+    3
+   ],
+   [
+    "Spectre: Fiery Zealot",
+    3
+   ],
+   [
+    "Spectre: It That Hates",
+    3
+   ],
+   [
+    "Spectre: Lightless Abomination",
+    3
+   ],
+   [
+    "Spectre: Rotted Rat",
+    3
+   ],
+   [
+    "Spectre: Serpent Shaman",
+    3
+   ],
+   [
+    "Spectre: Terracotta Soldier",
+    3
+   ],
+   [
+    "Spectre: Twilight Order Priest",
+    3
+   ],
+   [
+    "Spectre: Winged Fiend",
+    3
+   ],
+   [
+    "Companion: Experimental Boar",
+    2
+   ],
+   [
+    "Companion: Experimental Cobra",
+    2
+   ],
+   [
+    "Companion: Loyal Jaguar",
+    2
+   ],
+   [
+    "Companion: Rathbreaker",
+    2
+   ],
+   [
+    "Companion: Unchained Beast",
+    2
+   ],
+   [
+    "Companion: Uxmal, the Beastlord",
+    2
+   ],
+   [
+    "Future-Past",
+    2
+   ],
+   [
+    "Spectre: Abyss Fish",
+    2
+   ],
+   [
+    "Spectre: Ancestral Channeler",
+    2
+   ],
+   [
+    "Spectre: Azak Fleshstabber",
+    2
+   ],
+   [
+    "Spectre: Azak Throatcutter",
+    2
+   ],
+   [
+    "Spectre: Blackblooded Elite",
+    2
+   ],
+   [
+    "Spectre: Blackblooded Tarhulk",
+    2
+   ],
+   [
+    "Spectre: Bladelash Transcendent",
+    2
+   ],
+   [
+    "Spectre: Blood-fevered Hookman",
+    2
+   ],
+   [
+    "Spectre: Bloodrite Guard",
+    2
+   ],
+   [
+    "Spectre: Bogfelled Slave",
+    2
+   ],
+   [
+    "Spectre: Bramble Ape",
+    2
+   ],
+   [
+    "Spectre: Brimstone Crab",
+    2
+   ],
+   [
+    "Spectre: Carrion Gull",
+    2
+   ],
+   [
+    "Spectre: Clawcrunch",
+    2
+   ],
+   [
+    "Spectre: Decrepit Mercenary",
+    2
+   ],
+   [
+    "Spectre: Diretusk Boar",
+    2
+   ],
+   [
+    "Spectre: Faridun Fledgling",
+    2
+   ],
+   [
+    "Spectre: Faridun Heavy Infantry",
+    2
+   ],
+   [
+    "Spectre: Fettered Snake",
+    2
+   ],
+   [
+    "Spectre: Forsaken Miner",
+    2
+   ],
+   [
+    "Spectre: Frost Wraith",
+    2
+   ],
+   [
+    "Spectre: Gold-Melted Shambler",
+    2
+   ],
+   [
+    "Spectre: Harano, the Meat Carver",
+    2
+   ],
+   [
+    "Spectre: Hyena Demon",
+    2
+   ],
+   [
+    "Spectre: Lost-men Zealot",
+    2
+   ],
+   [
+    "Spectre: Nameless Vermin",
+    2
+   ],
+   [
+    "Spectre: Porcupine Crab",
+    2
+   ],
+   [
+    "Spectre: Priest of the Sun",
+    2
+   ],
+   [
+    "Spectre: Ravenous Brute",
+    2
+   ],
+   [
+    "Spectre: Risen Maraketh",
+    2
+   ],
+   [
+    "Spectre: River Drake",
+    2
+   ],
+   [
+    "Spectre: Sabre Spider",
+    2
+   ],
+   [
+    "Spectre: Scorpion Monkey",
+    2
+   ],
+   [
+    "Spectre: Shaman Kin",
+    2
+   ],
+   [
+    "Spectre: Spinesnatcher",
+    2
+   ],
+   [
+    "Spectre: Vaal Embalmed Archer",
+    2
+   ],
+   [
+    "Spectre: Vaal Embalmed Bearer",
+    2
+   ],
+   [
+    "Spectre: Viper Legionnaire",
+    2
+   ],
+   [
+    "Companion: Captive Stoneback Rhoa",
+    1
+   ],
+   [
+    "Companion: Cecaelian Angler",
+    1
+   ],
+   [
+    "Companion: Cecaelian Crab",
+    1
+   ],
+   [
+    "Companion: Gorian, the Moving Earth",
+    1
+   ],
+   [
+    "Companion: Vornas, the Fell Flame",
+    1
+   ],
+   [
+    "Companion: Xyclucian, the Chimera",
+    1
+   ],
+   [
+    "Companion: Ylth Eater",
+    1
+   ],
+   [
+    "Soul Crystal: Knight of the Sun",
+    1
+   ],
+   [
+    "Soul Crystal: Pale Abductor",
+    1
+   ],
+   [
+    "Soul Crystal: Risen Maraketh",
+    1
+   ],
+   [
+    "Soul Crystal: Rotting Soulcatcher",
+    1
+   ],
+   [
+    "Spectre: Abyssal Shambler",
+    1
+   ],
+   [
+    "Spectre: Ancestral Archer",
+    1
+   ],
+   [
+    "Spectre: Blackbark Demolisher",
+    1
+   ],
+   [
+    "Spectre: Bloated Anchorman",
+    1
+   ],
+   [
+    "Spectre: Blood Priest",
+    1
+   ],
+   [
+    "Spectre: Blood-fevered Axeman",
+    1
+   ],
+   [
+    "Spectre: Bone Stalker",
+    1
+   ],
+   [
+    "Spectre: Bramble Hulk",
+    1
+   ],
+   [
+    "Spectre: Burning Dead",
+    1
+   ],
+   [
+    "Spectre: Caustic Crab",
+    1
+   ],
+   [
+    "Spectre: Cecaelian Crab",
+    1
+   ],
+   [
+    "Spectre: Chaw Mongrel",
+    1
+   ],
+   [
+    "Spectre: Coztic, the Forgehand",
+    1
+   ],
+   [
+    "Spectre: Crawler Sentinel",
+    1
+   ],
+   [
+    "Spectre: Crested Behemoth",
+    1
+   ],
+   [
+    "Spectre: Dezzic Soldier",
+    1
+   ],
+   [
+    "Spectre: Dread Servant",
+    1
+   ],
+   [
+    "Spectre: Drowned Explorer",
+    1
+   ],
+   [
+    "Spectre: Eternal Prisoner",
+    1
+   ],
+   [
+    "Spectre: Faridun Bladedancer",
+    1
+   ],
+   [
+    "Spectre: Faridun Crawler",
+    1
+   ],
+   [
+    "Spectre: Fettered Hook",
+    1
+   ],
+   [
+    "Spectre: Fettered Monstrosity",
+    1
+   ],
+   [
+    "Spectre: Flathead Warrior",
+    1
+   ],
+   [
+    "Spectre: Flathead Youngling",
+    1
+   ],
+   [
+    "Spectre: Forgotten Crawler",
+    1
+   ],
+   [
+    "Spectre: Fungal Zombie",
+    1
+   ],
+   [
+    "Spectre: Goliath",
+    1
+   ],
+   [
+    "Spectre: Guardian Turtle",
+    1
+   ],
+   [
+    "Spectre: Gull Shrike",
+    1
+   ],
+   [
+    "Spectre: Hungering Stalker",
+    1
+   ],
+   [
+    "Spectre: Hungry Wolf",
+    1
+   ],
+   [
+    "Spectre: Iron Spearman",
+    1
+   ],
+   [
+    "Spectre: Iron Thaumaturgist",
+    1
+   ],
+   [
+    "Spectre: It That Controls",
+    1
+   ],
+   [
+    "Spectre: Krell Fleshgouger",
+    1
+   ],
+   [
+    "Spectre: Lightless Moray",
+    1
+   ],
+   [
+    "Spectre: Lightless Serpent",
+    1
+   ],
+   [
+    "Spectre: Lightless Vengewing",
+    1
+   ],
+   [
+    "Spectre: Mantis Rat",
+    1
+   ],
+   [
+    "Spectre: Mar Acolyte",
+    1
+   ],
+   [
+    "Spectre: Maw Demon",
+    1
+   ],
+   [
+    "Spectre: Nameless Hulk",
+    1
+   ],
+   [
+    "Spectre: Order Ostiary",
+    1
+   ],
+   [
+    "Spectre: Orok Hunter",
+    1
+   ],
+   [
+    "Spectre: Orok Shaman",
+    1
+   ],
+   [
+    "Spectre: Pale Abductor",
+    1
+   ],
+   [
+    "Spectre: Pale Seraphim",
+    1
+   ],
+   [
+    "Spectre: Petulant Stonemaw",
+    1
+   ],
+   [
+    "Spectre: Prospector Kin",
+    1
+   ],
+   [
+    "Spectre: Quake Golem",
+    1
+   ],
+   [
+    "Spectre: Rabid Dog",
+    1
+   ],
+   [
+    "Spectre: Rasp Scavenger",
+    1
+   ],
+   [
+    "Spectre: Raven Shrike",
+    1
+   ],
+   [
+    "Spectre: Ravenous Macerator",
+    1
+   ],
+   [
+    "Spectre: Risen Tale-woman",
+    1
+   ],
+   [
+    "Spectre: Rotten Wolf",
+    1
+   ],
+   [
+    "Spectre: Rotting Demolitionist",
+    1
+   ],
+   [
+    "Spectre: Rotting Soulcatcher",
+    1
+   ],
+   [
+    "Spectre: Searot Skeleton",
+    1
+   ],
+   [
+    "Spectre: Shielded Transcendent",
+    1
+   ],
+   [
+    "Spectre: Skulltop Kin",
+    1
+   ],
+   [
+    "Spectre: Slitherspitter",
+    1
+   ],
+   [
+    "Spectre: Snakethroat Shambler",
+    1
+   ],
+   [
+    "Spectre: Spiked Ray",
+    1
+   ],
+   [
+    "Spectre: Spiked Scuttler",
+    1
+   ],
+   [
+    "Spectre: Starlit Nymph",
+    1
+   ],
+   [
+    "Spectre: Stoneclad Gorilla",
+    1
+   ],
+   [
+    "Spectre: Tarnished Beetle",
+    1
+   ],
+   [
+    "Spectre: Tendril Prowler",
+    1
+   ],
+   [
+    "Spectre: Torchbearer Kin",
+    1
+   ],
+   [
+    "Spectre: Treant Foulspawn",
+    1
+   ],
+   [
+    "Spectre: Treant Splitbeast",
+    1
+   ],
+   [
+    "Spectre: Tuskbearer Kin",
+    1
+   ],
+   [
+    "Spectre: Undertaker",
+    1
+   ],
+   [
+    "Spectre: Unearthed Soldier",
+    1
+   ],
+   [
+    "Spectre: Vaal Axeman",
+    1
+   ],
+   [
+    "Spectre: Vaal Embalmed Rogue",
+    1
+   ],
+   [
+    "Spectre: Vaal Excoriator",
+    1
+   ],
+   [
+    "Spectre: Vaal Skeletal Priest",
+    1
+   ],
+   [
+    "Spectre: Venomous Crab Matriarch",
+    1
+   ],
+   [
+    "Spectre: Vilespit Gull",
+    1
+   ],
+   [
+    "Spectre: Walking Goliath",
+    1
+   ],
+   [
+    "Spectre: Wardrum Kin",
+    1
+   ],
+   [
+    "Spectre: Warrior Transcendent",
+    1
+   ],
+   [
+    "Spectre: Winged Horror",
+    1
+   ],
+   [
+    "Spectre: Ylth Spewer",
+    1
+   ],
+   [
+    "Spectre: Zealous Pillarcrusher",
+    1
+   ]
+  ]
+ }
+}

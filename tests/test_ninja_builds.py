@@ -104,7 +104,7 @@ def test_fetch_slot_extracts_known_characters(fetcher: NinjaBuildsFetcher):
     assert first.level == 100
     assert first.char_class == "Martial Artist"
     assert first.keypassives == ("Dance with Death",)
-    assert first.main_skill == "Hollow Focus"
+    assert first.archetype_hint == "Hollow Focus"
 
 
 def test_keypassives_use_the_search_endpoints_own_dictionary_not_ggg_node_ids(fetcher: NinjaBuildsFetcher):
@@ -170,16 +170,16 @@ def test_repeat_fetch_of_same_filter_does_not_re_request(fetcher: NinjaBuildsFet
 def test_malformed_row_is_skipped_not_raised(fetcher: NinjaBuildsFetcher, monkeypatch):
     snap = fetcher.resolve_snapshot("Runes of Aldur")
 
-    real_main_skill = NinjaBuildsFetcher._main_skill
+    real_archetype_hint = NinjaBuildsFetcher._archetype_hint
     calls = {"n": 0}
 
-    def flaky_main_skill(skills_col, i, gem_dict):
+    def flaky_archetype_hint(skills_col, i, gem_dict):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ValueError("simulated bad row")
-        return real_main_skill(skills_col, i, gem_dict)
+        return real_archetype_hint(skills_col, i, gem_dict)
 
-    monkeypatch.setattr(NinjaBuildsFetcher, "_main_skill", staticmethod(flaky_main_skill))
+    monkeypatch.setattr(NinjaBuildsFetcher, "_archetype_hint", staticmethod(flaky_archetype_hint))
     chars = fetcher.fetch_slot(snap, "ring")
     assert len(chars) == 99  # one row skipped, no crash
 
@@ -319,7 +319,7 @@ def test_poe1_fetch_slot_extracts_known_characters(poe1_fetcher: NinjaBuildsFetc
     assert first.account == "Poteitik-3151"
     assert first.level == 100
     assert first.char_class == "Champion"
-    assert first.main_skill == "Desecrate"
+    assert first.archetype_hint == "Desecrate"
 
 
 def test_poe1_slot_filters_have_no_focus_or_charm():
@@ -357,3 +357,91 @@ def test_known_classes_cover_the_captured_class_dictionaries():
     for game in ("poe1", "poe2"):
         names = ndic.decode((SAMPLES / f"ninja_{game}_dict_class_2026-09-21.bin").read_bytes())
         assert set(names) == set(ninja_builds.KNOWN_CLASSES_BY_GAME[game])
+
+
+# --- Skill-centric collection (2026-09-21): facets + per-skill lists, real samples ---
+
+from tests.ninja_samples import SampleHttp  # noqa: E402
+
+
+def _sample_fetcher(game: str, tmp_path) -> tuple[NinjaBuildsFetcher, SampleHttp, SnapshotVersion]:
+    http = SampleHttp(game)
+    fetcher = NinjaBuildsFetcher(
+        http_client=http, game=game, failed_responses_dir=tmp_path / "failed",
+        last_good_sample_path=tmp_path / f"last_good_builds_{game}.bin",
+    )
+    return fetcher, http, SnapshotVersion("league", "League", "v1", "league")
+
+
+def test_fetch_population_facets_poe1_real_sample(tmp_path):
+    fetcher, _http, snap = _sample_fetcher("poe1", tmp_path)
+    facets = fetcher.fetch_population_facets(snap)
+
+    assert facets.total == 124413
+    assert facets.spirit_skills is None  # PoE1 has no spirit skills
+    assert len(facets.skills) == 584
+    assert facets.skills["Winter Orb"] == 9328
+    assert facets.skills["Vaal Righteous Fire"] == 1363  # Vaal variants are their own entries
+    assert len(facets.classes) == 28
+    assert facets.classes["Marauder"] == 1  # an unascended base class: a one-character class
+
+
+def test_fetch_population_facets_poe2_real_sample_has_separate_spirit_list(tmp_path):
+    fetcher, _http, snap = _sample_fetcher("poe2", tmp_path)
+    facets = fetcher.fetch_population_facets(snap)
+
+    assert facets.total == 124098
+    assert len(facets.skills) == 438 and len(facets.spirit_skills) == 450
+    assert facets.skills["Whirling Slash"] == 18731
+    assert facets.spirit_skills["Ghost Dance"] == 30741
+    # Herald of Ice is in BOTH lists -- they're separate populations, never merged
+    assert "Herald of Ice" in facets.skills and "Herald of Ice" in facets.spirit_skills
+    assert facets.classes["Druid"] == 4  # the 31st class that broke ndic on 2026-09-21
+    assert len(facets.classes) == 31
+
+
+def test_fetch_population_facets_saves_last_good_response(tmp_path):
+    fetcher, _http, snap = _sample_fetcher("poe1", tmp_path)
+    fetcher.fetch_population_facets(snap)
+    assert (tmp_path / "last_good_facets_poe1.bin").exists()
+
+
+def test_fetch_skill_list_main_skill_poe1_real_sample(tmp_path):
+    fetcher, http, snap = _sample_fetcher("poe1", tmp_path)
+    total, rows = fetcher.fetch_skill_list(snap, "main", "Winter Orb")
+
+    assert total == 9328  # the server's own count for that skill, not the 100 rows
+    assert len(rows) == 100
+    assert all(r.level >= 90 for r in rows)  # top-100 by level
+    assert [r.level for r in rows] == sorted((r.level for r in rows), reverse=True)
+    assert rows[0].char_class == "Occultist" and "Mind Over Matter" in rows[0].keypassives
+    assert "skills=Winter%20Orb" in http.calls[0]
+
+
+def test_fetch_skill_list_spirit_skill_poe2_uses_spiritgems_param(tmp_path):
+    fetcher, http, snap = _sample_fetcher("poe2", tmp_path)
+    total, rows = fetcher.fetch_skill_list(snap, "spirit", "Ghost Dance")
+    assert total == 30741 and len(rows) == 100
+    assert "spiritgems=Ghost%20Dance" in http.calls[0]
+
+
+def test_fetch_skill_list_rejects_spirit_on_poe1_and_unknown_type(tmp_path):
+    fetcher, _http, snap = _sample_fetcher("poe1", tmp_path)
+    with pytest.raises(ValueError, match="unsupported skill list type"):
+        fetcher.fetch_skill_list(snap, "spirit", "Anything")
+    with pytest.raises(ValueError, match="unsupported skill list type"):
+        fetcher.fetch_skill_list(snap, "nonsense", "Anything")
+
+
+def test_facet_validation_rejects_missing_facets_and_class_sum_mismatch(tmp_path):
+    from src.utils import pbwire
+
+    fetcher, _http, _snap = _sample_fetcher("poe2", tmp_path)
+    good_class = ("class", [(0, 60), (1, 40)])
+    with pytest.raises(pbwire.ProtoParseError, match="missing/empty facet"):
+        fetcher._validate_facets({"class": good_class}, 100, "u")  # no skills / spiritgems
+    facets = {"skills": ("gem", [(0, 5)]), "spiritgems": ("gem", [(0, 5)]), "class": ("class", [(0, 10)])}
+    with pytest.raises(pbwire.ProtoParseError, match="class facet sums"):
+        fetcher._validate_facets(facets, 100, "u")
+    with pytest.raises(pbwire.ProtoParseError, match="population total"):
+        fetcher._validate_facets({}, 0, "u")

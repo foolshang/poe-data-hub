@@ -197,3 +197,81 @@ def test_find_upcoming_launch_most_recent_candidate_wins(tmp_path):
     empty_fetcher = LeagueDatesFetcher(http_client=http, failed_responses_dir=tmp_path / "failed")
     detected = empty_fetcher.find_upcoming_launch()
     assert (detected.month, detected.day) == (6, 15)
+
+
+# --- 2026-09-21: launch date from an announcement when no "Now Available" post exists ---
+# (days_since_league_start was NULL in every snapshot of Allflame / Forbidden Rites.)
+# The texts below are the real phrasings from GGG's Steam news.
+
+def _ts(y, m, d, h=12):
+    return int(datetime(y, m, d, h, tzinfo=timezone.utc).timestamp())
+
+
+def _official(title, contents, ts):
+    return {"feedlabel": "Community Announcements", "title": title, "contents": contents, "date": ts}
+
+
+def _fetcher_with(tmp_path, items, game="poe1"):
+    http = _FakeHttpClient({"appnews": {"newsitems": items}})
+    return LeagueDatesFetcher(http_client=http, game=game, failed_responses_dir=tmp_path / "failed")
+
+
+def test_poe1_start_date_from_a_releases_on_title(tmp_path):
+    items = [_official(
+        "Path of Exile: Curse of the Allflame Releases on July 24 PDT",
+        "Curse of the Allflame, our next challenge league, arrives soon.", _ts(2026, 7, 5),
+    )]
+    dates = _fetcher_with(tmp_path, items).fetch("Allflame")
+    assert dates.start_at.date() == datetime(2026, 7, 24).date()
+
+
+def test_poe2_start_date_from_a_launching_month_day_body(tmp_path):
+    items = [_official(
+        "Path of Exile 2: Forbidden Rites Patch Notes and Item Filter Information",
+        "The patch notes for Path of Exile 2: Forbidden Rites, launching September 4th at 1PM PDT are now available.",
+        _ts(2026, 9, 2, 22),
+    )]
+    dates = _fetcher_with(tmp_path, items, game="poe2").fetch("Forbidden Rites")
+    assert dates.start_at.date() == datetime(2026, 9, 4).date()
+
+
+def test_a_now_available_post_still_wins_over_the_announcement_fallback(tmp_path):
+    items = [
+        _official("Path of Exile: Mirage is Now Available", "Mirage has begun.", _ts(2026, 2, 26, 19)),
+        _official("Mirage Releases on March 3", "Mirage details.", _ts(2026, 2, 1)),
+    ]
+    dates = _fetcher_with(tmp_path, items).fetch("Mirage")
+    assert dates.start_at == datetime.fromtimestamp(_ts(2026, 2, 26, 19), tz=timezone.utc)
+
+
+def test_fallback_ignores_posts_that_do_not_name_the_league(tmp_path):
+    items = [_official("Some Other League Releases on July 24", "Nothing about ours.", _ts(2026, 7, 5))]
+    assert _fetcher_with(tmp_path, items).fetch("Allflame").start_at is None
+
+
+def test_fallback_needs_a_real_month_so_launching_alongside_does_not_match(tmp_path):
+    items = [_official(
+        "Forbidden Rites FAQ",
+        "Forbidden Rites, an event league launching alongside the 0.5 patch, has a 3 day head start.", _ts(2026, 8, 31),
+    )]
+    assert _fetcher_with(tmp_path, items, game="poe2").fetch("Forbidden Rites").start_at is None
+
+
+def test_the_most_recent_announcement_wins_so_a_corrected_date_overrides(tmp_path):
+    items = [
+        _official("Allflame Releases on July 24", "Allflame.", _ts(2026, 7, 5)),
+        _official("Allflame update", "Allflame now launching July 26 instead.", _ts(2026, 7, 10)),
+    ]
+    assert _fetcher_with(tmp_path, items).fetch("Allflame").start_at.date() == datetime(2026, 7, 26).date()
+
+
+def test_a_backwards_looking_date_is_not_a_launch_date(tmp_path):
+    # The phrase matches, but the date (Sept 1) is before the post's own date
+    # (Sept 10): a recap of something that already happened, not an announcement.
+    items = [_official("Recap", "Forbidden Rites launches on September 1 -- what a start it was.", _ts(2026, 9, 10))]
+    assert _fetcher_with(tmp_path, items, game="poe2").fetch("Forbidden Rites").start_at is None
+
+
+def test_abbreviated_and_dotted_months_parse(tmp_path):
+    items = [_official("Allflame launches on Jul. 24th", "Allflame.", _ts(2026, 7, 5))]
+    assert _fetcher_with(tmp_path, items).fetch("Allflame").start_at.date() == datetime(2026, 7, 24).date()
