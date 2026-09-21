@@ -15,7 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from src.fetchers.ninja_builds import NinjaBuildsFetcher, SnapshotVersion
+from src.fetchers import ninja_builds
+from src.fetchers.ninja_builds import DictionaryValidationError, NinjaBuildsFetcher, SnapshotVersion
 
 SAMPLES = Path(__file__).resolve().parents[1] / "data" / "samples"
 
@@ -336,3 +337,23 @@ def test_poe1_slot_filters_use_poe1_weapon_types_not_poe2s():
     assert "Rare Dagger" in weapon_filters
     assert "Rare Crossbow" not in weapon_filters  # PoE2-only weapon type
     assert "Rare Sceptre" not in weapon_filters   # PoE2-only weapon type
+
+
+def test_unknown_class_name_in_dictionary_raises_and_is_not_swallowed_by_fetch_all(fetcher: NinjaBuildsFetcher, monkeypatch):
+    """2026-09-21: a wrong/garbled or genuinely new class dictionary must stop
+    the game's run outright, not be logged as a per-slot skip."""
+    snap = fetcher.resolve_snapshot("Runes of Aldur")
+    trimmed = ninja_builds.KNOWN_CLASSES_BY_GAME["poe2"] - {"Martial Artist"}
+    monkeypatch.setitem(ninja_builds.KNOWN_CLASSES_BY_GAME, "poe2", trimmed)
+
+    with pytest.raises(DictionaryValidationError, match="Martial Artist"):
+        fetcher.fetch_slot(snap, "ring")
+    with pytest.raises(DictionaryValidationError):
+        fetcher.fetch_all(snap, slots=["ring", "helmet"])
+
+
+def test_known_classes_cover_the_captured_class_dictionaries():
+    from src.utils import ndic
+    for game in ("poe1", "poe2"):
+        names = ndic.decode((SAMPLES / f"ninja_{game}_dict_class_2026-09-21.bin").read_bytes())
+        assert set(names) == set(ninja_builds.KNOWN_CLASSES_BY_GAME[game])

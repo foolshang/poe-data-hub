@@ -271,6 +271,22 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   including small nodes), it needs real external GGG tree data — poe.ninja
   never exposes a dictionary for that ID space anywhere in this schema.
 
+- **`ndic.decode`'s split-point search is ambiguous — never accept the first
+  match** (found 2026-09-21, before it reached the DB): PoE2's class
+  dictionary grew from 30 to 31 entries (`Druid`) and a second split point
+  appeared that also passes the "lengths sum to the remaining bytes" check
+  and also decodes as UTF-8, so the old first-match rule silently returned 31
+  garbled strings (`''`, `'of KitavaSor'`, the length bytes as a name).
+  `decode` now evaluates every split point, keeps the single one whose names
+  are non-empty and control-character-free, and raises on anything still
+  ambiguous. Separately, `ninja_builds._get_dictionary` validates the class
+  dictionary against `KNOWN_CLASSES_BY_GAME` and raises
+  `DictionaryValidationError` (re-raised by `fetch_all`, not swallowed as a
+  per-slot skip) on any unknown name -- a genuinely new class means adding it
+  to that set. Note `CharacterRef.char_class` (from this dictionary) was
+  unused downstream at the time; `char_items.class` comes from the
+  character-detail JSON, so the live DB was never affected.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source

@@ -30,6 +30,12 @@ exactly the number of bytes remaining in the buffer. Verified against real
 poe.ninja "class" (30 entries) and "gem" (1280 entries PoE2, several
 thousand PoE1) dictionaries for both games -- both decode with zero
 leftover/short bytes.
+
+Ambiguity (learned 2026-09-21): more than one split point can satisfy that
+rule for the same buffer. `decode` therefore evaluates all of them, prefers
+the single one whose names are all non-empty and free of control characters,
+and raises `NdicParseError` if that still doesn't pick exactly one. See the
+comment inside `decode` and tests/test_ndic.py's 2026-09-21 poe2 class sample.
 """
 from __future__ import annotations
 
@@ -61,6 +67,14 @@ def decode(raw: bytes) -> list[str]:
     if count == 0:
         return []
 
+    # Collect *every* split point that satisfies the sum-of-lengths check
+    # rather than returning the first. Found live 2026-09-21: PoE2's class
+    # dictionary grew from 30 to 31 entries ("Druid") and a second, spurious
+    # split point appeared *before* the real one -- it also sums correctly and
+    # also decodes as valid UTF-8 (the "text" it produces is the true length
+    # array + the first names glued together), so the old first-match rule
+    # silently returned 31 garbled strings ('' / 'of KitavaSor' / ...).
+    candidates: list[list[str]] = []
     for text_start in range(count, total + 1):
         lengths = raw[text_start - count:text_start]
         if sum(lengths) != total - text_start:
@@ -73,7 +87,22 @@ def decode(raw: bytes) -> list[str]:
                 pos += length
         except UnicodeDecodeError:
             continue
-        if pos == total:
-            return names
+        if pos == total and len(names) == count:
+            candidates.append(names)
 
-    raise NdicParseError(f"could not locate {count} length-prefixed entries totaling to {total} bytes")
+    if not candidates:
+        raise NdicParseError(f"could not locate {count} length-prefixed entries totaling to {total} bytes")
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Several split points fit. A spurious one swallows the length array into
+    # the text, which shows up as control characters / empty entries -- real
+    # names have neither. Only accept the result if exactly one candidate is
+    # clean; anything else is ambiguous and must fail loudly, never guess.
+    clean = [c for c in candidates if all(n and all(ord(ch) >= 32 for ch in n) for n in c)]
+    if len(clean) == 1:
+        return clean[0]
+    raise NdicParseError(
+        f"ambiguous NDIC layout: {len(candidates)} split points fit {count} entries / {total} bytes and "
+        f"{len(clean)} of them decode to clean names -- refusing to guess"
+    )

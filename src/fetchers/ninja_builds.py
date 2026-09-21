@@ -139,6 +139,34 @@ DICTIONARY_URL_TEMPLATE = "https://poe.ninja/{game}/api/builds/dictionary/{hash}
 
 DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
 
+# Every class/ascendancy name poe.ninja's "class" dictionary is known to
+# contain (captured 2026-09-21: 28 PoE1, 31 PoE2 incl. the newly added
+# "Druid"). `_get_dictionary` raises on any name outside this set instead of
+# carrying it forward -- the 2026-09-21 ndic split bug showed a wrong/garbled
+# class dictionary can otherwise pass silently. A genuinely new class means
+# updating this set (one line), which is the point: a human looks first.
+KNOWN_CLASSES_BY_GAME: dict[str, frozenset[str]] = {
+    "poe1": frozenset({
+        "Ascendant", "Assassin", "Berserker", "Champion", "Chieftain", "Deadeye", "Duelist", "Elementalist",
+        "Gladiator", "Guardian", "Hierophant", "Inquisitor", "Juggernaut", "Luminary", "Marauder", "Necromancer",
+        "Occultist", "Pathfinder", "Ranger", "Reliquarian", "Saboteur", "Scion", "Shadow", "Slayer", "Templar",
+        "Trickster", "Warden", "Witch",
+    }),
+    "poe2": frozenset({
+        "Abyssal Lich", "Acolyte of Chayula", "Amazon", "Blood Mage", "Chronomancer", "Deadeye",
+        "Disciple of Varashta", "Druid", "Gemling Legionnaire", "Huntress", "Infernalist", "Invoker", "Lich",
+        "Martial Artist", "Mercenary", "Monk", "Oracle", "Pathfinder", "Ranger", "Ritualist", "Shaman",
+        "Smith of Kitava", "Sorceress", "Spirit Walker", "Stormweaver", "Tactician", "Titan", "Warbringer",
+        "Warrior", "Witch", "Witchhunter",
+    }),
+}
+
+
+class DictionaryValidationError(ValueError):
+    """A poe.ninja dictionary decoded but failed a sanity check (unknown
+    class name, ...). Never swallowed by `fetch_all`'s per-slot skip -- it
+    aborts the whole game's meta run so nothing is published from it."""
+
 # snapshotVersions entries whose `type` is not this are a different
 # leaderboard (Delve Depth Solo, streamer-only, ...), not the general
 # population sample this project wants -- see module docstring. PoE2
@@ -316,6 +344,8 @@ class NinjaBuildsFetcher:
                 chars = self.fetch_slot(snapshot, slot)
                 by_slot[slot] = chars
                 counts[slot] = len(chars)
+            except DictionaryValidationError:
+                raise
             except Exception as e:
                 counts[slot] = 0
                 log.warning("ninja_builds: skip slot %s: %s", slot, e)
@@ -522,9 +552,21 @@ class NinjaBuildsFetcher:
         except ndic.NdicParseError as e:
             self._dump_failed_bytes(raw, url)
             raise ValueError(f"ninja_builds({self._game}): could not parse dictionary {name!r} ({url}): {e}") from e
+        if name == "class":
+            self._validate_class_dictionary(values, url)
         self._save_last_good(self._last_good_dict_path(name), raw)
         self._dict_cache[hash_] = values
         return values
+
+    def _validate_class_dictionary(self, values: list[str], url: str) -> None:
+        known = KNOWN_CLASSES_BY_GAME[self._game]
+        unknown = sorted(v for v in values if v not in known)
+        if unknown:
+            raise DictionaryValidationError(
+                f"ninja_builds({self._game}): class dictionary has {len(unknown)} unknown name(s) {unknown[:8]!r} "
+                f"({len(values)} entries, {url}) -- either poe.ninja added a class (update KNOWN_CLASSES_BY_GAME) "
+                f"or the dictionary was mis-decoded; refusing to continue"
+            )
 
     def _last_good_dict_path(self, name: str) -> Path:
         return self._last_good_sample_path.parent / f"last_good_dict_{self._game}_{name}.bin"
