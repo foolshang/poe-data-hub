@@ -445,3 +445,47 @@ def test_facet_validation_rejects_missing_facets_and_class_sum_mismatch(tmp_path
         fetcher._validate_facets(facets, 100, "u")
     with pytest.raises(pbwire.ProtoParseError, match="population total"):
         fetcher._validate_facets({}, 0, "u")
+
+
+def test_skill_list_with_ragged_dps_columns_is_accepted_real_samples(tmp_path):
+    """2026-09-21, first live run: 5 of the first 5 failing lists had dps-<skill>.*
+    columns shorter than the 100 rows (99, 98, 94) because characters with no
+    value for that skill are omitted. Every column we READ was complete, so the
+    lists must parse -- the strict all-columns check wrongly rejected them."""
+    fetcher, _http, snap = _sample_fetcher("poe1", tmp_path)
+    for skill, expected_total in (("Flicker Strike", 3106), ("Frenzy", 1319)):
+        total, rows = fetcher.fetch_skill_list(snap, "main", skill)
+        assert total == expected_total and len(rows) == 100
+        assert all(r.account and r.name and r.char_class for r in rows)
+
+
+def test_strict_per_slot_validation_still_rejects_ragged_columns_but_aligned_check_accepts(tmp_path):
+    """The per-slot fetch keeps its strict check (a schema break must stay loud);
+    only the per-skill list path narrows it to the columns it consumes."""
+    from src.fetchers.ninja_builds import SKILL_LIST_ALIGNED_COLUMNS
+    from src.utils import pbwire as pb
+    from tests.ninja_samples import SAMPLES
+
+    fetcher, _http, _snap = _sample_fetcher("poe1", tmp_path)
+    body = pb.first((SAMPLES / "ninja_poe1_builds_search_skill_Frenzy_2026-09-21.bin").read_bytes(), 1)
+    columns, _refs = fetcher._parse_body(body)
+    total = pb.first(body, 1)
+
+    with pytest.raises(pb.ProtoParseError, match="row-count mismatch"):
+        fetcher._validate_search_response(columns, total, "u")
+    fetcher._validate_search_response(columns, total, "u", aligned=SKILL_LIST_ALIGNED_COLUMNS)
+
+
+def test_a_misaligned_column_we_actually_read_still_fails_the_list_check(tmp_path):
+    from src.fetchers.ninja_builds import SKILL_LIST_ALIGNED_COLUMNS, _ValueColumn
+    from src.utils import pbwire as pb
+
+    fetcher, _http, _snap = _sample_fetcher("poe1", tmp_path)
+    columns = {
+        "name": _ValueColumn("name", strings=["a", "b", "c"]),
+        "account": _ValueColumn("account", strings=["x", "y", "z"]),
+        "level": _ValueColumn("level", single_values=[100, 99]),  # one short -> rows would be misattributed
+        "class": _ValueColumn("class", single_values=[1, 2, 3]),
+    }
+    with pytest.raises(pb.ProtoParseError, match="row-count mismatch"):
+        fetcher._validate_search_response(columns, 3, "u", aligned=SKILL_LIST_ALIGNED_COLUMNS)

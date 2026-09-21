@@ -139,6 +139,10 @@ DICTIONARY_URL_TEMPLATE = "https://poe.ninja/{game}/api/builds/dictionary/{hash}
 
 DEFAULT_FAILED_RESPONSES_DIR = Path("data/failed_responses")
 
+# The columns `_extract_characters` reads -- the only ones that must be
+# row-aligned in a per-skill list response (see `_validate_search_response`).
+SKILL_LIST_ALIGNED_COLUMNS = ("name", "account", "level", "class", "skills", "keypassives")
+
 # Every class/ascendancy name poe.ninja's "class" dictionary is known to
 # contain (captured 2026-09-21: 28 PoE1, 31 PoE2 incl. the newly added
 # "Druid"). `_get_dictionary` raises on any name outside this set instead of
@@ -474,7 +478,7 @@ class NinjaBuildsFetcher:
                 raise pb.ProtoParseError("missing top-level field 1")
             total = pb.first(body, 1)
             columns, dict_refs = self._parse_body(body)
-            self._validate_search_response(columns, total, url)
+            self._validate_search_response(columns, total, url, aligned=SKILL_LIST_ALIGNED_COLUMNS)
         except pb.ProtoParseError as e:
             self._dump_failed_bytes(raw, url)
             raise ValueError(f"ninja_builds({self._game}): could not parse skill list ({url}): {e}") from e
@@ -562,7 +566,16 @@ class NinjaBuildsFetcher:
             dict_name=dict_name,
         )
 
-    def _validate_search_response(self, columns: dict[str, "_ValueColumn"], total: Any, url: str) -> None:
+    def _validate_search_response(
+        self, columns: dict[str, "_ValueColumn"], total: Any, url: str, aligned: Optional[tuple[str, ...]] = None,
+    ) -> None:
+        """`aligned`: when given, only these columns must be row-aligned with
+        `name`. Per-skill lists need it: their `dps-<skill>.*` / `rate-...`
+        columns list only the characters that HAVE a value (found live
+        2026-09-21: 99, 98, even 94 entries for 100 rows), so demanding equal
+        length everywhere rejected those lists though every column we actually
+        read was complete. The per-slot fetch keeps the strict all-columns
+        check (`aligned=None`)."""
         required = ("name", "account", "level", "class")
         missing = [k for k in required if k not in columns]
         if missing:
@@ -584,7 +597,8 @@ class NinjaBuildsFetcher:
                 )
             log.warning("ninja_builds: 0 characters returned and total=0 (genuinely empty filter result): %s", url)
 
-        mismatched = {name: col.length() for name, col in columns.items() if col.length() not in (0, n)}
+        checked = columns if aligned is None else {k: v for k, v in columns.items() if k in aligned}
+        mismatched = {name: col.length() for name, col in checked.items() if col.length() not in (0, n)}
         if mismatched:
             raise pb.ProtoParseError(f"valueList column row-count mismatch (expected {n}): {mismatched} in {url}")
 

@@ -13,6 +13,10 @@ STAMP = "2026-09-21"
 # (game, query-param, value) -> captured filtered-search response
 LIST_SAMPLES = {
     ("poe1", "skills", "Winter Orb"): "ninja_poe1_builds_search_skill_WinterOrb_2026-09-21.bin",
+    # Captured from a real run's failed_responses: their dps-*/rate-* columns hold FEWER
+    # than 100 entries (99 and 94) because characters without a value are omitted.
+    ("poe1", "skills", "Flicker Strike"): "ninja_poe1_builds_search_skill_FlickerStrike_2026-09-21.bin",
+    ("poe1", "skills", "Frenzy"): "ninja_poe1_builds_search_skill_Frenzy_2026-09-21.bin",
     ("poe2", "skills", "Whirling Slash"): "ninja_poe2_builds_search_skill_WhirlingSlash_2026-09-21.bin",
     ("poe2", "spiritgems", "Ghost Dance"): "ninja_poe2_builds_search_spirit_GhostDance_2026-09-21.bin",
 }
