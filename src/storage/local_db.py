@@ -285,7 +285,24 @@ def _now_iso() -> str:
 class LocalDb:
     def __init__(self, db_path: Path = DEFAULT_DB_PATH):
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
+        # `timeout=30`: Python's own SQLITE_BUSY retry window -- learned the
+        # hard way 2026-09-22, first live incremental skill run: a read-only
+        # ad-hoc diagnostic query (a `dbstat` sweep over the then-1.5GB
+        # char_items table, opened as a completely separate `sqlite3.connect`
+        # outside this class, so job_lock never saw it) held a lock long
+        # enough that the *default* 5s timeout wasn't enough, and a live
+        # skill-centric run died mid-list with "database is locked" (see
+        # CLAUDE.md). WAL journal mode is the real fix -- a writer's commit
+        # no longer blocks concurrent readers (and vice versa) the way the
+        # default rollback journal does -- kept alongside the longer timeout
+        # as a second line of defense for any reader that isn't WAL-aware
+        # (an old sqlite3 CLI, a tool that forces `PRAGMA journal_mode`
+        # itself, etc). `journal_mode` is stored in the database file itself,
+        # so this converts the file to WAL permanently on first connect, not
+        # just for this process.
+        self._conn = sqlite3.connect(db_path, timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript(_SCHEMA)
         self._migrate()
         self._conn.commit()

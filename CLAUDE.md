@@ -339,6 +339,33 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   - `{game}/skills/dictionary.json` exists specifically so `stat_id ->
     template` isn't duplicated into 150+ per-skill files (~1.5MB each for
     PoE1 otherwise).
+- **A read-only ad-hoc query against the live production SQLite file can
+  crash a real job with "database is locked" -- `job_lock` does not protect
+  against this** (learned 2026-09-22, first live incremental skill run):
+  while PoE2's skill run was mid-`save_skill_list_members` (list 175/417), a
+  `dbstat` diagnostic sweep run over SSH in a completely separate
+  `sqlite3.connect()` (investigating the skill-centric tables' per-run disk
+  growth) held a read lock over the then-1.5GB `char_items` table long enough
+  that the job's write blew past Python sqlite3's *default* 5s busy timeout
+  and raised `OperationalError: database is locked`, killing that attempt
+  (cleanly -- `skill_run_lists`/`skill_run_members` checkpoints for the 175
+  already-saved lists were intact, so the very next `--only skill` invocation
+  resumed from list 176, no lost work). `job_lock` only serializes this
+  project's *own* jobs against each other; it was never in the loop for a
+  manual diagnostic script. Fixed at the connection level, not by avoiding
+  concurrent reads: `LocalDb.__init__` now opens with `timeout=30` and sets
+  `PRAGMA journal_mode=WAL` (persists in the db file itself, so this
+  converted the production file to WAL permanently on first connect after
+  deploy) + `PRAGMA busy_timeout=30000` -- WAL lets a writer's commit and a
+  concurrent reader coexist instead of blocking each other, which is the real
+  fix; the longer timeout is only a second line of defense for a reader that
+  somehow isn't WAL-aware. **Still worth avoiding**, even with this fix: a
+  long, unbounded full-table scan (`SELECT ... FROM dbstat`, or any query
+  touching all of a multi-GB table like `char_items`) against the live
+  production file while a job may be writing -- prefer `mode=ro` (already
+  this project's convention for ad-hoc VM queries, see
+  [[reference-vm-sqlite-readonly-access]]) and keep such queries narrow/
+  indexed where the DB is large.
 
 ## Layout
 

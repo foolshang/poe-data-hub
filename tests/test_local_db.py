@@ -563,3 +563,32 @@ def test_iter_skill_stat_and_passive_counts_for_league_only_reads_skill_top100_s
     passive_rows = db.iter_skill_passive_counts_for_league("poe2", "L")
     assert len(passive_rows) == 1 and passive_rows[0][6] == skill_snap
     db.close()
+
+
+# --- Concurrency robustness (2026-09-22 "database is locked" incident) -----
+
+def test_uses_wal_journal_mode_and_a_generous_busy_timeout(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    assert db._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert db._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
+    db.close()
+
+
+def test_a_long_held_reader_does_not_block_a_concurrent_writer(tmp_path):
+    """Reproduces the 2026-09-22 incident: a read-only connection holding an
+    open transaction (standing in for an ad-hoc diagnostic query against the
+    live production file) must not make a concurrent write raise "database is
+    locked" -- the whole reason for WAL mode, not just a bigger timeout."""
+    path = tmp_path / "t.sqlite3"
+    db = LocalDb(path)
+    db.insert_snapshot(game="poe2", league="L", days_since_league_start=1, sample_total=0, unique_characters_fetched=0, fetch_failed=0)
+
+    reader = sqlite3.connect(path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM snapshots").fetchall()  # open read transaction, never committed/closed
+
+    try:
+        db.insert_snapshot(game="poe2", league="L", days_since_league_start=2, sample_total=0, unique_characters_fetched=0, fetch_failed=0)
+    finally:
+        reader.close()
+        db.close()
