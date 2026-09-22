@@ -1142,7 +1142,7 @@ productive snapshots combined): 1.5MB (poe2) / 2.8MB (poe1) after switching
 the VM copy to compact JSON -- see Phase 20/21 below for the full sizing
 investigation; not yet measured against a full-length league.
 
-### 8.9 `{game}/passives/latest.json` (skill-meta phase 3, path A)
+### 8.9 `{game}/passives/latest.json` (schema_version 3, replaced 2026-09-21 -- skill-meta phase 22)
 
 **Notable/keystone passives only -- not the full passive tree.**
 poe.ninja's builds-search "keypassives" column + dictionary (confirmed live
@@ -1157,39 +1157,43 @@ full investigation (including why `passiveSelection` and Path of Building's
 own node list disagree for the same character, and why poe.ninja's
 dictionary can't resolve `passiveSelection` at all -- different ID spaces).
 
+**Full shape replacement (schema_version 2 -> 3)**, source table changed from
+`keypassive_counts` (legacy per-slot, first-gem-guessed skill) to
+`skill_passive_counts` (skill-centric collection, 8.10) -- `main_skill`/
+`archetype`/`rank_in_bracket` are gone, `skill_type` is new:
+
 ```json
 {
-  "schema_version": 2,
-  "generated_at": "2026-09-17T00:00:00Z",
-  "league": "Runes of Aldur",
-  "days_since_league_start": 5,
-  "source": "keypassives (notable/keystone tier only, not the full passive tree)",
+  "schema_version": 3,
+  "generated_at": "2026-09-22T00:00:00Z",
+  "game": "poe1",
+  "league": "Allflame",
+  "days_since_league_start": 58,
+  "source": "keypassives (notable/keystone tier only, not the full passive tree); counted per skill-centric list (SPEC.md 8.10) -- a character only counts into the skill(s) it was pulled for, not every skill it happens to run",
   "passives": [
     {
-      "main_skill": "Fireball",
+      "skill_type": "main",
+      "skill": "Righteous Fire",
       "level_bracket": "90-100",
-      "archetype": "spell-fire",
-      "keypassive": "Dance with Death",
-      "count": 8,
-      "population": 10,
-      "usage_pct": 80.0,
-      "rank_in_bracket": 1
+      "keypassive": "Unwavering Stance",
+      "count": 102,
+      "population": 173,
+      "usage_pct": 58.96
     }
   ]
 }
 ```
 
-Same counting rule as a regular slot's mods: counted once per character
-even if (defensively) the same keypassive appears twice in that
-character's list. Rows below `skill_meta.min_population_publish` (default
-20) are dropped from this file (never from the SQLite `keypassive_counts`
-table, which keeps every row forever the same as `skill_mod_counts` --
-publish-worthiness and storage are separate, same policy as the skill
-dimension). `(main_skill, level_bracket, archetype)` matches
-`skill_mod_counts`'s own dimension (minus `slot`, since passives aren't
-slot-specific) so the two can be joined/queried the same way.
+Same counting rule as a regular slot's mods: counted once per character even
+if (defensively) the same keypassive appears twice in that character's list.
+Rows below `skill_meta.publish.min_usage_pct` (percentage of that skill's
+population, not a population floor -- the old `min_population_publish` no
+longer applies here) are dropped; a skill's passives can be entirely empty
+without its `skills/index.json` entry or file disappearing (see 8.11).
+`(skill_type, skill, level_bracket)` matches `skill_stat_counts`'s own
+dimension (minus `slot`, since passives aren't slot-specific).
 
-## 8.10 Skill-centric collection (2026-09-21; SQLite-side, publish step pending)
+### 8.10 Skill-centric collection (2026-09-21; SQLite-side, publish step pending)
 
 Replaces the *skill dimension* of the per-slot collection. Not a published
 schema yet -- the publish step (per-skill mods, `passives/latest.json`, the
@@ -1328,6 +1332,109 @@ neither league had one. It now falls back to a post that names the league and
 states its launch ("Releases on July 24", "launching September 4th"), most
 recent post wins, forward-looking dates only. Verified against the live Steam
 feed: Allflame -> 2026-07-24, Forbidden Rites -> 2026-09-04.
+
+### 8.11 `{game}/skills/*` (skill-meta phase 22, added 2026-09-21)
+
+Published from the skill-centric collection (8.10) by
+`src/main.py`'s `publish_skill_meta` (`src/processing/skill_publish.py`
+builds the shapes). Never built from a `legacy_slot_top100` snapshot.
+
+**`{game}/skills/index.json`** -- every skill that was collected (main and,
+in PoE2, spirit), each with its own base size **even when thin** (2-8
+characters is common for a niche/new skill) so a consumer can show how much
+to trust a skill's numbers, per the project owner's explicit ask -- nothing
+is dropped from this file by population size, only `skill_meta.publish.
+min_usage_pct` drops individual mod/passive rows inside a skill's own file:
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-22T00:00:00Z",
+  "game": "poe1",
+  "league": "Allflame",
+  "days_since_league_start": 58,
+  "population_total": 124408,
+  "skills": [
+    {
+      "skill_type": "main",
+      "skill": "Winter Orb",
+      "slug": "winter-orb",
+      "facet_count": 9328,
+      "populations": {"90-100": 100},
+      "path": "poe1/skills/main/winter-orb.json"
+    }
+  ]
+}
+```
+
+`facet_count` is poe.ninja's own reported population for that skill (PoE1
+Vaal variants folded into their base skill's count, 8.10); `populations` is
+this run's actual per-bracket sample size (almost always just `90-100`
+today, 8.10's level-80-floor note). Sorted by `skill_type` then `facet_count`
+descending. `slug` is the path segment (`skill_slug`/`_unique_slugs` in
+skill_publish.py): a plain lowercase-hyphenated form of the skill name, with
+`-2`, `-3`, ... appended on the rare collision.
+
+**`{game}/skills/{main|spirit}/{slug}.json`** -- one skill's full mod/passive
+breakdown, **compact JSON** (no indentation -- 150+ of these exist per game,
+see `PricesPublisher.publish(..., compact=True)`):
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-22T00:00:00Z",
+  "game": "poe1",
+  "league": "Allflame",
+  "days_since_league_start": 58,
+  "skill_type": "main",
+  "skill": "Righteous Fire",
+  "slug": "righteous-fire",
+  "facet_count": 7140,
+  "populations": {"90-100": 173},
+  "mods": {
+    "90-100": {
+      "gloves": [
+        {"stat_id": "implicit.stat_2011785027", "mod_kind": "implicit", "count": 154,
+         "population": 173, "slot_holders": 170, "usage_pct": 89.02, "value_min": 1.0, "value_max": 1.0}
+      ]
+    }
+  },
+  "passives": {
+    "90-100": [
+      {"keypassive": "Unwavering Stance", "count": 102, "population": 173, "usage_pct": 58.96}
+    ]
+  }
+}
+```
+
+`population` on a mod/passive row equals that bracket's entry in
+`populations` (repeated per row, same convention `skill_mod_counts` used);
+`slot_holders` is how many of `population` wear >= 1 item in that slot (lets
+a consumer compute "% of ring-wearers" instead of "% of the whole skill" if
+it wants to). No count-based floor is applied (`skill_meta.publish.
+min_usage_pct`, a percentage, is the only filter) -- SQLite's
+`skill_stat_counts`/`skill_passive_counts` keep every row regardless.
+
+**`{game}/skills/dictionary.json`** -- the same `stat_id -> template` lookup
+as `meta/latest.json`'s own `stat_dictionary`, published once per game
+instead of duplicated into every skill file (~1.5MB for PoE1 -- repeating it
+150+ times was not an option):
+
+```json
+{"schema_version": 1, "generated_at": "...", "game": "poe1", "stat_dictionary": [{"stat_id": "...", "template": "...", "mod_kind": "..."}]}
+```
+
+**Cache-Control** (`skill_meta.publish.*_cache_max_age_seconds`, config.yaml):
+index 1h, per-skill files 6h, dictionary 24h -- provisional until the
+skill-centric job's real update cadence is decided (it is still manual,
+`skill_meta.collect.scheduled=false`; see 8.10).
+
+**Retroactive publish without recollecting**: `python -m src.main
+--publish-skill-meta --game poe1 [--game poe2]` reads whatever skill-centric
+run most recently *finished* for that game and (re)publishes from it --
+used to ship a publish-side fix, or to publish for the first time after a
+collection run that predates this feature, without repeating an 8-10h
+collection (same idea as `run_gems_once` republishing a staged copy).
 
 ## Binding conditions (from project owner, still in force)
 
@@ -2055,33 +2162,60 @@ feed: Allflame -> 2026-07-24, Forbidden Rites -> 2026-09-04.
       passing.
 
 - [ ] Phase 22: skill-centric collection (top-100 per poe.ninja skill instead
-      of top-100 per slot) -- **steps 2-4 implemented and tested; steps 5+
-      (first live run, measurement, publish, archive re-export, autocomplete,
-      deploy) pending.** Full design in 8.10.
+      of top-100 per slot) -- **collection, publish, and archive re-export
+      implemented, tested, and deployed; two full first-runs completed live;
+      incremental-cost measurement and flipping `scheduled=true` pending.**
+      Full design in 8.10/8.11.
 
       Done: facet/list fetchers (real-sample tests), skill plan (Vaal fold,
       spirit lists, ascendancy cut, all thresholds in config), counter,
       shared persistent character cache, checkpointed + resumable run,
       `collection_method` marking of old snapshots, `days_since_league_start`
       fix, legacy job kept as a bridge (shares the cache; no longer writes
-      skill/passive data), CLI `--game` / `--only`. Removed from the live
-      path: the first-gem `main_skill` guess (renamed `archetype_hint`, legacy
-      archetype bucketing only), `aggregate_*_by_skill`,
+      skill/passive data), CLI `--game` / `--only` / `--publish-skill-meta`.
+      Removed from the live path: the first-gem `main_skill` guess (renamed
+      `archetype_hint`, legacy archetype bucketing only), `aggregate_*_by_skill`,
       `compute_skill_bracket_population`, `aggregate_keypassives_by_skill`,
-      and the legacy job's `passives/latest.json` publish (that file keeps its
-      last content until the new publish step ships) and the legacy summary
-      keys `skill_bracket_population`, `top_20_skills_by_population`,
+      and the legacy job's `passives/latest.json` publish, plus the legacy
+      summary keys `skill_bracket_population`, `top_20_skills_by_population`,
       `thin_brackets_below_publish_threshold`, `skill_mod_counts_rows`,
       `keypassive_counts_rows`, `unmapped_skill_names`, `skill_gems_*`.
 
       Also fixed this phase: `ndic.decode` accepted the first of several
       valid split points and returned garbled names for PoE2's 31-entry class
       dictionary (`Druid`); class dictionaries are now validated against
-      `KNOWN_CLASSES_BY_GAME` (CLAUDE.md).
+      `KNOWN_CLASSES_BY_GAME` (CLAUDE.md). Removed the stale
+      `league.poe1_override: "Mirage"` (that league had ended).
 
-      Pending: first live run per game (manual, `--only skill`, hours),
-      second run to measure incremental cost (stop and report if a game
-      exceeds 6 h -> consider top-50), publish + archive re-export +
-      `passives/latest.json` new shape + `skills[]` (main and spirit) for the
-      F4 autocomplete, deploy + verify. TODO: check at the next league's
-      launch whether poe.ninja indexes characters below level 80.
+      **First live runs (2026-09-21/22, manual `--only skill`, one game at a
+      time)**: PoE1 8h18m (158 main skills, 185 lists incl. Vaal, 14,374
+      distinct characters, 16 failed = 0.11%, peak RSS 75.5MB); PoE2 9h46m
+      (271 main + 145 spirit = 416 lists, 16,627 distinct characters, 104
+      failed = 0.63%, peak RSS 81.4MB). Neither ever approached the VM's RAM
+      guard (available never dropped below 278MB). PoE1's run hit a real bug
+      the samples hadn't shown: `dps-<skill>.*`/`rate-*` columns in a
+      per-skill list can hold *fewer* than 100 entries (characters with no
+      value for that skill omitted -- 99/98/94 seen live), which the
+      strict all-columns row-alignment check rejected; fixed by checking
+      alignment only for the columns the collector actually reads
+      (`SKILL_LIST_ALIGNED_COLUMNS`), fixed and redeployed mid-run, then
+      resumed from checkpoint with zero lost work. The legacy per-slot job
+      was also run manually once per game right after (8-9 min each, 83-86%
+      cache reuse) to refresh `meta/latest.json` without waiting for the next
+      scheduled cycle.
+
+      Publish (8.11) implemented and run against both completed snapshots:
+      `{game}/skills/index.json`, one `{game}/skills/{main|spirit}/{slug}.json`
+      per skill (compact JSON), `{game}/skills/dictionary.json`, and
+      `passives/latest.json` bumped to schema_version 3 (full shape
+      replacement -- see 8.9; consumers reading the old
+      `main_skill`/`archetype`/`rank_in_bracket` shape need updating).
+      `build_league_archive` gained a `skills` key sourced only from
+      `skill_top100_v1` snapshots (`mod_counts` still spans both collection
+      methods -- it has no main-skill dimension to be unreliable).
+
+      Pending: run one incremental cycle per game and report requests/time/
+      new-vs-reused-characters/DB growth; only then set
+      `skill_meta.collect.scheduled=true` (currently `false` on purpose --
+      see CLAUDE.md). TODO: check at the next league's launch whether
+      poe.ninja indexes characters below level 80.

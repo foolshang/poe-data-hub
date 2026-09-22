@@ -467,3 +467,99 @@ def test_replace_skill_counts_is_idempotent_per_group(tmp_path):
     assert counts == {"skill_stat_counts": 2, "skill_passive_counts": 2, "skill_populations": 2}  # main + spirit, once each
     assert db._conn.execute("SELECT days_since_league_start FROM skill_stat_counts").fetchone() == (9,)
     db.close()
+
+
+# --- Skill-centric publish queries (skill-meta phase 22) --------------------
+
+def test_latest_finished_skill_run_ignores_running_and_other_games(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    snap1 = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    run1 = db.create_skill_run("poe2", "L", snap1, 1000, {}, [])
+    db.finish_skill_run(run1, "finished", {})
+
+    snap2 = db.insert_snapshot("poe2", "L", 9, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    run2 = db.create_skill_run("poe2", "L", snap2, 1000, {}, [])  # left 'running'
+
+    snap3 = db.insert_snapshot("poe1", "Other", 3, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    run3 = db.create_skill_run("poe1", "Other", snap3, 1000, {}, [])
+    db.finish_skill_run(run3, "finished", {})
+
+    found = db.latest_finished_skill_run("poe2")
+    assert found == {"run_id": run1, "snapshot_id": snap1, "league": "L", "days_since_league_start": 5, "finished_at": found["finished_at"]}
+    assert run2  # the still-running run exists but must never be returned as "finished"
+    assert db.latest_finished_skill_run("poe1")["run_id"] == run3
+    db.close()
+
+
+def test_latest_finished_skill_run_picks_the_newest_of_several_finished_runs(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    for i in range(3):
+        snap = db.insert_snapshot("poe2", "L", i, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+        run = db.create_skill_run("poe2", "L", snap, 1000, {}, [])
+        db.finish_skill_run(run, "finished", {})
+    assert db.latest_finished_skill_run("poe2")["days_since_league_start"] == 2
+    db.close()
+
+
+def test_latest_finished_skill_run_none_when_nothing_finished(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    assert db.latest_finished_skill_run("poe2") is None
+    snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    db.create_skill_run("poe2", "L", snap, 1000, {}, [])  # still running
+    assert db.latest_finished_skill_run("poe2") is None
+    db.close()
+
+
+def test_get_skill_run_population_total(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    run = db.create_skill_run("poe2", "L", snap, 124408, {}, [])
+    assert db.get_skill_run_population_total(run) == 124408
+    assert db.get_skill_run_population_total(999999) == 0
+    db.close()
+
+
+def test_iter_skill_stat_passive_population_for_snapshot(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    stat = {"level_bracket": "90-100", "slot": "ring", "stat_id": "s1", "mod_kind": "explicit", "count": 2,
+            "population": 4, "slot_holders": 3, "usage_pct": 50.0, "value_min": 1.0, "value_max": 2.0}
+    passive = {"level_bracket": "90-100", "keypassive": "K", "count": 1, "population": 4, "usage_pct": 25.0}
+    pop = {"level_bracket": "90-100", "population": 4, "facet_count": 500}
+    db.replace_skill_counts_for_snapshot(snap, "poe2", 5, "main", "Fireball", [stat], [passive], [pop])
+
+    stat_rows = db.iter_skill_stat_counts_for_snapshot(snap)
+    assert stat_rows == [("main", "Fireball", "90-100", "ring", "s1", "explicit", 2, 4, 3, 50.0, 1.0, 2.0)]
+    passive_rows = db.iter_skill_passive_counts_for_snapshot(snap)
+    assert passive_rows == [("main", "Fireball", "90-100", "K", 1, 4, 25.0)]
+    pop_rows = db.iter_skill_populations_for_snapshot(snap)
+    assert pop_rows == [("main", "Fireball", "90-100", 4, 500)]
+
+    # a different snapshot must see none of this
+    other = db.insert_snapshot("poe2", "L", 6, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    assert db.iter_skill_stat_counts_for_snapshot(other) == []
+    db.close()
+
+
+def test_iter_skill_stat_and_passive_counts_for_league_only_reads_skill_top100_snapshots(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    skill_snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    legacy_snap = db.insert_snapshot("poe2", "L", 6, 0, 0, 0)  # defaults to legacy
+    stat = {"level_bracket": "90-100", "slot": "ring", "stat_id": "s1", "mod_kind": "explicit", "count": 2,
+            "population": 4, "slot_holders": 3, "usage_pct": 50.0, "value_min": 1.0, "value_max": 2.0}
+    passive = {"level_bracket": "90-100", "keypassive": "K", "count": 1, "population": 4, "usage_pct": 25.0}
+    db.replace_skill_counts_for_snapshot(skill_snap, "poe2", 5, "main", "Fireball", [stat], [passive], [])
+    # simulate a hypothetical legacy write directly (should never happen via real code paths)
+    db._conn.execute(
+        "INSERT INTO skill_stat_counts (snapshot_id, game, skill_type, skill, level_bracket, slot, stat_id, "
+        "mod_kind, count, population, slot_holders, usage_pct, value_min, value_max, days_since_league_start, created_at) "
+        "VALUES (?, 'poe2', 'main', 'Fireball', '90-100', 'ring', 's1', 'explicit', 99, 4, 3, 50.0, 1.0, 2.0, 6, '2026-01-01T00:00:00Z')",
+        (legacy_snap,),
+    )
+    db._conn.commit()
+
+    stat_rows = db.iter_skill_stat_counts_for_league("poe2", "L")
+    assert len(stat_rows) == 1 and stat_rows[0][11] == skill_snap  # snapshot_id column
+    passive_rows = db.iter_skill_passive_counts_for_league("poe2", "L")
+    assert len(passive_rows) == 1 and passive_rows[0][6] == skill_snap
+    db.close()

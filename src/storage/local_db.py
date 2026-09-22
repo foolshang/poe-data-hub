@@ -447,8 +447,8 @@ class LocalDb:
             """SELECT kpc.main_skill, kpc.level_bracket, kpc.archetype, kpc.keypassive,
                       kpc.count, kpc.population, kpc.snapshot_id, kpc.days_since_league_start
                FROM keypassive_counts kpc JOIN snapshots s ON s.id = kpc.snapshot_id
-               WHERE s.game = ? AND s.league = ?""",
-            (game, league),
+               WHERE s.game = ? AND s.league = ? AND s.collection_method = ?""",
+            (game, league, COLLECTION_METHOD_LEGACY),
         ).fetchall()
 
     def query_skill_mod_counts(
@@ -589,13 +589,17 @@ class LocalDb:
         (kept forever) rather than char_items (90-day retention) so a
         league that ended long ago can still be archived (spec skill-meta
         phase 5, item 20)."""
+        # Filtered to legacy_slot_top100 snapshots -- a no-op today (the
+        # skill-centric job never writes to this table) but explicit so a
+        # league that later mixes both collection methods can never blend an
+        # unreliable-skill legacy row into what looks like current data.
         return self._conn.execute(
             """SELECT smc.slot, smc.main_skill, smc.level_bracket, smc.archetype, smc.stat_id, smc.mod_kind,
                       smc.count, smc.population, smc.value_min, smc.value_max, smc.snapshot_id,
                       smc.days_since_league_start
                FROM skill_mod_counts smc JOIN snapshots s ON s.id = smc.snapshot_id
-               WHERE s.game = ? AND s.league = ?""",
-            (game, league),
+               WHERE s.game = ? AND s.league = ? AND s.collection_method = ?""",
+            (game, league, COLLECTION_METHOD_LEGACY),
         ).fetchall()
 
     def iter_mod_counts_for_league(self, game: str, league: str) -> list[tuple]:
@@ -893,6 +897,73 @@ class LocalDb:
                     for r in population_rows
                 ],
             )
+
+    # ---- skill-centric publish (skill-meta phase 22) ---------------------
+
+    def latest_finished_skill_run(self, game: str) -> Optional[dict[str, Any]]:
+        """The newest 'finished' skill_runs row for `game`, joined to its
+        snapshot's `days_since_league_start` -- what `publish_skill_meta`
+        reads. `None` if no run has ever finished (nothing to publish yet)."""
+        row = self._conn.execute(
+            """SELECT sr.id, sr.snapshot_id, sr.league, s.days_since_league_start, sr.finished_at
+               FROM skill_runs sr JOIN snapshots s ON s.id = sr.snapshot_id
+               WHERE sr.game = ? AND sr.status = 'finished' ORDER BY sr.id DESC LIMIT 1""",
+            (game,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"run_id": row[0], "snapshot_id": row[1], "league": row[2], "days_since_league_start": row[3], "finished_at": row[4]}
+
+    def get_skill_run_population_total(self, run_id: int) -> int:
+        row = self._conn.execute("SELECT population_total FROM skill_runs WHERE id = ?", (run_id,)).fetchone()
+        return row[0] if row else 0
+
+    def iter_skill_stat_counts_for_snapshot(self, snapshot_id: int) -> list[tuple]:
+        return self._conn.execute(
+            """SELECT skill_type, skill, level_bracket, slot, stat_id, mod_kind, count, population,
+                      slot_holders, usage_pct, value_min, value_max
+               FROM skill_stat_counts WHERE snapshot_id = ?""",
+            (snapshot_id,),
+        ).fetchall()
+
+    def iter_skill_passive_counts_for_snapshot(self, snapshot_id: int) -> list[tuple]:
+        return self._conn.execute(
+            """SELECT skill_type, skill, level_bracket, keypassive, count, population, usage_pct
+               FROM skill_passive_counts WHERE snapshot_id = ?""",
+            (snapshot_id,),
+        ).fetchall()
+
+    def iter_skill_populations_for_snapshot(self, snapshot_id: int) -> list[tuple]:
+        return self._conn.execute(
+            """SELECT skill_type, skill, level_bracket, population, facet_count
+               FROM skill_populations WHERE snapshot_id = ?""",
+            (snapshot_id,),
+        ).fetchall()
+
+    def iter_skill_stat_counts_for_league(self, game: str, league: str) -> list[tuple]:
+        """Every skill_stat_counts row ever recorded for (game, league) from a
+        skill-centric (`skill_top100_v1`) snapshot, joined to
+        days_since_league_start -- used by archive_export.py. Explicitly
+        filtered by collection_method (a no-op today: the legacy job never
+        writes to this table) so a future accidental legacy write can never
+        silently blend an unreliable-skill snapshot into this archive."""
+        return self._conn.execute(
+            """SELECT ssc.skill_type, ssc.skill, ssc.level_bracket, ssc.slot, ssc.stat_id, ssc.mod_kind,
+                      ssc.count, ssc.population, ssc.slot_holders, ssc.value_min, ssc.value_max,
+                      ssc.snapshot_id, ssc.days_since_league_start
+               FROM skill_stat_counts ssc JOIN snapshots s ON s.id = ssc.snapshot_id
+               WHERE s.game = ? AND s.league = ? AND s.collection_method = ?""",
+            (game, league, COLLECTION_METHOD_SKILL),
+        ).fetchall()
+
+    def iter_skill_passive_counts_for_league(self, game: str, league: str) -> list[tuple]:
+        return self._conn.execute(
+            """SELECT spc.skill_type, spc.skill, spc.level_bracket, spc.keypassive, spc.count,
+                      spc.population, spc.snapshot_id, spc.days_since_league_start
+               FROM skill_passive_counts spc JOIN snapshots s ON s.id = spc.snapshot_id
+               WHERE s.game = ? AND s.league = ? AND s.collection_method = ?""",
+            (game, league, COLLECTION_METHOD_SKILL),
+        ).fetchall()
 
     def commit(self) -> None:
         self._conn.commit()

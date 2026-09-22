@@ -243,26 +243,10 @@ def build_meta_schema(
     }
 
 
-def build_passives_schema(
-    league: str,
-    days_since_league_start: Optional[int],
-    passives: list[dict[str, Any]],
-    min_population: int = 20,
-) -> dict[str, Any]:
-    """Build `{game}/passives/latest.json` (skill-meta phase 3, path A).
-    Notable/keystone passives only, from poe.ninja's builds-search
-    "keypassives" column -- NOT the full passive tree, see
-    src/fetchers/ninja_builds.py's module docstring and CLAUDE.md for why.
-    Rows below `min_population` are dropped, same noise-cutting rule as
-    `build_meta_schema`'s mod count filter."""
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "league": league,
-        "days_since_league_start": days_since_league_start,
-        "source": "keypassives (notable/keystone tier only, not the full passive tree)",
-        "passives": [p for p in passives if p["population"] >= min_population],
-    }
+# `build_passives_schema` (the `{game}/passives/latest.json` builder) moved to
+# src/processing/skill_publish.py 2026-09-21 -- it now reads the skill-centric
+# tables (skill_passive_counts), not keypassive_counts, and filters by
+# usage_pct (skill_meta.publish.min_usage_pct), not population. See SPEC.md 8.9.
 
 
 class PricesPublisher:
@@ -303,8 +287,13 @@ class PricesPublisher:
                 pass
         return None
 
-    def publish(self, data: dict[str, Any], blob_path: str, cache_control: str) -> None:
-        payload = json.dumps(data, ensure_ascii=False, indent=2)
+    def publish(self, data: dict[str, Any], blob_path: str, cache_control: str, compact: bool = False) -> None:
+        """`compact=True` skips indentation (no data difference, ~50% smaller
+        for deeply-nested payloads -- see `archive_export.py`'s own measured
+        note). Used for `{game}/skills/*` files, where per-skill file count
+        (150+) makes the indentation overhead add up; every other published
+        file keeps the project's existing indented convention."""
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")) if compact else json.dumps(data, ensure_ascii=False, indent=2)
 
         bucket = self._client_lazy().bucket(self._bucket_name)
         blob = bucket.blob(blob_path)

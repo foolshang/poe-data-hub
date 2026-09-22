@@ -44,6 +44,12 @@ from src.processing.archetyper import Archetyper
 from src.processing.archive_export import DEFAULT_ARCHIVE_DIR, export_league_archive
 from src.processing.char_cache import SnapshotProvider, StoreBackedCharacterCache
 from src.processing.skill_collect import CollectConfig, run_skill_collection
+from src.processing.skill_publish import (
+    build_skill_dictionary,
+    build_skill_groups,
+    build_skill_passives_schema,
+    build_skills_index,
+)
 from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
 from src.storage.local_db import COLLECTION_METHOD_LEGACY, LocalDb
@@ -110,6 +116,14 @@ def _meta_dated_blob_path(game: str, date_str: str) -> str:
 
 def _passives_blob_path(game: str) -> str:
     return f"{game}/passives/latest.json"
+
+
+def _skills_index_blob_path(game: str) -> str:
+    return f"{game}/skills/index.json"
+
+
+def _skill_dictionary_blob_path(game: str) -> str:
+    return f"{game}/skills/dictionary.json"
 
 
 def _prices_blob_path(game: str) -> str:
@@ -691,7 +705,10 @@ def _run_skill_meta_for_game(
 ) -> dict[str, Any]:
     """The skill-centric job: top-100 characters per poe.ninja skill list
     (main, and spirit in PoE2), checkpointed and resumable -- see
-    `src/processing/skill_collect.py`."""
+    `src/processing/skill_collect.py`. Publishes `{game}/skills/*` and the new
+    `{game}/passives/latest.json` immediately after a successful collection
+    (see `publish_skill_meta`), reusing the same `normalizer` (no extra
+    fetch)."""
     league, _league_dates, days_since_league_start = _detect_league_and_dates(http, cfg, game)
 
     collect_cfg = CollectConfig.from_cfg(cfg)
@@ -721,11 +738,101 @@ def _run_skill_meta_for_game(
             builds_fetcher=builds_fetcher, snapshots=snapshots, cache=cache, db=db,
             normalizer=normalizer, level_brackets=_level_brackets(cfg), config=collect_cfg,
         )
+        publish_result = publish_skill_meta(db, publisher, game, cfg, normalizer)
+        stats["publish"] = publish_result
     finally:
         db.close()
     stats["peak_rss_mb"] = _peak_memory_mb()
     log.info("skill meta job(%s): peak RSS = %s MB", game, stats["peak_rss_mb"])
     return stats
+
+
+def publish_skill_meta(
+    db: LocalDb, publisher: PricesPublisher, game: str, cfg: dict[str, Any], normalizer: ModNormalizer,
+) -> dict[str, Any]:
+    """Publishes from whatever skill-centric run most recently *finished*
+    (`skill_runs.status = 'finished'`) for `game` -- not necessarily the one
+    that was just collected: this also lets `--publish-skill-meta` republish
+    from an already-completed run without recollecting (e.g. after a publish
+    bug fix, the same pattern `run_gems_once` uses for its staged copy).
+
+    Publishes, all under `skill_meta.publish` config: `{game}/skills/index.json`
+    (every skill, `populations` shown even when a skill's base is thin -- never
+    filtered out, see skill_publish.py), one `{game}/skills/{type}/{slug}.json`
+    per skill (compact JSON), a shared `{game}/skills/dictionary.json`
+    (stat_id -> template, not duplicated into every skill file), and the new
+    `{game}/passives/latest.json` (schema_version bumped, full shape
+    replacement -- see SPEC.md 8.9/CLAUDE.md)."""
+    run = db.latest_finished_skill_run(game)
+    if run is None:
+        log.warning("skill publish(%s): no finished skill-centric run yet -- nothing to publish", game)
+        return {"ok": False, "reason": "no finished run"}
+
+    publish_cfg = cfg.get("skill_meta", {}).get("publish", {})
+    min_usage_pct = publish_cfg.get("min_usage_pct", 0.1)
+    index_max_age = publish_cfg.get("index_cache_max_age_seconds", 3600)
+    skill_max_age = publish_cfg.get("skill_file_cache_max_age_seconds", 21600)
+    dict_max_age = publish_cfg.get("dictionary_cache_max_age_seconds", 86400)
+
+    snapshot_id, league, days = run["snapshot_id"], run["league"], run["days_since_league_start"]
+    stat_rows = db.iter_skill_stat_counts_for_snapshot(snapshot_id)
+    passive_rows = db.iter_skill_passive_counts_for_snapshot(snapshot_id)
+    population_rows = db.iter_skill_populations_for_snapshot(snapshot_id)
+    groups = build_skill_groups(stat_rows, passive_rows, population_rows, min_usage_pct)
+    population_total = db.get_skill_run_population_total(run["run_id"])
+
+    index_data = build_skills_index(game, league, days, population_total, groups)
+    publisher.publish(index_data, _skills_index_blob_path(game), cache_control=f"public, max-age={index_max_age}")
+
+    for g in groups:
+        publisher.publish(
+            g.to_file(game, league, days), g.path(game), cache_control=f"public, max-age={skill_max_age}", compact=True,
+        )
+
+    dictionary_data = build_skill_dictionary(game, normalizer.stat_dictionary())
+    publisher.publish(dictionary_data, _skill_dictionary_blob_path(game), cache_control=f"public, max-age={dict_max_age}")
+
+    passives_data = build_skill_passives_schema(game, league, days, groups)
+    publisher.publish(passives_data, _passives_blob_path(game), cache_control="public, max-age=3600")
+
+    log.info(
+        "skill publish(%s): run %d (snapshot %d) -- %d skills (%d main, %d spirit), index+dictionary+passives",
+        game, run["run_id"], snapshot_id, len(groups),
+        sum(1 for g in groups if g.skill_type == "main"), sum(1 for g in groups if g.skill_type == "spirit"),
+    )
+    return {
+        "ok": True, "run_id": run["run_id"], "snapshot_id": snapshot_id, "league": league,
+        "skills_published": len(groups),
+        "main_skills": sum(1 for g in groups if g.skill_type == "main"),
+        "spirit_skills": sum(1 for g in groups if g.skill_type == "spirit"),
+    }
+
+
+def run_publish_skill_meta_once(cfg: dict[str, Any], games: list[str]) -> dict[str, dict[str, Any]]:
+    """`--publish-skill-meta --game G [--game G2 ...]`: (re)publish from the
+    latest finished skill-centric run for each game, without recollecting --
+    the escape hatch for shipping a publish-side fix without repeating an
+    8-10h collection. Not guarded by job_lock: it only reads SQLite + a cheap
+    ModNormalizer load and writes to Firebase, none of the rate-limited
+    poe.ninja calls job_lock protects against."""
+    http = _build_http_client(cfg)
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    results: dict[str, dict[str, Any]] = {}
+    db = LocalDb()
+    try:
+        for game in games:
+            normalizer = ModNormalizer(
+                http, game=game,
+                cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
+                firebase_stats_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+            )
+            normalizer.load()
+            results[game] = publish_skill_meta(db, publisher, game, cfg, normalizer)
+    finally:
+        db.close()
+    log.info("publish_skill_meta: %s", results)
+    return results
 
 
 META_PARTS = ("slot", "skill")
@@ -1395,6 +1502,11 @@ def main() -> None:
     parser.add_argument("--run-gems-once", action="store_true")
     parser.add_argument("--reprocess-char-items", action="store_true", help="Recompute skill_mod_counts from stored char_items, offline (skill-meta phase 2)")
     parser.add_argument("--export-league-archive", metavar="GAME:LEAGUE", help="Export one league's archive now, e.g. poe1:Mirage (skill-meta phase 5)")
+    parser.add_argument(
+        "--publish-skill-meta", action="store_true",
+        help="(Re)publish {game}/skills/* + passives/latest.json from the latest finished skill-centric run, "
+             "without recollecting (needs --game at least once)",
+    )
     parser.add_argument("--serve", action="store_true", help="Run the persistent scheduler (prices+meta+cleanup+news+gems)")
     args = parser.parse_args()
 
@@ -1413,6 +1525,10 @@ def main() -> None:
         run_gems_once(cfg)
     elif args.reprocess_char_items:
         run_reprocess_char_items(cfg)
+    elif args.publish_skill_meta:
+        if not args.game:
+            parser.error("--publish-skill-meta requires at least one --game")
+        run_publish_skill_meta_once(cfg, args.game)
     elif args.export_league_archive:
         game, _, league = args.export_league_archive.partition(":")
         if not game or not league:

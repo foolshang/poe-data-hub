@@ -23,6 +23,38 @@ def publisher(tmp_path) -> PricesPublisher:
     return PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
 
 
+def test_publish_compact_omits_indentation_but_keeps_the_same_data(publisher: PricesPublisher):
+    """`compact=True` (used for {game}/skills/* files) must round-trip the
+    same data with no separators/newline padding, and still pass its own
+    readback verification."""
+    import json
+
+    data = {"a": 1, "b": [1, 2, 3]}
+    compact_payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    client, blob, _bucket = _mock_client(compact_payload)
+    publisher._client = client
+
+    publisher.publish(data, "poe1/skills/main/fireball.json", cache_control="public, max-age=21600", compact=True)
+
+    uploaded = blob.upload_from_string.call_args[0][0]
+    assert uploaded == compact_payload
+    assert "\n" not in uploaded and ": " not in uploaded
+    assert json.loads(uploaded) == data
+
+
+def test_publish_default_is_still_indented(publisher: PricesPublisher):
+    import json
+
+    data = {"a": 1}
+    indented_payload = json.dumps(data, ensure_ascii=False, indent=2)
+    client, blob, _bucket = _mock_client(indented_payload)
+    publisher._client = client
+
+    publisher.publish(data, "poe1/meta/latest.json", cache_control="no-cache")
+
+    assert blob.upload_from_string.call_args[0][0] == indented_payload
+
+
 def _mock_client(readback_text):
     """A fake google.cloud.storage.Client whose blob.download_as_text()
     returns `readback_text` regardless of upload_from_string content."""

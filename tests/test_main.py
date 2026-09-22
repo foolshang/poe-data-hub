@@ -24,10 +24,12 @@ from src.main import (
     _safe_run,
     _update_meta_status,
     _update_status,
+    publish_skill_meta,
     run_archive_export_once,
     run_export_league_archive,
     run_meta_once,
     run_prices_once,
+    run_publish_skill_meta_once,
     run_reprocess_char_items,
     run_scheduler,
 )
@@ -36,7 +38,10 @@ from src.storage.publisher import PricesPublisher
 from src.utils import job_lock
 
 
-_TESTS_OF_THE_REAL_SKILL_JOB = {"test_run_skill_meta_for_game_wires_league_cache_and_collection"}
+_TESTS_OF_THE_REAL_SKILL_JOB = {
+    "test_run_skill_meta_for_game_wires_league_cache_and_collection",
+    "test_run_skill_meta_for_game_publishes_after_a_successful_collection",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -1420,3 +1425,151 @@ def test_run_skill_meta_for_game_wires_league_cache_and_collection(tmp_path, mon
     assert seen["days_since_league_start"] == (datetime.now(timezone.utc) - start).days  # no longer NULL
     assert seen["config"].min_skill_pct == 0.5 and seen["config"].reuse_max_age_days == 3.0
     normalizer.load.assert_called_once()
+
+
+# --- Skill-centric publish wiring (skill-meta phase 22) ---------------------
+
+def _seed_finished_skill_run(db, game="poe2", league="L", days=5):
+    from src.storage.local_db import COLLECTION_METHOD_SKILL
+
+    snap = db.insert_snapshot(game, league, days, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    stat = {"level_bracket": "90-100", "slot": "ring", "stat_id": "s1", "mod_kind": "explicit", "count": 8,
+            "population": 10, "slot_holders": 9, "usage_pct": 80.0, "value_min": 1.0, "value_max": 2.0}
+    passive = {"level_bracket": "90-100", "keypassive": "Dance with Death", "count": 8, "population": 10, "usage_pct": 80.0}
+    pop = {"level_bracket": "90-100", "population": 10, "facet_count": 500}
+    db.replace_skill_counts_for_snapshot(snap, game, days, "main", "Fireball", [stat], [passive], [pop])
+    run_id = db.create_skill_run(game, league, snap, 124408, {}, [])
+    db.finish_skill_run(run_id, "finished", {})
+    return snap, run_id
+
+
+def test_publish_skill_meta_publishes_index_skill_file_dictionary_and_passives(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    _seed_finished_skill_run(db)
+    publisher = MagicMock()
+    normalizer = MagicMock(stat_dictionary=lambda: [{"stat_id": "s1", "template": "+# to Life", "mod_kind": "explicit"}])
+    cfg = {"skill_meta": {"publish": {"min_usage_pct": 0.1}}}
+
+    result = publish_skill_meta(db, publisher, "poe2", cfg, normalizer)
+    db.close()
+
+    assert result["ok"] is True and result["main_skills"] == 1 and result["skills_published"] == 1
+    paths = [c.args[1] for c in publisher.publish.call_args_list]
+    assert "poe2/skills/index.json" in paths
+    assert "poe2/skills/main/fireball.json" in paths
+    assert "poe2/skills/dictionary.json" in paths
+    assert "poe2/passives/latest.json" in paths
+
+    skill_file_call = next(c for c in publisher.publish.call_args_list if c.args[1] == "poe2/skills/main/fireball.json")
+    assert skill_file_call.kwargs.get("compact") is True
+    index_call = next(c for c in publisher.publish.call_args_list if c.args[1] == "poe2/skills/index.json")
+    assert index_call.args[0]["population_total"] == 124408
+
+
+def test_publish_skill_meta_uses_configured_cache_control_seconds(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    _seed_finished_skill_run(db)
+    publisher = MagicMock()
+    normalizer = MagicMock(stat_dictionary=lambda: [])
+    cfg = {"skill_meta": {"publish": {
+        "min_usage_pct": 0.1, "index_cache_max_age_seconds": 111,
+        "skill_file_cache_max_age_seconds": 222, "dictionary_cache_max_age_seconds": 333,
+    }}}
+
+    publish_skill_meta(db, publisher, "poe2", cfg, normalizer)
+    db.close()
+
+    by_path = {c.args[1]: c.kwargs["cache_control"] for c in publisher.publish.call_args_list}
+    assert by_path["poe2/skills/index.json"] == "public, max-age=111"
+    assert by_path["poe2/skills/main/fireball.json"] == "public, max-age=222"
+    assert by_path["poe2/skills/dictionary.json"] == "public, max-age=333"
+
+
+def test_publish_skill_meta_no_finished_run_yet_publishes_nothing(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    publisher = MagicMock()
+    result = publish_skill_meta(db, publisher, "poe2", {}, MagicMock())
+    db.close()
+    assert result == {"ok": False, "reason": "no finished run"}
+    publisher.publish.assert_not_called()
+
+
+def test_run_publish_skill_meta_once_publishes_for_every_requested_game_without_recollecting(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db = LocalDb()
+    _seed_finished_skill_run(db, game="poe1", league="Allflame")
+    _seed_finished_skill_run(db, game="poe2", league="Forbidden Rites")
+    db.close()
+
+    cfg = {"firebase": {"bucket": "b"}, "rate_limits": {}, "http": {}}
+    created_publishers = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created_publishers)), \
+         patch("src.main.ModNormalizer") as MockNormalizer, patch("src.main.HttpClient"), \
+         patch("src.main.run_skill_collection") as fake_collect:
+        MockNormalizer.return_value.stat_dictionary.return_value = []
+        results = run_publish_skill_meta_once(cfg, ["poe1", "poe2"])
+
+    fake_collect.assert_not_called()  # the whole point: no recollection
+    assert results["poe1"]["ok"] is True and results["poe2"]["ok"] is True
+    publisher = created_publishers[-1]
+    assert publisher.fetch_previous("poe1/skills/index.json")["game"] == "poe1"
+    assert publisher.fetch_previous("poe2/passives/latest.json")["league"] == "Forbidden Rites"
+
+
+def test_main_parses_publish_skill_meta_flag_and_requires_game(monkeypatch):
+    import src.main as main_module
+
+    with patch("src.main.load_config", return_value={}), patch("src.main._setup_logging"), \
+         patch("src.main.run_publish_skill_meta_once") as fake_publish:
+        monkeypatch.setattr("sys.argv", ["main", "--publish-skill-meta", "--game", "poe1", "--game", "poe2"])
+        main_module.main()
+        fake_publish.assert_called_once_with({}, ["poe1", "poe2"])
+
+    with patch("src.main.load_config", return_value={}), patch("src.main._setup_logging"), \
+         pytest.raises(SystemExit):
+        main_module_argv = ["main", "--publish-skill-meta"]
+        monkeypatch.setattr("sys.argv", main_module_argv)
+        main_module.main()
+
+
+def test_run_skill_meta_for_game_publishes_after_a_successful_collection(tmp_path, monkeypatch):
+    """Glue test: `_run_skill_meta_for_game` calls `publish_skill_meta` with the
+    same normalizer it loaded (no extra fetch) after collection succeeds."""
+    import src.main as main_module
+    from datetime import datetime, timezone
+
+    monkeypatch.chdir(tmp_path)
+    cfg = {"firebase": {"bucket": "b"}, "game_versions": ["poe2"], "rate_limits": {}, "http": {}}
+
+    class FakeDetector:
+        def __init__(self, *a, **k): pass
+        def detect(self): return LeagueResult(main="L", events=[])
+
+    class FakeDates:
+        def __init__(self, *a, **k): pass
+        def fetch(self, league):
+            from src.fetchers.league_dates import LeagueDates
+            return LeagueDates(start_at=datetime.now(timezone.utc), end_at=None)
+
+    class FakeBuilds:
+        def __init__(self, *a, **k): pass
+        def resolve_snapshot(self, league):
+            from src.fetchers.ninja_builds import SnapshotVersion
+            return SnapshotVersion("u", league, "v1", "s")
+
+    seen = {}
+
+    def fake_publish(db, publisher, game, cfg, normalizer):
+        seen["normalizer"] = normalizer
+        return {"ok": True}
+
+    with patch("src.main.LeagueDetector", FakeDetector), patch("src.main.LeagueDatesFetcher", FakeDates), \
+         patch("src.main.NinjaBuildsFetcher", FakeBuilds), patch("src.main.ModNormalizer") as MockNormalizer, \
+         patch("src.main.run_skill_collection", return_value={"snapshot_id": 1}), \
+         patch("src.main.publish_skill_meta", side_effect=fake_publish), \
+         patch("src.main._archive_previous_league_if_changed"), patch("src.main.NinjaCharsFetcher"):
+        MockNormalizer.return_value.stats_source = "test"
+        stats = main_module._run_skill_meta_for_game(MagicMock(), MagicMock(), cfg, "poe2")
+
+    assert stats["publish"] == {"ok": True}
+    assert seen["normalizer"] is MockNormalizer.return_value  # same instance, not a fresh load

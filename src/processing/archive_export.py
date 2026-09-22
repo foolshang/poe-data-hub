@@ -40,6 +40,17 @@ full-tree "path B" would need real GGG tree data this project doesn't have
 yet. For a league with no keypassive_counts rows at all (never reprocessed
 under phase 3, or genuinely empty), this is `{}`, not `null` -- `null` only
 ever meant "phase 3 doesn't exist yet", which is no longer true.
+
+`skills` (skill-meta phase 22, added 2026-09-21): the skill-centric
+collection's own archive, from `skill_stat_counts`/`skill_passive_counts`/
+`skill_populations` -- **only ever reads `skill_top100_v1` snapshots**
+(`LocalDb.iter_skill_stat_counts_for_league`/`iter_skill_passive_counts_for_league`
+filter on `collection_method`), never the `legacy_slot_top100` snapshots that
+back `mod_counts`/`skill_mod_counts`/`passives` above. This is an orthogonal
+top-level key, not a replacement -- `mod_counts` (archetype dimension, no
+main-skill guess involved) keeps spanning every snapshot regardless of
+collection method, and `skill_mod_counts`/`passives` keep whatever
+`legacy_slot_top100` history already existed. See SPEC.md 8.10.
 """
 from __future__ import annotations
 
@@ -157,10 +168,87 @@ def _build_passive_archive(rows: list[tuple]) -> dict[str, Any]:
     return out
 
 
+def _build_skill_centric_archive(
+    stat_rows: list[tuple], passive_rows: list[tuple],
+    population_rows_by_snapshot: dict[int, tuple[Optional[int], list[tuple]]],
+) -> dict[str, Any]:
+    """`stat_rows`: (skill_type, skill, bracket, slot, stat_id, mod_kind,
+    count, population, slot_holders, v_min, v_max, snapshot_id, days).
+    `passive_rows`: (skill_type, skill, bracket, keypassive, count,
+    population, snapshot_id, days). `population_rows_by_snapshot`: per
+    snapshot_id, `(days_since_league_start, that snapshot's own (skill_type,
+    skill, bracket, population, facet_count) rows)` -- the source of truth
+    for population, same reasoning as `skill_publish.build_skill_groups`,
+    applied per age bucket instead of per snapshot: a (skill_type, skill,
+    bracket, bucket) group's population is the SUM of its member snapshots'
+    own populations (each counted once, not once per stat/passive row -- same
+    population-dedup rule as `_build_skill_mod_archive` above, keyed without
+    `archetype` since this table has none)."""
+    population_by_key: dict[tuple, int] = defaultdict(int)
+    for days, rows in population_rows_by_snapshot.values():
+        for skill_type, skill, bracket, population, _facet in rows:
+            population_by_key[(skill_type, skill, bracket, _age_bucket(days))] += population
+
+    stat_by_key: dict[tuple, dict[tuple, dict[str, Any]]] = {}
+    for skill_type, skill, bracket, slot, stat_id, mod_kind, count, _pop, _slot_holders, v_min, v_max, snapshot_id, days in stat_rows:
+        bucket = _age_bucket(days)
+        key = (skill_type, skill, bracket, bucket, slot)
+        entry = stat_by_key.setdefault(key, {}).setdefault(
+            (stat_id, mod_kind), {"stat_id": stat_id, "mod_kind": mod_kind, "count": 0, "value_min": None, "value_max": None},
+        )
+        entry["count"] += count
+        if v_min is not None:
+            entry["value_min"] = v_min if entry["value_min"] is None else min(entry["value_min"], v_min)
+        if v_max is not None:
+            entry["value_max"] = v_max if entry["value_max"] is None else max(entry["value_max"], v_max)
+
+    kp_by_key: dict[tuple, dict[str, dict[str, Any]]] = {}
+    for skill_type, skill, bracket, keypassive, count, _pop, snapshot_id, days in passive_rows:
+        bucket = _age_bucket(days)
+        key = (skill_type, skill, bracket, bucket)
+        entry = kp_by_key.setdefault(key, {}).setdefault(keypassive, {"keypassive": keypassive, "count": 0})
+        entry["count"] += count
+
+    leaves: dict[tuple, dict[str, Any]] = {}
+    for (skill_type, skill, bracket, bucket, slot), stat_map in stat_by_key.items():
+        leaf = leaves.setdefault((skill_type, skill, bracket, bucket), {"population": 0, "mods": {}, "passives": []})
+        pop = population_by_key.get((skill_type, skill, bracket, bucket), 0)
+        rows = sorted(stat_map.values(), key=lambda r: r["count"], reverse=True)
+        for r in rows:
+            r["population"] = pop
+            r["usage_pct"] = round(r["count"] / pop * 100, 2) if pop else 0.0
+        leaf["population"] = pop
+        leaf["mods"][slot] = rows
+    for (skill_type, skill, bracket, bucket), kp_map in kp_by_key.items():
+        leaf = leaves.setdefault((skill_type, skill, bracket, bucket), {"population": 0, "mods": {}, "passives": []})
+        pop = population_by_key.get((skill_type, skill, bracket, bucket), 0)
+        rows = sorted(kp_map.values(), key=lambda r: r["count"], reverse=True)
+        for r in rows:
+            r["population"] = pop
+            r["usage_pct"] = round(r["count"] / pop * 100, 2) if pop else 0.0
+        leaf["population"] = pop
+        leaf["passives"] = rows
+
+    out: dict[str, Any] = {}
+    for (skill_type, skill, bracket, bucket), leaf in leaves.items():
+        out.setdefault(skill_type, {}).setdefault(skill, {}).setdefault(bracket, {})[bucket] = leaf
+    return out
+
+
 def build_league_archive(db: LocalDb, game: str, league: str) -> dict[str, Any]:
     skill_rows = db.iter_skill_mod_counts_for_league(game, league)
     mod_rows = db.iter_mod_counts_for_league(game, league)
     passive_rows = db.iter_keypassive_counts_for_league(game, league)
+
+    skill_centric_stat_rows = db.iter_skill_stat_counts_for_league(game, league)
+    skill_centric_passive_rows = db.iter_skill_passive_counts_for_league(game, league)
+    days_by_snapshot = {r[11]: r[12] for r in skill_centric_stat_rows}
+    days_by_snapshot.update({r[6]: r[7] for r in skill_centric_passive_rows})
+    population_rows_by_snapshot = {
+        snapshot_id: (days, db.iter_skill_populations_for_snapshot(snapshot_id))
+        for snapshot_id, days in days_by_snapshot.items()
+    }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "game": game,
@@ -171,6 +259,7 @@ def build_league_archive(db: LocalDb, game: str, league: str) -> dict[str, Any]:
         "mod_counts": _build_mod_archive(mod_rows),
         "skill_mod_counts": _build_skill_mod_archive(skill_rows),
         "passives": _build_passive_archive(passive_rows),
+        "skills": _build_skill_centric_archive(skill_centric_stat_rows, skill_centric_passive_rows, population_rows_by_snapshot),
     }
 
 

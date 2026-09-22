@@ -315,6 +315,30 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   - Main and spirit (PoE2) lists overlap by name; `gems.json`'s `gem_type` does
     not identify spirit skills (24 of 450) -- the source of truth is which
     poe.ninja facet a skill came from.
+  - **A per-skill list's `dps-<skill>.*`/`rate-*` etc. columns can hold fewer
+    entries than there are rows** (99/98/94 of 100 seen live 2026-09-21,
+    first PoE1 run) -- characters with no value for that skill are simply
+    omitted from those columns, not padded. `_validate_search_response`'s
+    per-skill-list call now checks row-alignment only for the columns the
+    collector actually reads (`SKILL_LIST_ALIGNED_COLUMNS`), not every column
+    in the response; the per-slot fetch keeps the strict all-columns check.
+  - **`{game}/passives/latest.json` schema_version bumped 2 -> 3, full shape
+    replacement** (2026-09-21): `main_skill`/`archetype`/`rank_in_bracket`
+    gone, `skill_type` added, source table changed from `keypassive_counts`
+    to `skill_passive_counts`. Any consumer still parsing the old shape needs
+    updating -- see the "Deploy ordering for breaking id/schema changes"
+    memory ([[feedback-deploy-id-space-ordering]]) if this ever needs
+    sequencing with a bot/Checker deploy; this particular change was shipped
+    directly on the project owner's explicit instruction, not previously
+    coordinated with those repos.
+  - **`{game}/skills/index.json` never drops a skill by population size** --
+    only `skill_meta.publish.min_usage_pct` drops individual mod/passive rows
+    inside a skill's own file. A thin skill (2-8 characters) still gets an
+    index entry and a file with its real population shown, so a consumer can
+    judge how much to trust its numbers (project owner's explicit ask).
+  - `{game}/skills/dictionary.json` exists specifically so `stat_id ->
+    template` isn't duplicated into 150+ per-skill files (~1.5MB each for
+    PoE1 otherwise).
 
 ## Layout
 

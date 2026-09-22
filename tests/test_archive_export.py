@@ -230,3 +230,141 @@ def test_export_league_archive_publish_failure_does_not_raise(tmp_path):
     db.close()
 
     assert path.exists()  # VM copy still written despite the publish failure
+
+
+# --- Skill-centric collection (skill-meta phase 22) -------------------------
+
+from src.storage.local_db import COLLECTION_METHOD_LEGACY, COLLECTION_METHOD_SKILL  # noqa: E402
+
+
+def _stat_row(**overrides):
+    row = {
+        "level_bracket": "90-100", "slot": "ring", "stat_id": "explicit.stat_life", "mod_kind": "explicit",
+        "count": 8, "population": 10, "slot_holders": 9, "usage_pct": 80.0, "value_min": 40.0, "value_max": 115.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def _pop_row(**overrides):
+    row = {"level_bracket": "90-100", "population": 10, "facet_count": 500}
+    row.update(overrides)
+    return row
+
+
+def _skill_passive_row(**overrides):
+    row = {"level_bracket": "90-100", "keypassive": "Dance with Death", "count": 8, "population": 10, "usage_pct": 80.0}
+    row.update(overrides)
+    return row
+
+
+def test_legacy_archive_sections_ignore_skill_centric_snapshots(tmp_path):
+    """Defensive: even if a skill_top100_v1 snapshot somehow had rows in the
+    OLD tables (it shouldn't -- the skill-centric job never writes there),
+    the legacy sections must not include them."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    skill_snap = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    db.insert_skill_mod_counts(skill_snap, "poe2", 5, [_skill_row()])
+    db.insert_keypassive_counts(skill_snap, "poe2", 5, [_keypassive_row()])
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    assert archive["skill_mod_counts"] == {}
+    assert archive["passives"] == {}
+
+
+def test_mod_counts_archive_spans_both_collection_methods(tmp_path):
+    """mod_counts has no main_skill/skill involved -- it keeps archiving
+    regardless of collection_method, unlike skill_mod_counts/passives."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    legacy_snap = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0,
+    )
+    skill_snap = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=6, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    db.insert_mod_counts(legacy_snap, [_mod_row(count=8)])
+    db.insert_mod_counts(skill_snap, [_mod_row(count=3)])
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    assert archive["mod_counts"]["ring"]["spell-fire"]["1-21"][0]["count"] == 11
+
+
+def test_skills_archive_basic_shape(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    db.replace_skill_counts_for_snapshot(
+        snap, "poe2", 5, "main", "Fireball", [_stat_row()], [_skill_passive_row()], [_pop_row()],
+    )
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    leaf = archive["skills"]["main"]["Fireball"]["90-100"]["1-21"]
+    assert leaf["population"] == 10
+    assert leaf["mods"]["ring"] == [
+        {"stat_id": "explicit.stat_life", "mod_kind": "explicit", "count": 8,
+         "value_min": 40.0, "value_max": 115.0, "population": 10, "usage_pct": 80.0}
+    ]
+    assert leaf["passives"] == [
+        {"keypassive": "Dance with Death", "count": 8, "population": 10, "usage_pct": 80.0}
+    ]
+
+
+def test_skills_archive_sums_across_snapshots_and_dedupes_population(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap1 = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    snap2 = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=10, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    db.replace_skill_counts_for_snapshot(snap1, "poe2", 3, "main", "Fireball", [_stat_row(count=8, population=10)], [], [_pop_row(population=10)])
+    db.replace_skill_counts_for_snapshot(snap2, "poe2", 10, "main", "Fireball", [_stat_row(count=4, population=6)], [], [_pop_row(population=6)])
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    row = archive["skills"]["main"]["Fireball"]["90-100"]["1-21"]["mods"]["ring"][0]
+    assert row["count"] == 12
+    assert row["population"] == 16
+    assert row["usage_pct"] == round(12 / 16 * 100, 2)
+
+
+def test_skills_archive_keeps_main_and_spirit_separate(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    db.replace_skill_counts_for_snapshot(snap, "poe2", 5, "main", "Herald of Ice", [_stat_row(count=3)], [], [_pop_row()])
+    db.replace_skill_counts_for_snapshot(snap, "poe2", 5, "spirit", "Herald of Ice", [_stat_row(count=7)], [], [_pop_row()])
+
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+
+    assert archive["skills"]["main"]["Herald of Ice"]["90-100"]["1-21"]["mods"]["ring"][0]["count"] == 3
+    assert archive["skills"]["spirit"]["Herald of Ice"]["90-100"]["1-21"]["mods"]["ring"][0]["count"] == 7
+
+
+def test_skills_archive_no_data_is_empty_dict(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    archive = build_league_archive(db, "poe2", "L")
+    db.close()
+    assert archive["skills"] == {}

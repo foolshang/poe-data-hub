@@ -148,8 +148,17 @@ skill_meta:
   # Publish-time filter for per-skill mods/passives (used by the publish step):
   # drop entries used by < this % of that skill's characters. Percentage only --
   # no count-based cutoff (the old count>=5 / population>=20 rules do not apply).
+  # A whole skill/bracket is never dropped this way, only individual mod/passive
+  # rows -- its population still shows in skills/index.json and its own file.
   publish:
     min_usage_pct: 0.1
+    # Cache-Control seconds for each published file. Provisional: the
+    # skill-centric job is still manual (skill_meta.collect.scheduled=false),
+    # so there's no real update cadence yet to size these against -- revisit
+    # once that's decided.
+    index_cache_max_age_seconds: 3600       # 1h -- small file, F4 wants it fresh
+    skill_file_cache_max_age_seconds: 21600 # 6h -- 150+ files, heavier to keep re-fetching
+    dictionary_cache_max_age_seconds: 86400 # 24h -- changes only when GGG changes the mod pool
 
 retention:
   char_items_days: 90
