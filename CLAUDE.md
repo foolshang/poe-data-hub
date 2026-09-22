@@ -304,10 +304,29 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   - **`snapshots.collection_method`**: everything before 2026-09-21 is
     `legacy_slot_top100`, whose `main_skill` columns are unreliable. Archive /
     publish of per-skill data must read only `skill_top100_v1`.
-  - **`skill_meta.collect.scheduled` is `false` on purpose**: a first run takes
-    ~8 h (PoE1) / ~10 h (PoE2) at 1 request / 2 s and must never start by
-    surprise from a deploy. `--run-meta-once --game <g> --only skill` always
-    runs it; flip the flag only after the first manual runs have finished.
+  - **`skill_meta.collect.scheduled` was `false` until 2026-09-22**: a first
+    run takes ~8 h (PoE1) / ~10 h (PoE2) at 1 request / 2 s and must never
+    start by surprise from a deploy. `--run-meta-once --game <g> --only
+    skill` always runs it regardless of the flag. Now `true`, live on its own
+    daily cron (`skill_meta`, 05:00 ICT, `schedule.
+    skill_meta_cron_hour_thailand`) -- deliberately a SEPARATE
+    `scheduler.add_job` from the slot job's `meta` cron (02:00 ICT, now
+    always called with `parts=("slot",)` explicitly), not bundled into one
+    job, so the two never share a schedule/games-order/healthcheck. The
+    skill job always runs `games=["poe1","poe2"]` (PoE1 then PoE2,
+    sequential, never parallel -- both peaked >200MB RSS in the first live
+    runs on this e2-micro), regardless of `game_versions`' own order (fixed
+    2026-09-22: `run_meta_once`'s game iteration now follows an explicit
+    `games` list's own order, not always `configured`'s; the "is this a full
+    run over every configured game" check that gates both healthcheck pings
+    is a set comparison, not list-order-sensitive, for the same reason). Has
+    its own healthchecks.io check (`healthchecks.skill_meta_ping_url`,
+    recommended Period 24h / Grace 4h), independent of `meta_ping_url` --
+    fires only when both games' `characters_distinct > 0` this cycle
+    (`_all_games_got_real_skill_characters`, mirrors the slot ping's own
+    guard). `tools/heartbeat_check.py` independently checks
+    `{game}/skills/index.json`'s freshness (< 30h) and `population_total`
+    (> 0) for both games, Layer 2.
   - poe.ninja's index only holds characters of level >= 80 (checked
     2026-09-21) and lists come back level-descending, so ~all data lands in
     the `90-100` bracket. Re-check at each new league's launch whether lower

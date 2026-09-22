@@ -16,6 +16,7 @@ from src.fetchers.league_detector import LeagueResult
 from src.main import (
     UNMAPPED_HISTORY_LEN,
     _all_games_got_real_characters,
+    _all_games_got_real_skill_characters,
     _archive_previous_league_if_changed,
     _check_league_start_mode,
     _check_stats_cache_stale,
@@ -1611,3 +1612,163 @@ def test_run_cleanup_once_prunes_old_skill_stat_counts_and_finished_checkpoints(
     assert db2.iter_skill_stat_counts_for_snapshot(old_snap) == []
     assert db2.pending_skill_lists(finished_run) == [] and db2.iter_skill_members(finished_run, "main", "A") == []
     db2.close()
+
+
+# --- Skill-centric scheduling + its own healthcheck (approved 2026-09-22) ---
+
+def _skill_cfg(scheduled=True, ping=True):
+    return {
+        "skill_meta": {"collect": {"scheduled": scheduled}},
+        "firebase": {"bucket": "test-bucket"},
+        "game_versions": ["poe2", "poe1"],
+        "rate_limits": {},
+        "http": {},
+        "healthchecks": {"skill_meta_ping_url": "https://hc-ping.com/test-skill-meta"} if ping else {},
+    }
+
+
+def _run_skill_with_call_log(tmp_path, cfg, skill_characters=None, **kwargs):
+    """Like `_run_with_call_log` but the fake skill job returns a real
+    characters_distinct count per game (default: 10 for every game)."""
+    calls: list[tuple[str, str]] = []
+    skill_characters = skill_characters or {}
+
+    def fake_skill(http, publisher, cfg, game):
+        calls.append(("skill", game))
+        return {"characters_distinct": skill_characters.get(game, 10)}
+
+    created: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)), \
+         patch("src.main._run_skill_meta_for_game", side_effect=fake_skill), \
+         patch("src.main.HttpClient") as MockHttpClient:
+        result = run_meta_once(cfg, **kwargs)
+    return result, calls, MockHttpClient.return_value, created[-1]
+
+
+def test_skill_ping_fires_when_both_games_report_real_characters(tmp_path):
+    _result, calls, http, _pub = _run_skill_with_call_log(tmp_path, _skill_cfg(), games=["poe1", "poe2"], parts=("skill",))
+    assert calls == [("skill", "poe1"), ("skill", "poe2")]  # explicit games order respected
+    http.get_bytes.assert_called_once_with("https://hc-ping.com/test-skill-meta")
+
+
+def test_skill_ping_does_not_fire_when_one_game_reports_zero_characters(tmp_path):
+    _result, _calls, http, _pub = _run_skill_with_call_log(
+        tmp_path, _skill_cfg(), skill_characters={"poe1": 10, "poe2": 0}, games=["poe1", "poe2"], parts=("skill",),
+    )
+    http.get_bytes.assert_not_called()
+
+
+def test_skill_ping_does_not_fire_on_a_partial_run(tmp_path):
+    _result, calls, http, _pub = _run_skill_with_call_log(tmp_path, _skill_cfg(), games=["poe1"], parts=("skill",))
+    assert calls == [("skill", "poe1")]
+    http.get_bytes.assert_not_called()
+
+
+def test_skill_ping_and_slot_ping_are_independent(tmp_path):
+    """Both parts in one call, both configured pings set, both games healthy
+    for both dimensions -> both pings fire, independently of each other."""
+    cfg = _meta_cfg()
+    cfg["healthchecks"]["skill_meta_ping_url"] = "https://hc-ping.com/test-skill-meta"
+    calls: list[tuple[str, str]] = []
+
+    def fake_slot(http, publisher, cfg, game):
+        calls.append(("slot", game))
+        return _fake_meta_result(game)
+
+    def fake_skill(http, publisher, cfg, game):
+        calls.append(("skill", game))
+        return {"characters_distinct": 10}
+
+    created: list = []
+    with patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)), \
+         patch("src.main._run_meta_for_game", side_effect=fake_slot), \
+         patch("src.main._run_skill_meta_for_game", side_effect=fake_skill), \
+         patch("src.main.HttpClient") as MockHttpClient:
+        run_meta_once(cfg)
+
+    pinged = {c.args[0] for c in MockHttpClient.return_value.get_bytes.call_args_list}
+    assert pinged == {"https://hc-ping.com/test-meta", "https://hc-ping.com/test-skill-meta"}
+
+
+def test_all_games_got_real_skill_characters_true_when_all_nonzero():
+    cfg = {"game_versions": ["poe2", "poe1"]}
+    results = {"poe2": {"characters_distinct": 100}, "poe1": {"characters_distinct": 50}}
+    assert _all_games_got_real_skill_characters(cfg, results) is True
+
+
+def test_all_games_got_real_skill_characters_false_when_one_zero():
+    cfg = {"game_versions": ["poe2", "poe1"]}
+    results = {"poe2": {"characters_distinct": 100}, "poe1": {"characters_distinct": 0}}
+    assert _all_games_got_real_skill_characters(cfg, results) is False
+
+
+def test_all_games_got_real_skill_characters_false_when_a_game_is_missing():
+    cfg = {"game_versions": ["poe2", "poe1"]}
+    results = {"poe2": {"characters_distinct": 100}}
+    assert _all_games_got_real_skill_characters(cfg, results) is False
+
+
+def test_run_meta_once_respects_explicit_games_order_not_game_versions_order(tmp_path):
+    """games=["poe1","poe2"] must run poe1 first even though game_versions is
+    configured poe2-first -- the scheduled skill job depends on this."""
+    result, calls, _http, _pub = _run_with_call_log(tmp_path, _meta_cfg(), games=["poe1", "poe2"])
+    slot_calls = [g for kind, g in calls if kind == "slot"]
+    assert slot_calls == ["poe1", "poe2"]
+    assert set(result) == {"poe1", "poe2"}
+
+
+def test_safe_run_forwards_kwargs_to_the_job_function():
+    seen = {}
+
+    def fn(cfg, **kwargs):
+        seen["cfg"] = cfg
+        seen["kwargs"] = kwargs
+
+    _safe_run(fn, {"x": 1}, "some_job", parts=("skill",), games=["poe1"])
+    assert seen == {"cfg": {"x": 1}, "kwargs": {"parts": ("skill",), "games": ["poe1"]}}
+
+
+def test_safe_run_still_catches_exceptions_with_kwargs():
+    def fn(cfg, **kwargs):
+        raise RuntimeError("boom")
+
+    _safe_run(fn, {}, "some_job", parts=("skill",))  # must not raise
+
+
+def test_run_scheduler_registers_skill_meta_job_when_scheduled(tmp_path):
+    from apscheduler.triggers.cron import CronTrigger
+
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "schedule": {"meta_cron_hour_thailand": 2, "skill_meta_cron_hour_thailand": 5},
+        "skill_meta": {"collect": {"scheduled": True}},
+    }
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
+        run_scheduler(cfg)
+
+    skill_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "skill_meta")
+    assert isinstance(skill_call.args[1], CronTrigger)
+    assert skill_call.kwargs["args"][0] is run_meta_once
+    assert skill_call.kwargs["kwargs"] == {"games": ["poe1", "poe2"], "parts": ("skill",)}
+
+    meta_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "meta")
+    assert meta_call.kwargs["kwargs"] == {"parts": ("slot",)}  # never doubles up with skill_meta
+
+
+def test_run_scheduler_does_not_register_skill_meta_job_when_not_scheduled(tmp_path):
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "schedule": {"meta_cron_hour_thailand": 2},
+        "skill_meta": {"collect": {"scheduled": False}},
+    }
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
+         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
+         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
+        run_scheduler(cfg)
+
+    ids = {c.kwargs.get("id") for c in fake_scheduler.add_job.call_args_list}
+    assert "skill_meta" not in ids

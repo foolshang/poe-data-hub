@@ -877,7 +877,13 @@ def _run_meta_once_locked(
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
 
     configured = list(cfg.get("game_versions", ["poe2"]))
-    selected = [g for g in configured if games is None or g in games]
+    # When `games` is given explicitly, iterate in ITS order (filtered to
+    # configured membership) -- e.g. the scheduled skill-centric job always
+    # passes games=["poe1", "poe2"] to guarantee PoE1 runs before PoE2
+    # (approved 2026-09-22: never in parallel, PoE1 first), regardless of
+    # `game_versions`' own order in config.yaml. `games=None` keeps the
+    # original behavior of following `configured`'s order.
+    selected = configured if games is None else [g for g in games if g in configured]
     unknown = [g for g in (games or []) if g not in configured]
     if unknown:
         raise ValueError(f"meta job: game(s) {unknown} not in configured game_versions {configured}")
@@ -892,6 +898,7 @@ def _run_meta_once_locked(
     _mark_job_running(publisher, "meta")
     try:
         results: dict[str, dict[str, Any]] = {}
+        skill_results: dict[str, dict[str, Any]] = {}
         for game in selected:
             if "slot" in parts:
                 try:
@@ -900,11 +907,11 @@ def _run_meta_once_locked(
                     log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
             if "skill" in parts:
                 try:
-                    _run_skill_meta_for_game(http, publisher, cfg, game)
+                    skill_results[game] = _run_skill_meta_for_game(http, publisher, cfg, game)
                 except Exception as e:
                     log.error("skill meta job(%s): failed: %s", game, e, exc_info=True)
 
-        if "slot" not in parts or selected != configured:
+        if "slot" not in parts or set(selected) != set(configured):
             log.info("meta job: partial run (games=%s, parts=%s) -- no healthcheck ping / status update", selected, parts)
         elif _all_games_got_real_characters(cfg, results):
             _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
@@ -916,6 +923,25 @@ def _run_meta_once_locked(
             )
         if results:
             _update_meta_status(publisher, results)
+
+        # Skill-centric ping (approved 2026-09-22): independent of the slot
+        # ping above -- its own healthchecks.io check, fires only when every
+        # configured game ran (this exact call, not some earlier partial one)
+        # and got a nonzero character count, same "never ping on a partial/
+        # empty cycle" rule as the slot job's own ping (see
+        # _all_games_got_real_characters's docstring for why that rule
+        # exists at all).
+        if "skill" in parts:
+            if set(selected) != set(configured):
+                log.info("skill meta job: partial run (games=%s) -- no healthcheck ping", selected)
+            elif _all_games_got_real_skill_characters(cfg, skill_results):
+                _ping_healthcheck(http, cfg.get("healthchecks", {}).get("skill_meta_ping_url"), "skill_meta")
+            else:
+                log.warning(
+                    "skill meta job: skipping healthcheck ping -- at least one configured game got 0 characters "
+                    "or failed entirely this cycle (characters_distinct by game: %s)",
+                    {g: r.get("characters_distinct") for g, r in skill_results.items()},
+                )
 
         return {game: r["data"] for game, r in results.items()}
     finally:
@@ -934,6 +960,16 @@ def _all_games_got_real_characters(cfg: dict[str, Any], results: dict[str, dict[
     if set(results) != set(configured):
         return False
     return all(r.get("summary", {}).get("sample_total", 0) > 0 for r in results.values())
+
+
+def _all_games_got_real_skill_characters(cfg: dict[str, Any], skill_results: dict[str, dict[str, Any]]) -> bool:
+    """Same rule as `_all_games_got_real_characters`, for the skill-centric
+    ping: a game missing entirely (its `_run_skill_meta_for_game` call
+    raised) or present with zero distinct characters both fail the check."""
+    configured = cfg.get("game_versions", ["poe2"])
+    if set(skill_results) != set(configured):
+        return False
+    return all(r.get("characters_distinct", 0) > 0 for r in skill_results.values())
 
 
 def _mark_job_running(publisher: PricesPublisher, job_name: str) -> None:
@@ -1231,9 +1267,9 @@ def _setup_logging(cfg: dict[str, Any]) -> None:
     root.addHandler(file_handler)
 
 
-def _safe_run(fn, cfg: dict[str, Any], job_name: str) -> None:
+def _safe_run(fn, cfg: dict[str, Any], job_name: str, **kwargs: Any) -> None:
     try:
-        fn(cfg)
+        fn(cfg, **kwargs)
     except Exception:
         log.error("%s job crashed", job_name, exc_info=True)
 
@@ -1438,10 +1474,37 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     global _league_start_mode_active
     meta_trigger, _league_start_mode_active, per_game_detail = _compute_meta_trigger(schedule_cfg, cfg, http)
     scheduler.add_job(
-        _safe_run, meta_trigger, args=[run_meta_once, cfg, "meta"],
+        # parts=("slot",) explicitly: the skill-centric part has its own
+        # dedicated job/cron/ping below (approved 2026-09-22) so it never
+        # doubles up with this one, regardless of skill_meta.collect.scheduled.
+        _safe_run, meta_trigger, args=[run_meta_once, cfg, "meta"], kwargs={"parts": ("slot",)},
         id="meta", max_instances=1, misfire_grace_time=3600,
     )
     _update_league_start_mode_status(publisher, _league_start_mode_active, per_game_detail)
+
+    # Skill-centric collection (approved 2026-09-22, after two full runs +
+    # one measured incremental cycle per game -- see SPEC.md 8.10): its own
+    # daily cron, deliberately separate from "meta" above so its schedule,
+    # game order, and healthcheck are independent. Only registered when
+    # skill_meta.collect.scheduled is true (see CollectConfig/config.yaml) --
+    # left unregistered entirely otherwise, not just no-op'd at runtime, so
+    # "is it scheduled at all" is answerable from the job list alone.
+    # games=["poe1","poe2"] is a hard requirement (not game_versions' own
+    # order, currently poe2-first): PoE1 must finish before PoE2 starts --
+    # sequential, never parallel, since both peaked over 200MB RSS in the
+    # first live runs and this VM is an e2-micro. Placed at 05:00 ICT: after
+    # cleanup (04:00) and gems (03:00), with the whole ~21h gap back to the
+    # next 02:00 slot-only meta run as headroom even for a much slower cycle
+    # than the ~71min measured 2026-09-22 (e.g. a league reset, where every
+    # character is new and cache reuse collapses).
+    skill_meta_scheduled = cfg.get("skill_meta", {}).get("collect", {}).get("scheduled", False)
+    if skill_meta_scheduled:
+        skill_meta_hour = schedule_cfg.get("skill_meta_cron_hour_thailand", 5)
+        scheduler.add_job(
+            _safe_run, CronTrigger(hour=skill_meta_hour, minute=0, timezone="Asia/Bangkok"),
+            args=[run_meta_once, cfg, "skill_meta"], kwargs={"games": ["poe1", "poe2"], "parts": ("skill",)},
+            id="skill_meta", max_instances=1, misfire_grace_time=3600,
+        )
 
     cleanup_hour = schedule_cfg.get("cleanup_hour_thailand", 4)
     scheduler.add_job(
@@ -1488,9 +1551,10 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
 
     log.info(
         "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s: %s], cleanup daily %02d:00 ICT, "
-        "news every %dmin, gems daily %02d:00 ICT, archive weekly)",
+        "news every %dmin, gems daily %02d:00 ICT, archive weekly, skill_meta %s)",
         prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", per_game_detail,
         cleanup_hour, news_interval, gems_hour,
+        f"daily {schedule_cfg.get('skill_meta_cron_hour_thailand', 5):02d}:00 ICT (poe1 then poe2)" if skill_meta_scheduled else "not scheduled",
     )
     scheduler.start()
 

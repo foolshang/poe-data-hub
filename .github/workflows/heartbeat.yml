@@ -22,5 +22,5 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Check prices + meta freshness
+      - name: Check prices + meta + skills freshness
         run: python -m tools.heartbeat_check

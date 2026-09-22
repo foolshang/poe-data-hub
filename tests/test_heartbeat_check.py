@@ -97,6 +97,41 @@ def test_check_meta_sample_total_flags_when_summary_is_none():
     assert problem is not None
 
 
+def test_check_skills_index_freshness_ok_when_recent():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert heartbeat_check.check_skills_index_freshness(generated_at, now=now) is None
+
+
+def test_check_skills_index_freshness_flags_when_stale():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(hours=31)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    problem = heartbeat_check.check_skills_index_freshness(generated_at, now=now)
+    assert problem is not None
+    assert "31.0 hours old" in problem
+
+
+def test_check_skills_index_freshness_boundary_not_flagged():
+    now = datetime(2026, 7, 11, 12, 0, 0, tzinfo=timezone.utc)
+    generated_at = (now - timedelta(hours=29, minutes=59)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert heartbeat_check.check_skills_index_freshness(generated_at, now=now) is None
+
+
+def test_check_skills_index_population_ok_when_nonzero():
+    assert heartbeat_check.check_skills_index_population(124408) is None
+
+
+def test_check_skills_index_population_flags_when_zero():
+    problem = heartbeat_check.check_skills_index_population(0)
+    assert problem is not None
+    assert "population_total" in problem
+
+
+def test_check_skills_index_population_flags_when_missing():
+    problem = heartbeat_check.check_skills_index_population(None)
+    assert problem is not None
+
+
 def test_check_per_category_health_ok_when_all_ok():
     per_category = {"Currency": {"ok": True, "count": 5}, "Fragment": {"ok": True, "count": 2}}
     assert heartbeat_check.check_per_category_health("ninja", per_category) is None
@@ -149,6 +184,15 @@ def _index_resp(hardcore=None):
     return resp
 
 
+def _fresh_skills_resp(now, population_total=100000):
+    resp = MagicMock()
+    resp.json.return_value = {
+        "generated_at": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "population_total": population_total,
+    }
+    return resp
+
+
 def _status_resp(now, poe2_age=timedelta(hours=2), poe1_age=timedelta(hours=2), poe2_sample_total=10, poe1_sample_total=10):
     resp = MagicMock()
     resp.json.return_value = {
@@ -181,7 +225,8 @@ def test_run_returns_0_when_both_fresh():
     now = datetime.now(timezone.utc)
     status_resp = _status_resp(now)
 
-    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
 
@@ -286,7 +331,7 @@ def test_run_returns_0_when_categories_all_ok():
     healthy = _fresh_prices_resp(now, per_category_by_source={"ninja": {"Currency": {"ok": True, "count": 5}}})
     status_resp = _status_resp(now)
 
-    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
+    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -305,7 +350,8 @@ def test_run_returns_0_when_hardcore_null():
     now = datetime.now(timezone.utc)
     status_resp = _status_resp(now)
 
-    with patch("requests.get", side_effect=_fresh_sequence(now) + [status_resp]):
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
+    with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
 
@@ -314,7 +360,7 @@ def test_run_returns_0_when_hardcore_fresh():
     fresh_hardcore = _index_resp(hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")})
     status_resp = _status_resp(now)
 
-    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), fresh_hardcore, _index_resp(), status_resp]
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), fresh_hardcore, _index_resp(), status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -331,5 +377,54 @@ def test_run_returns_1_when_response_missing_expected_key():
     status_resp = _status_resp(now)
 
     sequence = [bad_resp, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe2_skills_index_stale():
+    now = datetime.now(timezone.utc)
+    stale_skills = MagicMock()
+    stale_skills.json.return_value = {"generated_at": (now - timedelta(hours=40)).strftime("%Y-%m-%dT%H:%M:%SZ"), "population_total": 100000}
+    status_resp = _status_resp(now)
+
+    sequence = _fresh_sequence(now) + [status_resp, stale_skills, _fresh_skills_resp(now)]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe1_skills_index_stale():
+    now = datetime.now(timezone.utc)
+    stale_skills = MagicMock()
+    stale_skills.json.return_value = {"generated_at": (now - timedelta(hours=40)).strftime("%Y-%m-%dT%H:%M:%SZ"), "population_total": 100000}
+    status_resp = _status_resp(now)
+
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), stale_skills]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe2_skills_index_population_zero():
+    now = datetime.now(timezone.utc)
+    status_resp = _status_resp(now)
+
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now, population_total=0), _fresh_skills_resp(now)]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe1_skills_index_population_zero():
+    now = datetime.now(timezone.utc)
+    status_resp = _status_resp(now)
+
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now, population_total=0)]
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_skills_index_fetch_fails():
+    now = datetime.now(timezone.utc)
+    status_resp = _status_resp(now)
+
+    sequence = _fresh_sequence(now) + [status_resp, RuntimeError("network blip"), _fresh_skills_resp(now)]
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 1

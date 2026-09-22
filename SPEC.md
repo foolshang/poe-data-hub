@@ -1328,9 +1328,13 @@ disk. Two retention rules, `config.yaml`'s `retention.*`:
 **First live incremental run (2026-09-22, measured after the two full first
 runs).** PoE1: 185 lists (fixed cost, no way to skip an unchanged list) + only
 260 of 14,374 characters refetched (97.3% cache reuse) -> 28m39s total
-(22.7min collect + 5.7min publishing 158 files), DB +46MB, peak RSS 235MB
-(collection+publish now share one process). Confirms 1 run/day/game is
-comfortably inside a 1-2h budget.
+(22.7min collect + 5.7min publishing 158 files), DB +46MB, peak RSS 235MB.
+PoE2: 417 lists + 2,001 of 16,628 characters refetched (88.0% cache reuse,
+lower than PoE1 -- consistent with PoE2's faster population churn already
+seen in the 2026-09-21 distribution survey) -> ~42.9min real work (30.7min
+collect + 12.1min publishing 417 files), DB +79.7MB, peak RSS 333MB. Combined
+~71.3min/day for both games sequentially -- comfortably inside the approved
+1-2h budget (`skill_meta.collect.scheduled: true` since 2026-09-22).
 
 **First-run cost (measured 2026-09-21, 1 request / 2s).** PoE1: 171 lists +
 13,780 distinct characters ~ 8.0 h; PoE2: 417 lists + 16,717 ~ 9.8 h. Observed
@@ -1339,9 +1343,39 @@ list stability between index versions: PoE2 lists kept a median 98/100 members
 percent plus the 7-day refresh (estimated ~40-60 min per game per run).
 
 **CLI.** `python -m src.main --run-meta-once [--game poe1|poe2 ...]
-[--only slot|skill]`. The scheduled meta job runs, per game, the legacy
-per-slot job then the skill-centric job, all under the one `meta` job lock (so a
-long manual first run simply makes the scheduler's ticks skip).
+[--only slot|skill]` (plus `--publish-skill-meta --game G [--game G2 ...]`,
+8.11, to republish from the latest finished run without recollecting).
+
+**Scheduling (live since 2026-09-22): two independent daily cron jobs, not
+one.** The slot part (`meta`, `schedule.meta_cron_hour_thailand`, 02:00 ICT)
+and the skill-centric part (`skill_meta`,
+`schedule.skill_meta_cron_hour_thailand`, **05:00 ICT** -- after gems 03:00
+and cleanup 04:00, ~21h of headroom before the next day's 02:00 slot run even
+on a much slower cycle) each hold the same `job_lock("meta")`, so they still
+never race each other or a manual `--run-meta-once`, but they run on their
+own schedules and never bundle together. The skill job always runs
+`games=["poe1","poe2"]` explicitly (PoE1 then PoE2, sequential, never
+parallel -- both peaked over 200MB RSS in the first live runs on this
+e2-micro) regardless of `game_versions`' own order. Registered only when
+`skill_meta.collect.scheduled: true`; left off the scheduler's job list
+entirely otherwise (not just a runtime no-op), so "is it scheduled at all" is
+answerable from the job list alone. `--only skill` always runs regardless of
+the flag (unchanged).
+
+**Its own healthcheck, independent of `meta_ping_url`
+(`healthchecks.skill_meta_ping_url`, Layer 1).** Fires only when both
+configured games completed the SAME cycle with `characters_distinct > 0` --
+same "never ping a partial/empty cycle" rule `meta_ping_url` already used
+(`_all_games_got_real_skill_characters`, mirrors `_all_games_got_real_characters`).
+Recommended healthchecks.io settings for this check: **Period 24h, Grace
+4h** (covers the ~71min combined measured cost several times over, plus the
+scheduler's own `misfire_grace_time=3600` if the process was down right at
+the 05:00 ICT trigger). Layer 2 (`tools/heartbeat_check.py`) independently
+checks `{game}/skills/index.json`'s own `generated_at` (< 30h old) and
+`population_total` (> 0) for both games -- same freshness-plus-content
+pairing the meta checks already use, and the same two-independent-layers
+reasoning (CLAUDE.md) applies: a bug that leaves Layer 1 pinging "successfully"
+while the published content is stale/empty is still caught from the outside.
 
 **Legacy per-slot job -- a temporary bridge.** The per-slot job (top-100 per
 equipment slot -> `mod_counts` -> `{game}/meta/latest.json`) still runs because
@@ -2194,11 +2228,12 @@ collection (same idea as `run_gems_once` republishing a staged copy).
       `test_aggregator.py`, `test_archive_export.py`. 400/400 project-wide
       passing.
 
-- [ ] Phase 22: skill-centric collection (top-100 per poe.ninja skill instead
-      of top-100 per slot) -- **collection, publish, and archive re-export
-      implemented, tested, and deployed; two full first-runs completed live;
-      incremental-cost measurement and flipping `scheduled=true` pending.**
-      Full design in 8.10/8.11.
+- [x] Phase 22: skill-centric collection (top-100 per poe.ninja skill instead
+      of top-100 per slot) -- **fully live**: collection, publish, archive
+      re-export, retention, and its own scheduled cron + two-layer monitoring
+      all implemented, tested, and deployed; two full first-runs and one
+      incremental cycle per game completed live; `skill_meta.collect.scheduled`
+      flipped to `true` 2026-09-22. Full design in 8.10/8.11.
 
       Done: facet/list fetchers (real-sample tests), skill plan (Vaal fold,
       spirit lists, ascendancy cut, all thresholds in config), counter,
@@ -2247,8 +2282,34 @@ collection (same idea as `run_gems_once` republishing a staged copy).
       `skill_top100_v1` snapshots (`mod_counts` still spans both collection
       methods -- it has no main-skill dimension to be unreliable).
 
-      Pending: run one incremental cycle per game and report requests/time/
-      new-vs-reused-characters/DB growth; only then set
-      `skill_meta.collect.scheduled=true` (currently `false` on purpose --
-      see CLAUDE.md). TODO: check at the next league's launch whether
-      poe.ninja indexes characters below level 80.
+      **Incremental cycle measured 2026-09-22** (see 8.10 for the numbers):
+      PoE1 28m39s (97.3% cache reuse), PoE2 42.9min (88.0% reuse) -- combined
+      ~71.3min/day, comfortably inside the approved 1-2h budget. Also found
+      and fixed live during the incremental run: an ad-hoc `dbstat` diagnostic
+      query held a read lock long enough to crash a concurrent write with
+      "database is locked" (`LocalDb` now opens with `PRAGMA
+      journal_mode=WAL` + a 30s busy timeout -- see CLAUDE.md; the run
+      resumed from checkpoint with zero lost work).
+
+      **Retention approved 2026-09-22** after the incremental run measured
+      ~46-80MB DB growth per run/game: `skill_run_lists`/`skill_run_members`
+      (checkpoint-only) deleted immediately once a run is `'finished'`;
+      `skill_stat_counts`/`skill_passive_counts`/`skill_populations` pruned
+      after 45 days (`retention.skill_stat_counts_days`). Safe only because
+      `archive_export.py`'s `build_league_archive` now merges every fresh
+      recomputation against the previously written archive leaf-by-leaf
+      instead of overwriting -- a leaf whose raw rows aged out cleanly is
+      frozen at its last value, a partial loss raises `ArchiveRegressionError`
+      and refuses to write. `mod_counts`/`skill_mod_counts`/`keypassive_counts`
+      (the legacy tables) are untouched, unchanged "kept forever" policy.
+
+      **Scheduled and live** (see 8.10's Scheduling subsection): its own
+      daily cron (`skill_meta`, 05:00 ICT, PoE1 then PoE2) separate from the
+      slot job's `meta` cron (02:00 ICT, now `parts=("slot",)` explicitly so
+      the two never bundle together), and its own healthchecks.io check
+      (`skill_meta_ping_url`, recommended Period 24h / Grace 4h) plus Layer-2
+      freshness+population checks on `{game}/skills/index.json` in
+      `tools/heartbeat_check.py`.
+
+      TODO: check at the next league's launch whether poe.ninja indexes
+      characters below level 80 (8.10).

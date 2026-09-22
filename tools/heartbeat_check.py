@@ -46,6 +46,15 @@ with a fresh timestamp every cycle for ~43 days while the actual character
 count was silently 0. This check reads the population count directly rather
 than trusting a fresh timestamp to imply real content.
 
+Skill-centric collection (added 2026-09-22, once `skill_meta.collect.scheduled`
+was approved): checks `{game}/skills/index.json`'s own `generated_at`
+freshness and `population_total` nonzero, for both games -- the same
+freshness-plus-content pairing as the meta checks above, same reasoning
+(a fresh timestamp with silently-empty content already happened once). This
+is a completely separate file from `status.json`'s `meta.*` -- the
+skill-centric job has its own daily cron and its own Layer-1 healthchecks.io
+check (`skill_meta_ping_url`), independent of the slot job's `meta_ping_url`.
+
 This is deliberately a second, independent system from the
 healthchecks.io dead-man-switch pings the hub sends itself (Layer 1, see
 src/main.py's _ping_healthcheck and CLAUDE.md): Layer 1 watches "is the
@@ -81,6 +90,10 @@ INDEX_URLS = {
     "poe2": "https://storage.googleapis.com/poe-data-hub/poe2/prices/index.json",
     "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/prices/index.json",
 }
+SKILLS_INDEX_URLS = {
+    "poe2": "https://storage.googleapis.com/poe-data-hub/poe2/skills/index.json",
+    "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/skills/index.json",
+}
 STATUS_URL = "https://storage.googleapis.com/poe-data-hub/status.json"
 
 # prices publish every 1440 minutes (config.yaml schedule.prices_interval_minutes) x 2 as a
@@ -88,6 +101,13 @@ STATUS_URL = "https://storage.googleapis.com/poe-data-hub/status.json"
 # rest of the repo, see module docstring), so bump this by hand if that interval changes.
 PRICES_MAX_AGE_MINUTES = 2880
 META_MAX_AGE_HOURS = 26
+# skill-centric job runs once/day (schedule.skill_meta_cron_hour_thailand) --
+# same by-hand-bump caveat as the other constants here. Slightly wider than
+# META_MAX_AGE_HOURS: it's a much heavier job (measured ~71min combined for
+# both games 2026-09-22) with more room for a slow cycle, and Layer 2 should
+# generally be at least as lenient as Layer 1's healthchecks.io Period+Grace
+# (recommended 24h+4h=28h there) so the two layers don't flap in disagreement.
+SKILLS_INDEX_MAX_AGE_HOURS = 30
 # news job runs every 5 minutes (schedule.news_interval_minutes) -- same
 # by-hand-bump caveat as above; kept at a ~3x buffer (vs. prices' 2x) since
 # news freshness matters more.
@@ -148,6 +168,22 @@ def check_meta_sample_total(meta_job_summary: Optional[dict]) -> Optional[str]:
     sample_total = (meta_job_summary or {}).get("sample_total")
     if not sample_total:
         return f"meta.meta_job_summary.sample_total is {sample_total!r} (expected > 0)"
+    return None
+
+
+def check_skills_index_freshness(generated_at: str, now: Optional[datetime] = None) -> Optional[str]:
+    """Returns a problem description if stale, None if fresh."""
+    now = now or datetime.now(timezone.utc)
+    age_hours = (now - _parse_iso(generated_at)).total_seconds() / 3600
+    if age_hours > SKILLS_INDEX_MAX_AGE_HOURS:
+        return f"skills/index.json generated_at is {age_hours:.1f} hours old (> {SKILLS_INDEX_MAX_AGE_HOURS})"
+    return None
+
+
+def check_skills_index_population(population_total: Optional[int]) -> Optional[str]:
+    """Same "content, not just freshness" reasoning as check_meta_sample_total."""
+    if not population_total:
+        return f"skills/index.json population_total is {population_total!r} (expected > 0)"
     return None
 
 
@@ -215,12 +251,24 @@ def run() -> int:
     except Exception as e:
         problems.append(f"could not fetch/parse {STATUS_URL}: {e}")
 
+    for game, url in SKILLS_INDEX_URLS.items():
+        try:
+            skills_index = requests.get(url, timeout=15).json()
+            problem = check_skills_index_freshness(skills_index["generated_at"])
+            if problem:
+                problems.append(f"{game}: {problem}")
+            problem = check_skills_index_population(skills_index.get("population_total"))
+            if problem:
+                problems.append(f"{game}: {problem}")
+        except Exception as e:
+            problems.append(f"could not fetch/parse {url}: {e}")
+
     if problems:
         for p in problems:
             print(f"::error::{p}")
         return 1
 
-    print("OK: prices, news, and meta (all games) are fresh")
+    print("OK: prices, news, meta, and skills (all games) are fresh")
     return 0
 
 
