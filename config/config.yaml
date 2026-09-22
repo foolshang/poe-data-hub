@@ -137,11 +137,13 @@ skill_meta:
   # (poe.ninja's own count of indexed characters, ~124k), never of the
   # sampled characters. main and spirit (PoE2) skills follow the same rules.
   collect:
-    # Whether the *scheduler* (and a plain `--run-meta-once`) also runs the
-    # skill-centric job. Keep false until the first manual runs have finished
-    # (`--run-meta-once --game <g> --only skill` always runs it, this flag or
-    # not) -- a first run takes hours per game and must not start by surprise.
-    scheduled: false
+    # Whether the scheduler registers the dedicated "skill_meta" cron job
+    # (schedule.skill_meta_cron_hour_thailand) -- `--run-meta-once --game <g>
+    # --only skill` always runs it regardless of this flag. Approved
+    # 2026-09-22 after two full runs + one measured incremental cycle per
+    # game (~71.3min combined, comfortably inside the 1-2h budget) -- see
+    # SPEC.md 8.10's Scheduling subsection and CLAUDE.md.
+    scheduled: true
     min_skill_pct: 0.1          # skip skills used by < this % of the league
     min_ascendancy_pct: 0.1     # cut characters of classes < this % (unascended base classes)
     min_member_list_count: 20   # PoE1 Vaal folding: don't request a Vaal/base list with fewer characters

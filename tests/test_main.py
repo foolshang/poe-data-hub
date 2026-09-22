@@ -1319,10 +1319,13 @@ def test_skill_part_is_not_scheduled_by_default_but_only_skill_always_runs(tmp_p
     assert calls == [("skill", "poe2")]  # explicit --only skill runs regardless of the flag
 
 
-def test_shipped_config_leaves_the_skill_part_unscheduled():
+def test_shipped_config_has_skill_part_scheduled():
+    """Flipped true 2026-09-22 after two full runs + one measured incremental
+    cycle per game confirmed the combined cost (~71.3min) fits comfortably
+    inside the approved 1-2h budget -- see SPEC.md 8.10/CLAUDE.md."""
     from src.utils.config import load_config
 
-    assert load_config()["skill_meta"]["collect"]["scheduled"] is False
+    assert load_config()["skill_meta"]["collect"]["scheduled"] is True
 
 
 def test_run_meta_once_only_skill_skips_the_slot_job_and_never_pings_or_touches_meta_status(tmp_path):
