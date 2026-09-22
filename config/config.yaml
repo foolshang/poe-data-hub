@@ -166,6 +166,18 @@ retention:
   meta_files_days: 30
   failed_responses_days: 30
   log_rotate_days: 7
+  # Skill-centric collection's own results tables (skill_stat_counts/
+  # skill_passive_counts/skill_populations) -- NOT mod_counts/skill_mod_counts/
+  # keypassive_counts (the legacy per-slot tables), which keep every row
+  # forever by existing project policy and are untouched here. This dimension
+  # is ~10x denser per snapshot than the legacy one (158-416 skills vs ~8
+  # archetypes), so "kept forever" would be ~30GB/year at 1 run/day/game on a
+  # 29GB disk -- approved 2026-09-22 alongside archive_export.py's freeze/
+  # merge guard, which is what makes deleting these rows safe: a league's
+  # per-league archive (data/archive/{game}-{league}.json) never shrinks even
+  # after its early raw rows age out from here, as long as the weekly archive
+  # re-export cadence (7 days) stays well inside this window.
+  skill_stat_counts_days: 45
 
 healthchecks:
   # Layer-1 dead-man-switch pings (healthchecks.io or compatible), sent only

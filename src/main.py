@@ -1136,19 +1136,29 @@ def run_export_league_archive(cfg: dict[str, Any], game: str, league: str, archi
 
 
 def run_cleanup_once(cfg: dict[str, Any]) -> None:
-    """Daily cleanup (spec 9): char_items > 90d, meta/*.json on Firebase
-    > 30d (never "latest.json"), data/failed_responses/* > 30d, and
-    (phase 7) event-league price files for leagues that are no longer
-    active. Each step is independent and best-effort — one failing doesn't
-    block the others."""
+    """Daily cleanup (spec 9): char_items > 90d, char_details > 30d,
+    skill-centric result rows (skill_stat_counts/skill_passive_counts/
+    skill_populations) > 45d (safe: archive_export.py's freeze/merge guard
+    keeps the per-league archive from shrinking once these age out -- see
+    that module's docstring and config.yaml's retention comment),
+    meta/*.json on Firebase > 30d (never "latest.json"),
+    data/failed_responses/* > 30d, and (phase 7) event-league price files for
+    leagues that are no longer active. Each step is independent and
+    best-effort — one failing doesn't block the others."""
     retention_cfg = cfg.get("retention", {})
 
     db = LocalDb()
     try:
         deleted_rows = db.cleanup_old_char_items(older_than_days=retention_cfg.get("char_items_days", 90))
         deleted_details = db.cleanup_old_char_details(older_than_days=retention_cfg.get("char_details_days", 30))
+        deleted_skill_stats = db.cleanup_old_skill_stat_counts(
+            older_than_days=retention_cfg.get("skill_stat_counts_days", 45)
+        )
+        deleted_checkpoints = db.cleanup_finished_skill_run_checkpoints()
         log.info("cleanup: removed %d stale char_details row(s)", deleted_details)
         log.info("cleanup job: deleted %d old char_items rows", deleted_rows)
+        log.info("cleanup job: deleted old skill-centric result rows: %s", deleted_skill_stats)
+        log.info("cleanup job: deleted %d finished-run checkpoint row(s) (safety net)", deleted_checkpoints)
     finally:
         db.close()
 

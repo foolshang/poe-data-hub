@@ -1299,6 +1299,39 @@ failed characters aborts with nothing counted and the run left resumable.
 **Memory.** The population is never held in RAM: characters go to SQLite one at
 a time and counting streams one skill group's ~100 members at a time.
 
+**Disk retention (approved 2026-09-22, after the first live incremental run
+measured ~46MB DB growth per run/game).** This dimension is ~10x denser per
+snapshot than the legacy archetype one (158-416 skills vs ~8 archetypes), so
+"kept forever" (the existing policy for `mod_counts`/`skill_mod_counts`/
+`keypassive_counts`) would be ~30GB/year at 1 run/day/game on this VM's 29GB
+disk. Two retention rules, `config.yaml`'s `retention.*`:
+- **`skill_run_lists`/`skill_run_members`** (checkpoint-only data, needed
+  solely to resume an unfinished run) are deleted immediately once a run's
+  status becomes `'finished'` (`LocalDb.cleanup_finished_skill_run_checkpoints`,
+  called right after `finish_skill_run` in `skill_collect.py`, and again as a
+  safety net in the daily cleanup job) -- the single biggest avoidable share
+  of this pipeline's growth, since a finished run is never resumed.
+- **`skill_stat_counts`/`skill_passive_counts`/`skill_populations`** (the
+  actual results) are pruned after `retention.skill_stat_counts_days` (45)
+  by the daily cleanup job (`LocalDb.cleanup_old_skill_stat_counts`).
+  This is only safe because `archive_export.py`'s `build_league_archive` now
+  merges every fresh recomputation against the *previously written* archive
+  file leaf-by-leaf instead of blindly overwriting: a leaf whose raw rows
+  aged out is frozen at its last-known value, and any *partial* loss (an
+  actual bug, not a clean age-out) raises `ArchiveRegressionError` and
+  refuses to write rather than silently shrinking a permanent historical
+  record -- see that module's own docstring for the full mechanism. This
+  retention must never ship without that guard already in place, since a
+  league's per-league archive is otherwise fully recomputed from live rows
+  on every export.
+
+**First live incremental run (2026-09-22, measured after the two full first
+runs).** PoE1: 185 lists (fixed cost, no way to skip an unchanged list) + only
+260 of 14,374 characters refetched (97.3% cache reuse) -> 28m39s total
+(22.7min collect + 5.7min publishing 158 files), DB +46MB, peak RSS 235MB
+(collection+publish now share one process). Confirms 1 run/day/game is
+comfortably inside a 1-2h budget.
+
 **First-run cost (measured 2026-09-21, 1 request / 2s).** PoE1: 171 lists +
 13,780 distinct characters ~ 8.0 h; PoE2: 417 lists + 16,717 ~ 9.8 h. Observed
 list stability between index versions: PoE2 lists kept a median 98/100 members

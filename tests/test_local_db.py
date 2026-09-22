@@ -592,3 +592,64 @@ def test_a_long_held_reader_does_not_block_a_concurrent_writer(tmp_path):
     finally:
         reader.close()
         db.close()
+
+
+# --- Skill-centric retention (skill-meta phase 22, approved 2026-09-22) ----
+
+def test_cleanup_finished_skill_run_checkpoints_only_touches_finished_runs(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    lists = [{"skill_type": "main", "skill": "A", "list_name": "A", "facet_count": 9}]
+
+    def make_run(status):
+        snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+        run_id = db.create_skill_run("poe2", "L", snap, 1000, {}, lists)
+        db.save_skill_list_members(run_id, "main", "A", "A", 9, [
+            {"account": "x", "name": "X", "level": 99, "class": "Slayer", "keypassives": ()},
+        ])
+        if status != "running":
+            db.finish_skill_run(run_id, status, {})
+        return run_id
+
+    finished = make_run("finished")
+    running = make_run("running")
+    failed = make_run("failed")
+
+    removed = db.cleanup_finished_skill_run_checkpoints()
+
+    assert removed == 2  # one skill_run_lists row + one skill_run_members row, for the finished run only
+    assert db.pending_skill_lists(finished) == [] and db.iter_skill_members(finished, "main", "A") == []
+    assert db.skill_list_counts(running) == {"done": 1}  # untouched -- still resumable
+    assert db.skill_list_counts(failed) == {"done": 1}   # untouched -- kept for debugging
+    db.close()
+
+
+def test_cleanup_finished_skill_run_checkpoints_is_idempotent(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    run_id = db.create_skill_run("poe2", "L", snap, 1000, {}, [{"skill_type": "main", "skill": "A", "list_name": "A", "facet_count": 9}])
+    db.finish_skill_run(run_id, "finished", {})
+    assert db.cleanup_finished_skill_run_checkpoints() == 1  # the one skill_run_lists row
+    assert db.cleanup_finished_skill_run_checkpoints() == 0  # nothing left to remove
+    db.close()
+
+
+def test_cleanup_old_skill_stat_counts_respects_the_age_cutoff_and_collection_method(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    old_snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    new_snap = db.insert_snapshot("poe2", "L", 6, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    legacy_snap = db.insert_snapshot("poe2", "L", 7, 0, 0, 0)  # legacy_slot_top100, never has these rows normally
+    stat = {"level_bracket": "90-100", "slot": "ring", "stat_id": "s1", "mod_kind": "explicit", "count": 2,
+            "population": 4, "slot_holders": 3, "usage_pct": 50.0, "value_min": None, "value_max": None}
+    pop = {"level_bracket": "90-100", "population": 4, "facet_count": 500}
+    db.replace_skill_counts_for_snapshot(old_snap, "poe2", 5, "main", "A", [stat], [], [pop])
+    db.replace_skill_counts_for_snapshot(new_snap, "poe2", 6, "main", "A", [stat], [], [pop])
+    db._conn.execute("UPDATE snapshots SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?", (old_snap,))
+    db._conn.commit()
+
+    deleted = db.cleanup_old_skill_stat_counts(older_than_days=45)
+
+    assert deleted == {"skill_stat_counts": 1, "skill_passive_counts": 0, "skill_populations": 1}
+    assert db.iter_skill_stat_counts_for_snapshot(old_snap) == []
+    assert len(db.iter_skill_stat_counts_for_snapshot(new_snap)) == 1  # recent snapshot untouched
+    assert db._conn.execute("SELECT COUNT(*) FROM snapshots WHERE id = ?", (old_snap,)).fetchone()[0] == 1  # snapshot row itself kept
+    db.close()

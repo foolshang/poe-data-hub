@@ -368,3 +368,153 @@ def test_skills_archive_no_data_is_empty_dict(tmp_path):
     archive = build_league_archive(db, "poe2", "L")
     db.close()
     assert archive["skills"] == {}
+
+
+# --- Archive never shrinks: retention-safe merge (approved 2026-09-22) -----
+
+from src.processing.archive_export import ArchiveRegressionError, build_league_archive  # noqa: E402
+import pytest  # noqa: E402
+
+
+def test_freeze_keeps_early_league_data_after_its_raw_rows_age_out(tmp_path):
+    """The exact scenario that motivated this: retention deletes an early
+    snapshot's raw rows once it's older than the retention window; a later
+    re-export must not silently lose that already-archived early-league data."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    early_snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    late_snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=70, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(early_snap, "poe2", 3, [_skill_row(count=8, population=10)])
+    db.insert_skill_mod_counts(late_snap, "poe2", 70, [_skill_row(count=3, population=5)])
+
+    first = build_league_archive(db, "poe2", "L")
+    assert first["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["1-21"][0]["count"] == 8
+    assert first["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["61+"][0]["count"] == 3
+
+    # simulate retention: the early snapshot's raw rows are gone
+    db._conn.execute("DELETE FROM skill_mod_counts WHERE snapshot_id = ?", (early_snap,))
+    db._conn.commit()
+
+    second = build_league_archive(db, "poe2", "L", previous=first)
+    db.close()
+
+    # early-league bucket frozen from `first`, unaffected by the deletion
+    assert second["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["1-21"][0]["count"] == 8
+    # the still-live late bucket is unaffected either way
+    assert second["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["61+"][0]["count"] == 3
+
+
+def test_export_league_archive_freezes_across_a_real_file_round_trip(tmp_path):
+    """Same scenario as above but through the real file-reading path
+    (`export_league_archive` itself), the way retention cleanup + the weekly
+    archive job actually interact in production."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    early_snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(early_snap, "poe2", 3, [_skill_row(count=8, population=10)])
+    archive_dir = tmp_path / "archive"
+
+    export_league_archive(db, "poe2", "L", archive_dir=archive_dir)
+
+    db._conn.execute("DELETE FROM skill_mod_counts WHERE snapshot_id = ?", (early_snap,))
+    db._conn.commit()
+    path = export_league_archive(db, "poe2", "L", archive_dir=archive_dir)
+    db.close()
+
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["1-21"][0]["count"] == 8
+
+
+def test_a_partial_regression_raises_and_never_writes(tmp_path):
+    """Not a clean age-out (the bucket didn't go empty, it just lost some but
+    not all of its data) -- this must be treated as a bug and refused, not
+    silently accepted as a smaller-but-real number."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(snap, "poe2", 5, [_skill_row(count=8, population=10)])
+    archive_dir = tmp_path / "archive"
+
+    export_league_archive(db, "poe2", "L", archive_dir=archive_dir)
+    path = archive_dir / "poe2-l.json"
+    before = path.read_text(encoding="utf-8")
+
+    # shrink the count in place -- not a clean deletion, a partial loss
+    db._conn.execute("UPDATE skill_mod_counts SET count = 2 WHERE snapshot_id = ?", (snap,))
+    db._conn.commit()
+
+    with pytest.raises(ArchiveRegressionError, match="archive regression"):
+        export_league_archive(db, "poe2", "L", archive_dir=archive_dir)
+    db.close()
+
+    assert path.read_text(encoding="utf-8") == before  # untouched -- refused, not overwritten
+
+
+def test_a_key_entirely_missing_from_fresh_is_carried_forward_wholesale(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(snap, "poe2", 3, [_skill_row(slot="ring", count=8, population=10)])
+    first = build_league_archive(db, "poe2", "L")
+
+    db._conn.execute("DELETE FROM skill_mod_counts WHERE slot = 'ring'")
+    db._conn.commit()
+    second = build_league_archive(db, "poe2", "L", previous=first)
+    db.close()
+
+    assert second["skill_mod_counts"]["ring"] == first["skill_mod_counts"]["ring"]
+
+
+def test_growth_within_a_still_open_bucket_is_kept_not_frozen(tmp_path):
+    """A bucket that's still accumulating (more snapshots keep landing in it)
+    must use the fresh, bigger total -- freezing must not kick in just
+    because a previous archive exists."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap1 = db.insert_snapshot(game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(snap1, "poe2", 3, [_skill_row(count=8, population=10)])
+    first = build_league_archive(db, "poe2", "L")
+
+    snap2 = db.insert_snapshot(game="poe2", league="L", days_since_league_start=4, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(snap2, "poe2", 4, [_skill_row(count=5, population=6)])
+    second = build_league_archive(db, "poe2", "L", previous=first)
+    db.close()
+
+    assert second["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["1-21"][0]["count"] == 13  # 8+5, grown, not frozen
+
+
+def test_skills_dimension_population_freezes_the_same_way(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    early = db.insert_snapshot(
+        game="poe2", league="L", days_since_league_start=3, sample_total=1, unique_characters_fetched=1,
+        fetch_failed=0, collection_method=COLLECTION_METHOD_SKILL,
+    )
+    db.replace_skill_counts_for_snapshot(early, "poe2", 3, "main", "Fireball", [_stat_row()], [], [_pop_row()])
+    first = build_league_archive(db, "poe2", "L")
+    assert first["skills"]["main"]["Fireball"]["90-100"]["1-21"]["population"] == 10
+
+    db._conn.execute("DELETE FROM skill_stat_counts WHERE snapshot_id = ?", (early,))
+    db._conn.execute("DELETE FROM skill_populations WHERE snapshot_id = ?", (early,))
+    db._conn.commit()
+    second = build_league_archive(db, "poe2", "L", previous=first)
+    db.close()
+
+    assert second["skills"]["main"]["Fireball"]["90-100"]["1-21"]["population"] == 10
+    assert second["skills"]["main"]["Fireball"]["90-100"]["1-21"]["mods"]["ring"][0]["count"] == 8
+
+
+def test_no_previous_archive_never_raises_and_behaves_like_before(tmp_path):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(snap, "poe2", 5, [_skill_row()])
+    archive = build_league_archive(db, "poe2", "L", previous=None)
+    db.close()
+    assert archive["skill_mod_counts"]["ring"]["Fireball"]["90-100"]["1-21"][0]["count"] == 8
+
+
+def test_previous_archive_missing_a_dimension_key_entirely_does_not_crash(tmp_path):
+    """An archive written before the `skills` key existed at all (schema
+    grew additively) -- must not error just because `previous` lacks it."""
+    db = LocalDb(tmp_path / "test.sqlite3")
+    snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=5, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    db.insert_skill_mod_counts(snap, "poe2", 5, [_skill_row()])
+    old_shape_previous = {"mod_counts": {}, "skill_mod_counts": {}, "passives": {}}  # no "skills" key
+
+    archive = build_league_archive(db, "poe2", "L", previous=old_shape_previous)
+    db.close()
+    assert archive["skills"] == {}

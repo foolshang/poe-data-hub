@@ -26,6 +26,7 @@ from src.main import (
     _update_status,
     publish_skill_meta,
     run_archive_export_once,
+    run_cleanup_once,
     run_export_league_archive,
     run_meta_once,
     run_prices_once,
@@ -1573,3 +1574,40 @@ def test_run_skill_meta_for_game_publishes_after_a_successful_collection(tmp_pat
 
     assert stats["publish"] == {"ok": True}
     assert seen["normalizer"] is MockNormalizer.return_value  # same instance, not a fresh load
+
+
+# --- run_cleanup_once wiring for skill-centric retention (approved 2026-09-22) ---
+
+def test_run_cleanup_once_prunes_old_skill_stat_counts_and_finished_checkpoints(tmp_path, monkeypatch):
+    from src.storage.local_db import COLLECTION_METHOD_SKILL, LocalDb
+
+    monkeypatch.chdir(tmp_path)
+    db = LocalDb()
+    old_snap = db.insert_snapshot("poe2", "L", 5, 0, 0, 0, collection_method=COLLECTION_METHOD_SKILL)
+    stat = {"level_bracket": "90-100", "slot": "ring", "stat_id": "s1", "mod_kind": "explicit", "count": 2,
+            "population": 4, "slot_holders": 3, "usage_pct": 50.0, "value_min": None, "value_max": None}
+    db.replace_skill_counts_for_snapshot(old_snap, "poe2", 5, "main", "A", [stat], [], [])
+    db._conn.execute("UPDATE snapshots SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?", (old_snap,))
+    db._conn.commit()
+
+    finished_run = db.create_skill_run("poe2", "L", old_snap, 1000, {}, [{"skill_type": "main", "skill": "A", "list_name": "A", "facet_count": 9}])
+    db.save_skill_list_members(finished_run, "main", "A", "A", 9, [{"account": "x", "name": "X", "level": 99, "class": "Slayer", "keypassives": ()}])
+    db.finish_skill_run(finished_run, "finished", {})
+    db.close()
+
+    cfg = {
+        "firebase": {"bucket": "b"}, "game_versions": ["poe2"], "rate_limits": {}, "http": {},
+        "retention": {"skill_stat_counts_days": 45},
+        "league": {},
+    }
+    with patch("src.main.PricesPublisher") as MockPub, patch("src.main._build_http_client"), \
+         patch("src.main.LeagueDetector") as MockDetector:
+        MockPub.return_value.delete_old_blobs.return_value = 0
+        MockPub.return_value.delete_blobs_not_in.return_value = 0
+        MockDetector.return_value.detect.return_value = LeagueResult(main="L", events=[])
+        run_cleanup_once(cfg)
+
+    db2 = LocalDb()
+    assert db2.iter_skill_stat_counts_for_snapshot(old_snap) == []
+    assert db2.pending_skill_lists(finished_run) == [] and db2.iter_skill_members(finished_run, "main", "A") == []
+    db2.close()

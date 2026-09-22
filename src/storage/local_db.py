@@ -915,6 +915,60 @@ class LocalDb:
                 ],
             )
 
+    def cleanup_finished_skill_run_checkpoints(self) -> int:
+        """Deletes `skill_run_lists`/`skill_run_members` rows for every run
+        whose `status = 'finished'` -- once a run is finished it is never
+        resumed (`find_resumable_skill_run` only ever looks at 'running'
+        rows), so this checkpoint data has zero further use. Called right
+        after a run finishes (`skill_collect.run_skill_collection`), not
+        deferred to the daily cleanup job, per the project owner's explicit
+        "delete immediately" call (2026-09-22) -- these two tables were
+        otherwise the single biggest avoidable share of this pipeline's
+        per-run disk growth (~13MB/run/game measured live, purely from data
+        that already has no purpose). Running/failed/abandoned runs' rows are
+        untouched -- resuming or debugging them still needs them. Global (not
+        scoped to one run_id) and idempotent, so it's also a safety net for
+        any run whose own post-finish cleanup was somehow skipped."""
+        with self._conn:
+            cur1 = self._conn.execute(
+                "DELETE FROM skill_run_lists WHERE run_id IN (SELECT id FROM skill_runs WHERE status = 'finished')"
+            )
+            cur2 = self._conn.execute(
+                "DELETE FROM skill_run_members WHERE run_id IN (SELECT id FROM skill_runs WHERE status = 'finished')"
+            )
+        return cur1.rowcount + cur2.rowcount
+
+    def cleanup_old_skill_stat_counts(self, older_than_days: int) -> dict[str, int]:
+        """Deletes `skill_stat_counts`/`skill_passive_counts`/`skill_populations`
+        rows whose snapshot is older than `older_than_days` -- the skill-
+        centric dimension's own retention (much denser per snapshot than the
+        legacy `mod_counts`/`skill_mod_counts`/`keypassive_counts` tables,
+        which keep every row forever by design and are NOT touched here; see
+        CLAUDE.md for the disk-growth math this retention exists to bound).
+
+        Safe with `archive_export.py`'s per-league archive: `build_league_archive`
+        freezes/merges against the previously published archive rather than
+        blindly recomputing, so an age bucket whose raw rows this deletes
+        keeps the totals it already had archived instead of shrinking (see
+        that module's docstring) -- this must never be called from anywhere
+        that skips a fresh export afterward without going through that path.
+        Never touches `snapshots`/`skill_runs` rows themselves (tiny, kept as
+        history same as every other snapshot)."""
+        cutoff = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - older_than_days * 86400, tz=timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        deleted: dict[str, int] = {}
+        with self._conn:
+            for table in ("skill_stat_counts", "skill_passive_counts", "skill_populations"):
+                cur = self._conn.execute(
+                    f"""DELETE FROM {table} WHERE snapshot_id IN (
+                            SELECT id FROM snapshots WHERE collection_method = ? AND created_at < ?
+                        )""",
+                    (COLLECTION_METHOD_SKILL, cutoff),
+                )
+                deleted[table] = cur.rowcount
+        return deleted
+
     # ---- skill-centric publish (skill-meta phase 22) ---------------------
 
     def latest_finished_skill_run(self, game: str) -> Optional[dict[str, Any]]:

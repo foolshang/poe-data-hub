@@ -234,5 +234,9 @@ def run_skill_collection(
         "skill_groups": len(groups), "stat_rows": total_stat_rows, "passive_rows": total_passive_rows,
     }
     db.finish_skill_run(run_id, "finished", stats)
-    log.info("skill run(%s): FINISHED %s", game, stats)
+    checkpoint_rows_removed = db.cleanup_finished_skill_run_checkpoints()
+    log.info(
+        "skill run(%s): FINISHED %s (removed %d checkpoint row(s) for finished run(s))",
+        game, stats, checkpoint_rows_removed,
+    )
     return stats
