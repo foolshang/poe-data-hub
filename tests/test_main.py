@@ -1448,17 +1448,25 @@ def _seed_finished_skill_run(db, game="poe2", league="L", days=5):
     return snap, run_id
 
 
+def _fake_http_with_gems(gems: list[dict]) -> MagicMock:
+    http = MagicMock()
+    http.get_json.return_value = {"gems": gems}
+    return http
+
+
 def test_publish_skill_meta_publishes_index_skill_file_dictionary_and_passives(tmp_path):
     db = LocalDb(tmp_path / "t.sqlite3")
     _seed_finished_skill_run(db)
     publisher = MagicMock()
     normalizer = MagicMock(stat_dictionary=lambda: [{"stat_id": "s1", "template": "+# to Life", "mod_kind": "explicit"}])
-    cfg = {"skill_meta": {"publish": {"min_usage_pct": 0.1}}}
+    cfg = {"firebase": {"bucket": "b"}, "skill_meta": {"publish": {"min_usage_pct": 0.1}}}
+    http = _fake_http_with_gems([{"display_name": "Fireball", "is_support": False, "tags": ["fire", "projectile"]}])
 
-    result = publish_skill_meta(db, publisher, "poe2", cfg, normalizer)
+    result = publish_skill_meta(db, publisher, "poe2", cfg, normalizer, http)
     db.close()
 
     assert result["ok"] is True and result["main_skills"] == 1 and result["skills_published"] == 1
+    assert result["tags"]["joined"] == 1 and result["tags"]["unjoined_count"] == 0
     paths = [c.args[1] for c in publisher.publish.call_args_list]
     assert "poe2/skills/index.json" in paths
     assert "poe2/skills/main/fireball.json" in paths
@@ -1467,8 +1475,28 @@ def test_publish_skill_meta_publishes_index_skill_file_dictionary_and_passives(t
 
     skill_file_call = next(c for c in publisher.publish.call_args_list if c.args[1] == "poe2/skills/main/fireball.json")
     assert skill_file_call.kwargs.get("compact") is True
+    assert skill_file_call.args[0]["tags"] == ["fire", "projectile"]
     index_call = next(c for c in publisher.publish.call_args_list if c.args[1] == "poe2/skills/index.json")
     assert index_call.args[0]["population_total"] == 124408
+    assert index_call.args[0]["skills"][0]["tags"] == ["fire", "projectile"]
+
+
+def test_publish_skill_meta_gems_load_failure_degrades_to_empty_tags_not_a_crash(tmp_path):
+    db = LocalDb(tmp_path / "t.sqlite3")
+    _seed_finished_skill_run(db)
+    publisher = MagicMock()
+    normalizer = MagicMock(stat_dictionary=lambda: [])
+    cfg = {"firebase": {"bucket": "b"}, "skill_meta": {"publish": {"min_usage_pct": 0.1}}}
+    http = MagicMock()
+    http.get_json.side_effect = RuntimeError("network down")
+
+    result = publish_skill_meta(db, publisher, "poe2", cfg, normalizer, http)
+    db.close()
+
+    assert result["ok"] is True
+    assert result["tags"]["unjoined_count"] == 1
+    index_call = next(c for c in publisher.publish.call_args_list if c.args[1] == "poe2/skills/index.json")
+    assert index_call.args[0]["skills"][0]["tags"] == []
 
 
 def test_publish_skill_meta_uses_configured_cache_control_seconds(tmp_path):
@@ -1481,7 +1509,7 @@ def test_publish_skill_meta_uses_configured_cache_control_seconds(tmp_path):
         "skill_file_cache_max_age_seconds": 222, "dictionary_cache_max_age_seconds": 333,
     }}}
 
-    publish_skill_meta(db, publisher, "poe2", cfg, normalizer)
+    publish_skill_meta(db, publisher, "poe2", cfg, normalizer, _fake_http_with_gems([]))
     db.close()
 
     by_path = {c.args[1]: c.kwargs["cache_control"] for c in publisher.publish.call_args_list}
@@ -1493,7 +1521,7 @@ def test_publish_skill_meta_uses_configured_cache_control_seconds(tmp_path):
 def test_publish_skill_meta_no_finished_run_yet_publishes_nothing(tmp_path):
     db = LocalDb(tmp_path / "t.sqlite3")
     publisher = MagicMock()
-    result = publish_skill_meta(db, publisher, "poe2", {}, MagicMock())
+    result = publish_skill_meta(db, publisher, "poe2", {}, MagicMock(), MagicMock())
     db.close()
     assert result == {"ok": False, "reason": "no finished run"}
     publisher.publish.assert_not_called()
@@ -1564,7 +1592,7 @@ def test_run_skill_meta_for_game_publishes_after_a_successful_collection(tmp_pat
 
     seen = {}
 
-    def fake_publish(db, publisher, game, cfg, normalizer):
+    def fake_publish(db, publisher, game, cfg, normalizer, http):
         seen["normalizer"] = normalizer
         return {"ok": True}
 

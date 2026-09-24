@@ -18,10 +18,13 @@ mod/passive rows are dropped by the threshold, never a whole group.
 """
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 SKILLS_INDEX_SCHEMA_VERSION = 1
 SKILL_FILE_SCHEMA_VERSION = 1
@@ -75,6 +78,7 @@ class SkillGroup:
     populations: dict[str, int]  # level_bracket -> population
     mods: dict[str, dict[str, list[dict[str, Any]]]]  # level_bracket -> slot -> stat rows
     passives: dict[str, list[dict[str, Any]]]  # level_bracket -> passive rows
+    tags: list[str] = field(default_factory=list)  # from {game}/gems.json, see attach_skill_tags
 
     def path(self, game: str) -> str:
         return f"{game}/skills/{self.skill_type}/{self.slug}.json"
@@ -90,6 +94,7 @@ class SkillGroup:
             "skill": self.skill,
             "slug": self.slug,
             "facet_count": self.facet_count,
+            "tags": self.tags,
             "populations": self.populations,
             "mods": self.mods,
             "passives": self.passives,
@@ -101,6 +106,7 @@ class SkillGroup:
             "skill": self.skill,
             "slug": self.slug,
             "facet_count": self.facet_count,
+            "tags": self.tags,
             "populations": self.populations,
             "path": self.path(game),
         }
@@ -170,6 +176,98 @@ def build_skill_groups(
     ]
     groups.sort(key=lambda g: (g.skill_type, -g.facet_count, g.skill))
     return groups
+
+
+def build_gem_tags_lookup(gems: list[dict[str, Any]]) -> tuple[dict[str, list[str]], list[str]]:
+    """`display_name -> tags` from `{game}/gems.json`'s active (non-support)
+    gems only -- a skill-centric group's `skill` is always an active skill
+    (poe.ninja's main/spirit lists), never a support gem, so support entries
+    are excluded before the join rather than risking a support gem's tags
+    (or its frequent empty `tags: []`, see CLAUDE.md) leaking onto a same-
+    named active skill.
+
+    gems.json can hold more than one active-gem record for the same
+    `display_name` with *different* tag sets -- confirmed live 2026-09-24,
+    e.g. PoE2's "Herald of Ice" is both `SkillGemHeraldOfIce` (tags include
+    `dexterity`/`intelligence`) and `UniqueSkillGemHeraldOfIce` (a unique-
+    item-granted variant, missing those two) -- two genuinely different RePoE
+    records, not a bug. Picking either one arbitrarily would silently assert
+    a specific variant that a given character's skill may or may not
+    actually be. Decided with the project owner: take the **intersection**
+    of tags across every same-named active record -- keeps only tags true
+    for either variant, dropping only the ones that differ between them.
+    Transfigured PoE1 gems never hit this path: they're their own distinct
+    `display_name` (e.g. "Ice Nova of Frostbolts" vs base "Ice Nova"), so
+    each gets its own single-record lookup, never collapsed into its base.
+
+    Returns (tags_by_name, ambiguous_names) -- `ambiguous_names` is every
+    name that needed the intersection fallback, for the publish-time report/
+    log (CLAUDE.md: "an error message's own wording is not a diagnosis" --
+    same spirit here: a silent single-candidate pick would hide this from
+    a human entirely)."""
+    by_name: dict[str, list[tuple[str, ...]]] = {}
+    for g in gems:
+        if g.get("is_support"):
+            continue
+        name = g.get("display_name")
+        if not name:
+            continue
+        by_name.setdefault(name, []).append(tuple(g.get("tags") or []))
+
+    tags_by_name: dict[str, list[str]] = {}
+    ambiguous_names: list[str] = []
+    for name, tag_tuples in by_name.items():
+        unique = set(tag_tuples)
+        if len(unique) == 1:
+            tags_by_name[name] = list(tag_tuples[0])
+        else:
+            tags_by_name[name] = sorted(set.intersection(*(set(t) for t in tag_tuples)))
+            ambiguous_names.append(name)
+
+    return tags_by_name, ambiguous_names
+
+
+def attach_skill_tags(groups: list[SkillGroup], gems: list[dict[str, Any]]) -> tuple[list[SkillGroup], dict[str, Any]]:
+    """Joins each group's `tags` from `{game}/gems.json` by exact `skill` name
+    match (see `build_gem_tags_lookup` for the join rules). A name with no
+    active-gem match at all gets `tags: []` and is logged/reported rather
+    than dropped from the index -- same "never silently discard" convention
+    `skill_normalizer.py` uses for an unmapped `main_skill`.
+
+    `SkillGroup` is frozen, so this returns a new list (`dataclasses.replace`)
+    rather than mutating in place. Returns `(groups, report)`; `report` is
+    meant for the publish-time log line and `--publish-skill-meta` output,
+    not for any published file."""
+    tags_by_name, ambiguous_names = build_gem_tags_lookup(gems)
+
+    unjoined_names: list[str] = []
+    new_groups: list[SkillGroup] = []
+    for g in groups:
+        tags = tags_by_name.get(g.skill)
+        if tags is None:
+            unjoined_names.append(g.skill)
+            tags = []
+        new_groups.append(replace(g, tags=tags))
+
+    if unjoined_names:
+        log.warning(
+            "attach_skill_tags: %d/%d skills had no active-gem match in gems.json (tags=[] published) -- "
+            "examples: %s", len(unjoined_names), len(groups), sorted(set(unjoined_names))[:10],
+        )
+    if ambiguous_names:
+        log.warning(
+            "attach_skill_tags: %d skill name(s) matched multiple gems.json active-gem records with "
+            "differing tags -- published the tag intersection: %s", len(ambiguous_names), sorted(ambiguous_names),
+        )
+
+    report = {
+        "joined": len(groups) - len(unjoined_names),
+        "unjoined_count": len(unjoined_names),
+        "unjoined_examples": sorted(set(unjoined_names))[:10],
+        "ambiguous_count": len(ambiguous_names),
+        "ambiguous_names": sorted(ambiguous_names),
+    }
+    return new_groups, report
 
 
 def build_skills_index(

@@ -45,6 +45,7 @@ from src.processing.archive_export import DEFAULT_ARCHIVE_DIR, export_league_arc
 from src.processing.char_cache import SnapshotProvider, StoreBackedCharacterCache
 from src.processing.skill_collect import CollectConfig, run_skill_collection
 from src.processing.skill_publish import (
+    attach_skill_tags,
     build_skill_dictionary,
     build_skill_groups,
     build_skill_passives_schema,
@@ -738,7 +739,7 @@ def _run_skill_meta_for_game(
             builds_fetcher=builds_fetcher, snapshots=snapshots, cache=cache, db=db,
             normalizer=normalizer, level_brackets=_level_brackets(cfg), config=collect_cfg,
         )
-        publish_result = publish_skill_meta(db, publisher, game, cfg, normalizer)
+        publish_result = publish_skill_meta(db, publisher, game, cfg, normalizer, http)
         stats["publish"] = publish_result
     finally:
         db.close()
@@ -747,8 +748,29 @@ def _run_skill_meta_for_game(
     return stats
 
 
+def _load_gems_for_tags(http: HttpClient, cfg: dict[str, Any], game: str) -> list[dict[str, Any]]:
+    """Best-effort load of the published `{game}/gems.json` for the tags join
+    (see `attach_skill_tags`). Never raises -- a load failure degrades to
+    `tags: []` for every skill this publish, same "never crash the job on a
+    bad/empty response" convention as `skill_normalizer.py`'s own gems.json
+    load, rather than blocking the whole skill-meta publish on it."""
+    try:
+        data = http.get_json(_gems_url(cfg, game))
+        gems = data.get("gems")
+        if not isinstance(gems, list) or not gems:
+            raise ValueError(f"unexpected gems.json shape: no non-empty 'gems' list")
+        return gems
+    except Exception as e:
+        log.error(
+            "skill publish(%s): could not load gems.json for tags join (%s) -- "
+            "publishing with tags=[] for every skill this run", game, e,
+        )
+        return []
+
+
 def publish_skill_meta(
     db: LocalDb, publisher: PricesPublisher, game: str, cfg: dict[str, Any], normalizer: ModNormalizer,
+    http: HttpClient,
 ) -> dict[str, Any]:
     """Publishes from whatever skill-centric run most recently *finished*
     (`skill_runs.status = 'finished'`) for `game` -- not necessarily the one
@@ -781,6 +803,9 @@ def publish_skill_meta(
     groups = build_skill_groups(stat_rows, passive_rows, population_rows, min_usage_pct)
     population_total = db.get_skill_run_population_total(run["run_id"])
 
+    gems = _load_gems_for_tags(http, cfg, game)
+    groups, tags_report = attach_skill_tags(groups, gems)
+
     index_data = build_skills_index(game, league, days, population_total, groups)
     publisher.publish(index_data, _skills_index_blob_path(game), cache_control=f"public, max-age={index_max_age}")
 
@@ -796,15 +821,18 @@ def publish_skill_meta(
     publisher.publish(passives_data, _passives_blob_path(game), cache_control="public, max-age=3600")
 
     log.info(
-        "skill publish(%s): run %d (snapshot %d) -- %d skills (%d main, %d spirit), index+dictionary+passives",
+        "skill publish(%s): run %d (snapshot %d) -- %d skills (%d main, %d spirit), index+dictionary+passives; "
+        "tags joined %d/%d (%d ambiguous, resolved via intersection)",
         game, run["run_id"], snapshot_id, len(groups),
         sum(1 for g in groups if g.skill_type == "main"), sum(1 for g in groups if g.skill_type == "spirit"),
+        tags_report["joined"], len(groups), tags_report["ambiguous_count"],
     )
     return {
         "ok": True, "run_id": run["run_id"], "snapshot_id": snapshot_id, "league": league,
         "skills_published": len(groups),
         "main_skills": sum(1 for g in groups if g.skill_type == "main"),
         "spirit_skills": sum(1 for g in groups if g.skill_type == "spirit"),
+        "tags": tags_report,
     }
 
 
@@ -828,7 +856,7 @@ def run_publish_skill_meta_once(cfg: dict[str, Any], games: list[str]) -> dict[s
                 firebase_stats_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
             )
             normalizer.load()
-            results[game] = publish_skill_meta(db, publisher, game, cfg, normalizer)
+            results[game] = publish_skill_meta(db, publisher, game, cfg, normalizer, http)
     finally:
         db.close()
     log.info("publish_skill_meta: %s", results)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from src.processing.skill_publish import (
     PASSIVES_SCHEMA_VERSION,
+    attach_skill_tags,
+    build_gem_tags_lookup,
     build_skill_dictionary,
     build_skill_groups,
     build_skill_passives_schema,
@@ -97,7 +99,7 @@ def test_skill_file_and_index_entry_shape():
     entry = g.index_entry("poe1")
     assert entry == {
         "skill_type": "main", "skill": "Fireball", "slug": "fireball", "facet_count": 500,
-        "populations": {"90-100": 10}, "path": "poe1/skills/main/fireball.json",
+        "tags": [], "populations": {"90-100": 10}, "path": "poe1/skills/main/fireball.json",
     }
 
 
@@ -134,3 +136,95 @@ def test_build_skill_passives_schema_empty_when_no_passives_survive():
     groups = build_skill_groups([], [passive_row(usage_pct=0.01)], [pop_row()], min_usage_pct=0.1)
     data = build_skill_passives_schema("poe1", "Allflame", 58, groups)
     assert data["passives"] == []
+
+
+def gem(display_name, tags, is_support=False):
+    return {"display_name": display_name, "tags": tags, "is_support": is_support}
+
+
+def test_build_gem_tags_lookup_basic_join():
+    gems = [gem("Fireball", ["fire", "projectile", "spell"])]
+    tags_by_name, ambiguous = build_gem_tags_lookup(gems)
+    assert tags_by_name == {"Fireball": ["fire", "projectile", "spell"]}
+    assert ambiguous == []
+
+
+def test_build_gem_tags_lookup_excludes_support_gems():
+    """A skill-centric group's `skill` is always an active skill -- a
+    same-named support gem entry (e.g. a coincidental name clash) must never
+    supply its (often empty) tags for an active skill's lookup."""
+    gems = [gem("Combustion", [], is_support=True)]
+    tags_by_name, ambiguous = build_gem_tags_lookup(gems)
+    assert tags_by_name == {}
+
+
+def test_build_gem_tags_lookup_transfigured_gem_keeps_its_own_tags_not_base():
+    gems = [
+        gem("Ice Nova", ["cold", "spell", "aoe"]),
+        gem("Ice Nova of Frostbolts", ["cold", "spell", "projectile"]),
+    ]
+    tags_by_name, ambiguous = build_gem_tags_lookup(gems)
+    assert tags_by_name["Ice Nova"] == ["cold", "spell", "aoe"]
+    assert tags_by_name["Ice Nova of Frostbolts"] == ["cold", "spell", "projectile"]
+    assert ambiguous == []
+
+
+def test_build_gem_tags_lookup_ambiguous_active_duplicates_use_tag_intersection():
+    """Real case found 2026-09-24: PoE2's "Herald of Ice" is both
+    SkillGemHeraldOfIce (dexterity/intelligence) and a unique-item-granted
+    UniqueSkillGemHeraldOfIce (missing those two) -- two distinct RePoE
+    records sharing a display_name. Decided with the project owner: publish
+    the intersection rather than guessing which variant is "the real one"."""
+    gems = [
+        gem("Herald of Ice", ["area", "attack", "buff", "cold", "dexterity", "herald", "intelligence", "payoff", "persistent"]),
+        gem("Herald of Ice", ["area", "attack", "buff", "cold", "herald", "payoff", "persistent"]),
+    ]
+    tags_by_name, ambiguous = build_gem_tags_lookup(gems)
+    assert tags_by_name["Herald of Ice"] == ["area", "attack", "buff", "cold", "herald", "payoff", "persistent"]
+    assert ambiguous == ["Herald of Ice"]
+
+
+def test_build_gem_tags_lookup_duplicate_active_entries_with_identical_tags_not_flagged_ambiguous():
+    gems = [gem("Convocation", ["duration", "minion"]), gem("Convocation", ["duration", "minion"])]
+    tags_by_name, ambiguous = build_gem_tags_lookup(gems)
+    assert tags_by_name["Convocation"] == ["duration", "minion"]
+    assert ambiguous == []
+
+
+def test_attach_skill_tags_joins_by_name_and_reports_unjoined():
+    groups = build_skill_groups(
+        [], [], [pop_row(skill="Fireball"), pop_row(skill="Unknown Skill")], min_usage_pct=0.1,
+    )
+    gems = [gem("Fireball", ["fire", "spell"])]
+    new_groups, report = attach_skill_tags(groups, gems)
+    by_skill = {g.skill: g.tags for g in new_groups}
+    assert by_skill["Fireball"] == ["fire", "spell"]
+    assert by_skill["Unknown Skill"] == []
+    assert report["joined"] == 1
+    assert report["unjoined_count"] == 1 and report["unjoined_examples"] == ["Unknown Skill"]
+    assert report["ambiguous_count"] == 0
+
+
+def test_attach_skill_tags_main_and_spirit_duplicate_names_each_get_their_own_correct_tags():
+    """Herald of Ice/Wolf Pack-style case: the same skill name published
+    once as `main` and once as `spirit` must both resolve to that skill's
+    real tags, never mixed up with an unrelated skill's tags."""
+    groups = build_skill_groups(
+        [], [],
+        [pop_row(skill_type="main", skill="Herald of Ice"), pop_row(skill_type="spirit", skill="Herald of Ice")],
+        min_usage_pct=0.1,
+    )
+    gems = [gem("Herald of Ice", ["cold", "herald", "buff"])]
+    new_groups, report = attach_skill_tags(groups, gems)
+    assert {g.skill_type: g.tags for g in new_groups} == {
+        "main": ["cold", "herald", "buff"], "spirit": ["cold", "herald", "buff"],
+    }
+    assert report["unjoined_count"] == 0
+
+
+def test_attach_skill_tags_flows_into_index_entry_and_file():
+    groups = build_skill_groups([], [], [pop_row(skill="Fireball")], min_usage_pct=0.1)
+    new_groups, _report = attach_skill_tags(groups, [gem("Fireball", ["fire", "spell"])])
+    g = new_groups[0]
+    assert g.index_entry("poe2")["tags"] == ["fire", "spell"]
+    assert g.to_file("poe2", "Allflame", 58)["tags"] == ["fire", "spell"]
