@@ -1,0 +1,10 @@
+[Unit]
+Description=Log poe-data-hub memory every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=10min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

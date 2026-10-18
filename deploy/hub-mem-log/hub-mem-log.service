@@ -1,0 +1,8 @@
+[Unit]
+Description=Log poe-data-hub memory (process + cgroup) to the journal
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hub-mem-log.sh
+Nice=10
+SyslogIdentifier=hub-mem-log
