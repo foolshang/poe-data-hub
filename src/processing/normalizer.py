@@ -67,6 +67,11 @@ KNOWN_MOD_KINDS = {"explicit", "implicit", "fractured"}
 # common case), then sign-kept-as-literal as a fallback for that alternative.
 _NUMBER_WITH_SIGN_RE = re.compile(r"[+-]?\d+(?:\.\d+)?")
 _NUMBER_NO_SIGN_RE = re.compile(r"\d+(?:\.\d+)?")
+# An item text that shows its sign ("+25% Chance to Block Spell Damage") belongs to a template that spells the
+# "+" (RePoE: format "+#", stat additional_spell_block_%), not to the same-worded sign-less one (format "#",
+# base_spell_block_%). Try the sign-kept skeleton first for such texts; texts without an explicit "+" keep the
+# old order.
+_EXPLICIT_PLUS_RE = re.compile(r"(?<![\w.])\+\d")
 
 # Fallback-match helpers (see ModNormalizer._match_one): GGG's trade stats
 # table normalizes away plurals and always spells negative-roll stats in
@@ -488,7 +493,10 @@ class ModNormalizer:
 
     @staticmethod
     def _try_skeletons(text: str, bucket: dict[str, str], mod_kind: str) -> Optional[NormalizedMod]:
-        for pattern in (_NUMBER_WITH_SIGN_RE, _NUMBER_NO_SIGN_RE):
+        patterns = (_NUMBER_WITH_SIGN_RE, _NUMBER_NO_SIGN_RE)
+        if _EXPLICIT_PLUS_RE.search(text):
+            patterns = (_NUMBER_NO_SIGN_RE, _NUMBER_WITH_SIGN_RE)
+        for pattern in patterns:
             skeleton, values = _skeletonize(text, pattern)
             stat_id = bucket.get(skeleton)
             if stat_id is not None:

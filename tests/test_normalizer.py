@@ -581,3 +581,33 @@ def test_negative_roll_with_a_plural_difference_maps_with_its_sign(tmp_path):
     n = _normalizer_for(tmp_path, {"implicit": [("implicit.stat_P", "+# Prefix Modifier allowed")]})
     result = n.normalize("-2 Prefix Modifiers allowed", "implicit")
     assert [m.stat_id for m in result] == ["implicit.stat_P"] and result[0].values == [-2.0]
+
+
+# -- an explicit "+" on the item selects the template that spells the "+" ---------------------
+# RePoE: additional_spell_block_% renders "+#" (stat 19803471 in the real table); base_spell_block_% renders "#"
+# (stat 561307714). Same wording otherwise; the sign on the item tells them apart.
+
+def test_item_with_an_explicit_plus_prefers_the_template_that_spells_the_plus(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_plain", "#% Chance to Block Spell Damage"),
+        ("explicit.stat_plus", "+#% Chance to Block Spell Damage"),
+    ]})
+    plus = n.normalize("+25% Chance to Block Spell Damage", "explicit")
+    plain = n.normalize("25% Chance to Block Spell Damage", "explicit")
+    assert [m.stat_id for m in plus] == ["explicit.stat_plus"] and plus[0].values == [25.0]
+    assert [m.stat_id for m in plain] == ["explicit.stat_plain"]
+
+
+def test_an_explicit_plus_still_falls_back_to_a_template_without_the_plus(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_plain", "#% Chance to Block")]})
+    assert [m.stat_id for m in n.normalize("+5% Chance to Block", "explicit")] == ["explicit.stat_plain"]
+
+
+def test_negative_values_and_ordinary_plus_templates_are_unaffected(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_life", "+# to maximum Life"),
+        ("explicit.stat_res", "#% to Cold Resistance"),
+    ]})
+    assert [m.stat_id for m in n.normalize("+87 to maximum Life", "explicit")] == ["explicit.stat_life"]
+    res = n.normalize("-30% to Cold Resistance", "explicit")
+    assert [m.stat_id for m in res] == ["explicit.stat_res"] and res[0].values == [-30.0]
