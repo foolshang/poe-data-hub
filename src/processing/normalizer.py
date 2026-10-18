@@ -74,6 +74,7 @@ _NUMBER_NO_SIGN_RE = re.compile(r"\d+(?:\.\d+)?")
 # Only the trailing word is singularized ("Charm Slots" -> "Charm Slot") --
 # matching mid-string "s" too would also mangle verbs like "Has".
 _TRAILING_S_RE = re.compile(r"(\w)s\Z")
+_LOCAL_SUFFIX_RE = re.compile(r"\s*\(Local\)\s*\Z")
 _NEGATION_WORD_PAIRS = [("reduced", "increased"), ("less", "more")]
 
 
@@ -124,6 +125,10 @@ class ModNormalizer:
         self._firebase_stats_url = firebase_stats_url
         # mod_kind -> {template text ("+# to maximum Life"): stat_id}
         self._by_kind: dict[str, dict[str, str]] = {}
+        # mod_kind -> {template text without its "(Local)" suffix: (stat_id, full table text)}.
+        # Only for locals with NO same-text global twin in that kind; see _build_local_alias.
+        self._local_alias: dict[str, dict[str, tuple[str, str]]] = {}
+        self.local_alias_hits = 0
         self.processed_count = 0
         self.unmapped_count = 0
         # (mod_kind, raw text) -> occurrences. Each distinct unmapped mod is
@@ -224,6 +229,24 @@ class ModNormalizer:
                 if not stat_id or not text:
                     continue
                 bucket[text] = stat_id
+        self._local_alias = {kind: self._build_local_alias(bucket) for kind, bucket in self._by_kind.items()}
+
+    @staticmethod
+    def _build_local_alias(bucket: dict[str, str]) -> dict[str, tuple[str, str]]:
+        """GGG lists a weapon/armour-local mod as "#% increased Energy Shield (Local)" but
+        the item text carries no "(Local)", so it never matched. Alias the suffix-less text to
+        the local stat -- but ONLY when that is unambiguous: if the same kind also lists the
+        identical suffix-less text as a global stat ("+# to maximum Energy Shield" is both
+        global and local, with different stat_ids), the item text cannot say which one it is,
+        so no alias is built and the existing exact match to the global entry stays as it was.
+        Two locals sharing one suffix-less text are likewise skipped."""
+        candidates: dict[str, list[tuple[str, str]]] = {}
+        for text, stat_id in bucket.items():
+            m = _LOCAL_SUFFIX_RE.search(text)
+            if m is None:
+                continue
+            candidates.setdefault(text[: m.start()], []).append((stat_id, text))
+        return {base: found[0] for base, found in candidates.items() if len(found) == 1 and base not in bucket}
 
     def stat_dictionary(self) -> list[dict[str, str]]:
         """For embedding in meta/latest.json (spec 8.2) — consumers rely on this mapping."""
@@ -265,6 +288,22 @@ class ModNormalizer:
         return []
 
     def _match_one(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
+        result = self._match_one_exact(text, mod_kind)
+        if result is not None:
+            return result
+        # Last resort, after every earlier rule has failed, so a text that already mapped can
+        # never change its stat_id because of the alias.
+        alias = self._local_alias.get(mod_kind)
+        if alias:
+            for pattern in (_NUMBER_WITH_SIGN_RE, _NUMBER_NO_SIGN_RE):
+                skeleton, values = _skeletonize(text, pattern)
+                hit = alias.get(skeleton)
+                if hit is not None:
+                    self.local_alias_hits += 1
+                    return NormalizedMod(stat_id=hit[0], mod_kind=mod_kind, template=hit[1], values=values)
+        return None
+
+    def _match_one_exact(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
         bucket = self._by_kind.get(mod_kind, {})
         direct = self._try_skeletons(text, bucket, mod_kind)
         if direct is not None:

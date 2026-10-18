@@ -365,3 +365,65 @@ def test_poe1_and_poe2_normalizers_use_different_stats_urls():
     assert "trade2" in STATS_URL_BY_GAME["poe2"]
     assert "trade2" not in STATS_URL_BY_GAME["poe1"]
     assert "trade/" in STATS_URL_BY_GAME["poe1"]
+
+
+# -- (Local) suffix aliasing ----------------------------------------------
+# GGG lists weapon/armour-local mods as "... (Local)" but the item text has no
+# suffix. A suffix-less text is aliased to the local stat only when that is
+# unambiguous; anything that already matched must never change.
+
+def _normalizer_for(tmp_path, groups: dict) -> ModNormalizer:
+    payload = {"result": [
+        {"id": kind, "entries": [{"id": sid, "text": text} for sid, text in entries]}
+        for kind, entries in groups.items()
+    ]}
+    n = ModNormalizer(http_client=_FakeHttpClient(payload), cache_path=tmp_path / "c.json", unmapped_log_path=tmp_path / "u.log")
+    n.load()
+    return n
+
+
+def test_local_only_template_is_matched_without_the_suffix(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_L", "#% increased Energy Shield (Local)")]})
+    result = n.normalize("100% increased Energy Shield", "explicit")
+    assert [m.stat_id for m in result] == ["explicit.stat_L"]
+    assert result[0].values == [100.0]
+    assert result[0].template == "#% increased Energy Shield (Local)"
+    assert n.local_alias_hits == 1
+
+
+def test_local_with_a_global_twin_is_not_aliased_and_global_keeps_winning(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_G", "+# to maximum Energy Shield"),
+        ("explicit.stat_L", "+# to maximum Energy Shield (Local)"),
+    ]})
+    assert [m.stat_id for m in n.normalize("+40 to maximum Energy Shield", "explicit")] == ["explicit.stat_G"]
+    assert n.local_alias_hits == 0
+    assert "+# to maximum Energy Shield" not in n._local_alias["explicit"]
+
+
+def test_two_locals_sharing_one_suffixless_text_are_not_aliased(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_1", "#% increased Thing (Local)"),
+        ("explicit.stat_2", "#% increased Thing  (Local)"),
+    ]})
+    assert n.normalize("5% increased Thing", "explicit") == []
+
+
+def test_local_alias_is_scoped_to_its_own_mod_kind(tmp_path):
+    n = _normalizer_for(tmp_path, {
+        "implicit": [("implicit.stat_L", "#% increased Energy Shield (Local)")],
+        "explicit": [("explicit.stat_X", "+# to maximum Life")],
+    })
+    assert [m.stat_id for m in n.normalize("10% increased Energy Shield", "implicit")] == ["implicit.stat_L"]
+    assert n.normalize("10% increased Energy Shield", "explicit") == []
+
+
+def test_existing_fallback_still_wins_before_the_local_alias(tmp_path):
+    # "Has 2 Slots": the plural fallback reaches the global "Has # Slot" first; the alias
+    # for "Has # Slots (Local)" must not hijack a text the older rules already matched.
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_G", "Has # Slot"),
+        ("explicit.stat_L", "Has # Slots (Local)"),
+    ]})
+    assert [m.stat_id for m in n.normalize("Has 2 Slots", "explicit")] == ["explicit.stat_G"]
+    assert n.local_alias_hits == 0
