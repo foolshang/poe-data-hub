@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 User=poe-data-hub
 WorkingDirectory=/opt/poe-data-hub
+# healthchecks.io ping URLs (secrets, outside the repo; '-' = optional, no file = no pings)
+EnvironmentFile=-/etc/poe-data-hub/healthchecks.env
 Environment=GOOGLE_APPLICATION_CREDENTIALS=/opt/poe-data-hub/data/service-account.json
 ExecStart=/opt/poe-data-hub/.venv/bin/python -m src.main --serve
 Restart=on-failure

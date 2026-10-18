@@ -218,9 +218,17 @@ healthchecks:
   # "job finished". Optional: leave blank and the hub runs exactly the same,
   # just without this layer. See CLAUDE.md for the two-layer monitoring
   # design and recommended healthchecks.io Period/Grace settings.
-  prices_ping_url: "https://hc-ping.com/681a6116-a8f0-42d4-a7e6-3b2685099ccb"
-  meta_ping_url: "https://hc-ping.com/98f50ed8-cff3-4392-9f3a-22af3c996a44"
-  news_ping_url: "https://hc-ping.com/d4223856-ee45-43a8-befc-ed2c3b2aa704"
+  #
+  # The ping URLs themselves are SECRETS (anyone who knows one can turn the
+  # check green while the system is dead) and this repo is public, so config
+  # only holds the NAME of the environment variable; src/utils/config.py
+  # resolves `<job>_ping_url_env` into `<job>_ping_url` at load time. On the
+  # VM the variables come from the systemd EnvironmentFile
+  # /etc/poe-data-hub/healthchecks.env (outside the repo, mode 600). An unset
+  # variable = that job simply does not ping.
+  prices_ping_url_env: "HUB_HC_PRICES_URL"
+  meta_ping_url_env: "HUB_HC_META_URL"
+  news_ping_url_env: "HUB_HC_NEWS_URL"
   # Skill-centric collection's own check (approved 2026-09-22) -- fires only
   # when BOTH configured games completed this cycle with characters_distinct
   # > 0 (see _all_games_got_real_skill_characters), same "never ping on a
@@ -229,4 +237,4 @@ healthchecks:
   # measured at ~71min combined (2026-09-22): Period 24h, Grace 4h (covers a
   # much slower cycle plus the scheduler's own misfire_grace_time=3600 if the
   # process was down right at the 05:00 ICT trigger).
-  skill_meta_ping_url: "https://hc-ping.com/502fc6e4-3c36-4ba3-bd08-2e71f949af12"
+  skill_meta_ping_url_env: "HUB_HC_SKILL_META_URL"
