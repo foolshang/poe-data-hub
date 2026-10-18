@@ -4,6 +4,7 @@ healthchecks.io dead-man-switch ping helper, and (phase 7) the multi-game /
 multi-league prices job (run_prices_once, _update_status)."""
 from __future__ import annotations
 
+import os
 import pytest
 
 import json
@@ -398,6 +399,97 @@ def test_run_archive_export_once_skips_game_with_no_snapshots(tmp_path):
     assert results == {"poe2": None}
 
 
+# -- 2026-10-18: archive export switched off after the 2026-10-15 OOM -------
+
+def _status_publisher(tmp_path):
+    publisher = PricesPublisher(bucket_name="test-bucket", local_cache_dir=tmp_path)
+    publisher._client = _FakeStorageClient()
+    return publisher
+
+
+def test_run_archive_export_once_disabled_skips_loudly_and_flags_status(tmp_path, caplog):
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2"],
+           "archive": {"enabled": False, "disabled_reason": "test reason"}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.LocalDb", side_effect=AssertionError("must not touch the DB while disabled")),          patch("src.main.PricesPublisher", return_value=publisher),          caplog.at_level("WARNING", logger="poe_data_hub"):
+        results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive")
+
+    assert results == {}
+    assert not (tmp_path / "archive").exists()
+    assert any("SKIPPED" in r.getMessage() and "test reason" in r.getMessage() for r in caplog.records)
+    status = publisher.fetch_previous("status.json")
+    assert status["archive"]["enabled"] is False
+    assert status["archive"]["reason"] == "test reason"
+    assert status["archive"]["last_skipped_at"]
+
+
+def test_archive_enabled_defaults_to_true_when_config_is_silent(tmp_path):
+    from src.main import _archive_enabled
+    assert _archive_enabled({}) is True
+    assert _archive_enabled({"archive": {}}) is True
+    assert _archive_enabled({"archive": {"enabled": False}}) is False
+
+
+def test_archive_previous_league_disabled_does_not_export_and_records_it(tmp_path, caplog):
+    db = LocalDb(tmp_path / "test.sqlite3")
+    db.insert_snapshot(game="poe2", league="Mirage", days_since_league_start=80, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
+    publisher = _status_publisher(tmp_path)
+    cfg = {"archive": {"enabled": False}}
+
+    with patch("src.main.export_league_archive", side_effect=AssertionError("must not export while disabled")),          caplog.at_level("WARNING", logger="poe_data_hub"):
+        _archive_previous_league_if_changed(
+            db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive", archive_enabled=False, cfg=cfg,
+        )
+        _archive_previous_league_if_changed(  # same event reported twice must not duplicate the record
+            db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive", archive_enabled=False, cfg=cfg,
+        )
+    db.close()
+
+    assert any("NOT archived" in r.getMessage() for r in caplog.records)
+    status = publisher.fetch_previous("status.json")
+    entries = status["archive"]["unarchived_league_changes"]
+    assert len(entries) == 1 and entries[0]["game"] == "poe2" and entries[0]["league"] == "Mirage"
+    assert entries[0]["detected_at"]
+
+
+def test_disabled_archive_warns_about_unarchived_leagues_on_every_skipped_cycle(tmp_path, caplog):
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2"], "archive": {"enabled": False}}
+    publisher = _status_publisher(tmp_path)
+    publisher.publish(
+        {"errors": [], "archive": {"enabled": False, "unarchived_league_changes": [
+            {"game": "poe2", "league": "Mirage", "detected_at": "2026-10-20T00:00:00Z"}]}},
+        "status.json", cache_control="no-cache",
+    )
+    with patch("src.main.PricesPublisher", return_value=publisher), caplog.at_level("WARNING", logger="poe_data_hub"):
+        run_archive_export_once(cfg, archive_dir=tmp_path / "archive")
+        run_archive_export_once(cfg, archive_dir=tmp_path / "archive")
+
+    gaps = [r for r in caplog.records if "ARCHIVE GAP" in r.getMessage()]
+    assert len(gaps) == 2  # once per skipped cycle, not once ever
+    assert "poe2:Mirage" in gaps[0].getMessage()
+    # the record survives the status rewrite on each skipped cycle
+    assert len(publisher.fetch_previous("status.json")["archive"]["unarchived_league_changes"]) == 1
+
+
+def test_clear_stale_running_jobs_drops_dead_pids_only(tmp_path):
+    from src.main import _clear_stale_running_jobs
+    publisher = _status_publisher(tmp_path)
+    live_pid = os.getppid()
+    publisher.publish(
+        {"errors": [], "running_jobs": {
+            "meta": {"pid": 2**22 + 12345, "started_at": "2026-10-14T22:00:01Z"},
+            "other": {"pid": live_pid, "started_at": "2026-10-18T00:00:00Z"},
+        }},
+        "status.json", cache_control="no-cache",
+    )
+    with patch("src.main.job_lock._pid_alive", side_effect=lambda pid: pid == live_pid):
+        _clear_stale_running_jobs(publisher)
+
+    running = publisher.fetch_previous("status.json")["running_jobs"]
+    assert "meta" not in running
+    assert running["other"]["pid"] == live_pid
+
+
 def test_run_export_league_archive_exports_a_specific_league(tmp_path):
     db_path = tmp_path / "test.sqlite3"
     db = LocalDb(db_path)
@@ -724,23 +816,45 @@ def test_run_scheduler_uses_daily_cron_when_meta_runs_per_day_is_one(tmp_path):
     assert isinstance(trigger, CronTrigger)
 
 
-def test_run_scheduler_registers_weekly_archive_job(tmp_path):
+def test_run_scheduler_registers_weekly_archive_job_as_a_fixed_cron(tmp_path):
+    """A fixed weekly cron, never an interval: an IntervalTrigger's first fire
+    is process-start + 7d, so every restart moved it (2026-10-15 OOM)."""
+    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
 
     cfg = {
         "firebase": {"bucket": "test-bucket"},
-        "schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1},
+        "schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1,
+                     "archive_day_of_week": "sun", "archive_hour_thailand": 13},
     }
     fake_scheduler = MagicMock()
-    with patch("src.main.BlockingScheduler", return_value=fake_scheduler), \
-         patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])), \
-         patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler),          patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, [])),          patch("src.main._build_http_client", return_value=_FakeSteamHttp()):
         run_scheduler(cfg)
 
     archive_call = next(c for c in fake_scheduler.add_job.call_args_list if c.kwargs.get("id") == "archive")
     assert archive_call.args[0] is _safe_run
-    assert isinstance(archive_call.args[1], IntervalTrigger)
+    trigger = archive_call.args[1]
+    assert isinstance(trigger, CronTrigger) and not isinstance(trigger, IntervalTrigger)
+    fields = {f.name: str(f) for f in trigger.fields}
+    assert fields["day_of_week"] == "sun" and fields["hour"] == "13" and fields["minute"] == "0"
+    assert str(trigger.timezone) == "Asia/Bangkok"
     assert archive_call.kwargs["args"][0] is run_archive_export_once
+
+
+def test_run_scheduler_keeps_archive_job_registered_but_flags_status_when_disabled(tmp_path, caplog):
+    cfg = {
+        "firebase": {"bucket": "test-bucket"},
+        "schedule": {"meta_cron_hour_thailand": 2, "meta_runs_per_day_league_start": 1},
+        "archive": {"enabled": False, "disabled_reason": "test reason"},
+    }
+    created: list = []
+    fake_scheduler = MagicMock()
+    with patch("src.main.BlockingScheduler", return_value=fake_scheduler),          patch("src.main.PricesPublisher", new=_fake_prices_publisher_factory(tmp_path, created)),          patch("src.main._build_http_client", return_value=_FakeSteamHttp()),          caplog.at_level("WARNING", logger="poe_data_hub"):
+        run_scheduler(cfg)
+
+    assert any(c.kwargs.get("id") == "archive" for c in fake_scheduler.add_job.call_args_list)
+    assert any("archive export is DISABLED" in r.getMessage() for r in caplog.records)
+    assert created[-1].fetch_previous("status.json")["archive"]["enabled"] is False
 
 
 def test_run_scheduler_switches_to_evenly_spaced_runs_for_league_start(tmp_path):

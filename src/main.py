@@ -628,7 +628,7 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             game, cache.fetched_count, cache.reused_count, cache.unique_ok_count, cache.failed_count,
         )
 
-        _archive_previous_league_if_changed(db, publisher, game, league)
+        _archive_previous_league_if_changed(db, publisher, game, league, archive_enabled=_archive_enabled(cfg), cfg=cfg)
 
         snapshot_id = db.insert_snapshot(
             game=game,
@@ -678,6 +678,7 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
         round(normalizer.unmapped_count / normalizer.processed_count * 100, 2)
         if normalizer.processed_count else 0.0
     )
+    normalizer.log_unmapped_summary()
     peak_rss_mb = _peak_memory_mb()
     log.info("meta job(%s): peak RSS = %s MB", game, peak_rss_mb if peak_rss_mb is not None else "unknown (non-Unix)")
 
@@ -729,7 +730,7 @@ def _run_skill_meta_for_game(
 
     db = LocalDb()
     try:
-        _archive_previous_league_if_changed(db, publisher, game, league)
+        _archive_previous_league_if_changed(db, publisher, game, league, archive_enabled=_archive_enabled(cfg), cfg=cfg)
         cache = StoreBackedCharacterCache(
             db, NinjaCharsFetcher(http, game=game), snapshots, game, league,
             max_age_days=collect_cfg.reuse_max_age_days, memoize=False,
@@ -743,6 +744,7 @@ def _run_skill_meta_for_game(
         stats["publish"] = publish_result
     finally:
         db.close()
+    normalizer.log_unmapped_summary()
     stats["peak_rss_mb"] = _peak_memory_mb()
     log.info("skill meta job(%s): peak RSS = %s MB", game, stats["peak_rss_mb"])
     return stats
@@ -1020,6 +1022,31 @@ def _mark_job_finished(publisher: PricesPublisher, job_name: str) -> None:
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
 
 
+def _clear_stale_running_jobs(publisher: PricesPublisher) -> None:
+    """Drops `status["running_jobs"]` entries whose pid is no longer alive.
+    `_mark_job_finished` never runs when a process is OOM-killed or the VM
+    is reset mid-job, so the entry used to stay forever (2026-10-15: a
+    `meta` entry for the dead pid 1164340 outlived the reset by days).
+    Called once at scheduler startup, when no job of THIS process can be
+    running yet, so only another process's live entry (e.g. a manual
+    `--run-meta-once`) is kept. Best-effort, never fails startup."""
+    try:
+        status = publisher.fetch_previous(STATUS_BLOB_PATH) or {}
+        running = status.get("running_jobs") or {}
+        stale = {name: info for name, info in running.items()
+                 if not isinstance(info, dict) or not isinstance(info.get("pid"), int)
+                 or info["pid"] == os.getpid() or not job_lock._pid_alive(info["pid"])}
+        if not stale:
+            return
+        for name in stale:
+            running.pop(name, None)
+        status["running_jobs"] = running
+        publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+        log.warning("scheduler: cleared stale running_jobs entries %s (their processes are gone)", sorted(stale))
+    except Exception as e:
+        log.warning("could not clear stale running_jobs from status.json: %s", e)
+
+
 def _peak_memory_mb() -> Optional[float]:
     """Peak resident set size of this process since start, in MB. Linux's
     `ru_maxrss` is in KB (macOS uses bytes, but this only runs on the Linux
@@ -1133,8 +1160,69 @@ def _update_meta_status(publisher: PricesPublisher, results: dict[str, dict[str,
     publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
 
 
+def _archive_enabled(cfg: dict[str, Any]) -> bool:
+    """`archive.enabled` in config.yaml; absent means enabled, so a config
+    that never mentions it keeps the original behavior."""
+    return bool(cfg.get("archive", {}).get("enabled", True))
+
+
+def _archive_disabled_reason(cfg: dict[str, Any]) -> str:
+    return str(cfg.get("archive", {}).get("disabled_reason") or "archive.enabled is false")
+
+
+def _publish_archive_status(
+    publisher: PricesPublisher, cfg: dict[str, Any], *, skipped_at: Optional[str] = None,
+    unarchived_league: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """`status["archive"]`: whether the archive export is switched off and
+    why, so a disabled archive is visible in status.json instead of just
+    silently absent (the 2026-10-15 OOM fix disabled it on purpose; this is
+    what stops it staying off unnoticed). Best-effort -- never fails a job.
+    Returns the `archive` dict it wrote ({} if the status write failed)."""
+    archive_status: dict[str, Any] = {}
+    try:
+        status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
+        previous = status.get("archive") if isinstance(status.get("archive"), dict) else {}
+        if _archive_enabled(cfg):
+            archive_status = {"enabled": True}
+        else:
+            archive_status = {
+                "enabled": False,
+                "reason": _archive_disabled_reason(cfg),
+                "last_skipped_at": skipped_at or previous.get("last_skipped_at"),
+                "unarchived_league_changes": list(previous.get("unarchived_league_changes", [])),
+            }
+            if unarchived_league and not any(
+                e.get("game") == unarchived_league["game"] and e.get("league") == unarchived_league["league"]
+                for e in archive_status["unarchived_league_changes"]
+            ):
+                archive_status["unarchived_league_changes"].append(
+                    {**unarchived_league, "detected_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+                )
+        status["archive"] = archive_status
+        publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+    except Exception as e:
+        log.warning("could not update status.json's archive flag: %s", e)
+    return archive_status
+
+
+def _warn_unarchived_leagues(archive_status: dict[str, Any]) -> None:
+    """WARNING for every league that changed while the archive export was
+    off. Called on EVERY skipped weekly cycle and at scheduler start, not
+    just when the change is detected: unarchived rows age out under the
+    skill-centric retention (45d) and are then gone for good."""
+    for entry in archive_status.get("unarchived_league_changes", []):
+        log.warning(
+            "ARCHIVE GAP: %s league %r changed (detected %s) while the archive export was disabled and has NOT been "
+            "archived -- its raw rows are deleted by retention ~45 days after they were collected. Re-enable the "
+            "export or run `--export-league-archive %s:%s` before then.",
+            entry.get("game"), entry.get("league"), entry.get("detected_at", "unknown"), entry.get("game"), entry.get("league"),
+        )
+
+
 def _archive_previous_league_if_changed(
     db: LocalDb, publisher: PricesPublisher, game: str, new_league: str, archive_dir: Path = DEFAULT_ARCHIVE_DIR,
+    archive_enabled: bool = True, cfg: Optional[dict[str, Any]] = None,
 ) -> None:
     """Called from `_run_meta_for_game` right before inserting the new
     snapshot: if this game's most-recently-recorded league differs from the
@@ -1145,6 +1233,18 @@ def _archive_previous_league_if_changed(
     `--export-league-archive`, can still catch it up later)."""
     previous_league = db.most_recent_league(game)
     if previous_league is None or previous_league == new_league:
+        return
+    if not archive_enabled:
+        # Loud on purpose: skipping here means the old league's rows are
+        # NOT archived and will age out under the skill-centric retention
+        # (config.yaml `retention`, 45d) unless the export is run first.
+        log.warning(
+            "meta job(%s): league changed %r -> %r but the archive export is DISABLED (archive.enabled=false) -- "
+            "the old league is NOT archived. Re-enable it or run `--export-league-archive %s:%s` before its raw "
+            "rows age out under retention.", game, previous_league, new_league, game, previous_league,
+        )
+        if cfg is not None:
+            _publish_archive_status(publisher, cfg, unarchived_league={"game": game, "league": previous_league})
         return
     log.info("meta job(%s): league changed %r -> %r, archiving the old league", game, previous_league, new_league)
     try:
@@ -1165,6 +1265,15 @@ def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARC
     {game: league_exported_or_None}."""
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    if not _archive_enabled(cfg):
+        log.warning(
+            "archive job: SKIPPED this cycle -- the archive export is DISABLED (%s). No league archive is being "
+            "written; status.json's `archive.enabled` is false until it is re-enabled.", _archive_disabled_reason(cfg),
+        )
+        _warn_unarchived_leagues(
+            _publish_archive_status(publisher, cfg, skipped_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        )
+        return {}
     results: dict[str, Optional[str]] = {}
     db = LocalDb()
     try:
@@ -1572,16 +1681,28 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     # bounds how much of an in-progress league could be lost if the VM
     # disappears mid-league to at most a week. No poe.ninja calls (reads
     # local SQLite only), so no healthcheck ping needed here either.
+    # A fixed weekly cron, not IntervalTrigger(weeks=1): an interval's first
+    # fire is "process start + 7 days", so every restart moved it and the
+    # 2026-10-15 OOM landed exactly 7 days after a restart, at a time nobody
+    # chose. Registered even while `archive.enabled` is false so the skip is
+    # logged (WARNING) every cycle rather than the job just vanishing.
+    archive_dow = schedule_cfg.get("archive_day_of_week", "sun")
+    archive_hour = schedule_cfg.get("archive_hour_thailand", 13)
     scheduler.add_job(
-        _safe_run, IntervalTrigger(weeks=1), args=[run_archive_export_once, cfg, "archive"],
+        _safe_run, CronTrigger(day_of_week=archive_dow, hour=archive_hour, minute=0, timezone="Asia/Bangkok"),
+        args=[run_archive_export_once, cfg, "archive"],
         id="archive", max_instances=1, misfire_grace_time=3600,
     )
+    if not _archive_enabled(cfg):
+        log.warning("scheduler: archive export is DISABLED (%s) -- no league archive will be written", _archive_disabled_reason(cfg))
+    _warn_unarchived_leagues(_publish_archive_status(publisher, cfg))
+    _clear_stale_running_jobs(publisher)
 
     log.info(
         "scheduler: starting (prices every %dmin, meta %s [league_start_mode %s: %s], cleanup daily %02d:00 ICT, "
-        "news every %dmin, gems daily %02d:00 ICT, archive weekly, skill_meta %s)",
+        "news every %dmin, gems daily %02d:00 ICT, archive %s %02d:00 ICT%s, skill_meta %s)",
         prices_interval, meta_trigger, "active" if _league_start_mode_active else "inactive", per_game_detail,
-        cleanup_hour, news_interval, gems_hour,
+        cleanup_hour, news_interval, gems_hour, archive_dow, archive_hour, "" if _archive_enabled(cfg) else " [DISABLED]",
         f"daily {schedule_cfg.get('skill_meta_cron_hour_thailand', 5):02d}:00 ICT (poe1 then poe2)" if skill_meta_scheduled else "not scheduled",
     )
     scheduler.start()

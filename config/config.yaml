@@ -99,6 +99,13 @@ schedule:
   # ~21h of headroom before the next 02:00 slot-only meta run even on a much
   # slower cycle than the ~71min measured 2026-09-22 -- see SPEC.md 8.10.
   skill_meta_cron_hour_thailand: 5
+  # Weekly archive export: a fixed weekly cron, NOT an interval -- an interval's
+  # first fire is process-start + 7 days, so every restart moved it (the
+  # 2026-10-15 OOM landed exactly 7 days after a restart). Sunday 13:00 ICT
+  # sits clear of meta 02:00, gems 03:00, cleanup 04:00 and the skill run
+  # (05:00 start, ~3h normally, ~7h on a bad day).
+  archive_day_of_week: sun
+  archive_hour_thailand: 13
 
 meta:
   sample_per_slot: 100 # NOTE: poe.ninja's builds-search endpoint has no known
@@ -189,6 +196,21 @@ retention:
   # after its early raw rows age out from here, as long as the weekly archive
   # re-export cadence (7 days) stays well inside this window.
   skill_stat_counts_days: 45
+
+archive:
+  # DISABLED 2026-10-18 (temporary). run_archive_export_once and the
+  # league-change export (_archive_previous_league_if_changed) both load a
+  # league's whole stat tables into Python lists, which pushed poe-data-hub to
+  # ~2.6GB (711MB RSS + 1.9GB swap) on a 955MB VM and caused the 2026-10-15
+  # outage. While false: every skipped weekly cycle logs a WARNING, status.json
+  # carries archive.enabled=false (+ any league change that went unarchived),
+  # and `--export-league-archive` (manual) still works but WILL OOM the VM.
+  # Re-enable only after the export is rewritten to aggregate in SQL and stream
+  # in chunks, and measured against the real DB. A league that changes while
+  # this is false is NOT archived and its rows age out after
+  # retention.skill_stat_counts_days (45d) -- fix before then.
+  enabled: false
+  disabled_reason: "OOM risk: export loads whole league into RAM (2026-10-15 incident); awaiting SQL/streaming rewrite"
 
 healthchecks:
   # Layer-1 dead-man-switch pings (healthchecks.io or compatible), sent only
