@@ -64,9 +64,9 @@ def test_clean_mod_text_strips_reference_tags():
 
 
 def test_fetch_character_basic_fields(fetcher: NinjaCharsFetcher):
-    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
-    assert detail.account == "heygyus-0416"
-    assert detail.name == "ResurrectGodAura"
+    detail = fetcher.fetch_character(SNAPSHOT, "anon_f9b6b98", "anon_0774316e995")
+    assert detail.account == "anon_f9b6b98"
+    assert detail.name == "anon_0774316e995"
     assert detail.level == 100
     assert detail.char_class == "Martial Artist"
     assert detail.archetype_hint == "Hollow Focus"
@@ -77,7 +77,7 @@ def test_fetch_character_captures_raw_passive_selection(fetcher: NinjaCharsFetch
     nothing resolves these real GGG node IDs to names yet (no tree dataset
     wired in) -- so a future full-tree phase has historical data to work
     from instead of starting the clock over."""
-    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    detail = fetcher.fetch_character(SNAPSHOT, "anon_f9b6b98", "anon_0774316e995")
     assert len(detail.passive_selection) == 109
     assert 331 in detail.passive_selection
     assert all(isinstance(n, int) for n in detail.passive_selection)
@@ -92,7 +92,7 @@ def test_fetch_character_passive_selection_defaults_to_empty_when_absent(tmp_pat
 
 
 def test_fetch_character_ring_item_mods(fetcher: NinjaCharsFetcher):
-    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    detail = fetcher.fetch_character(SNAPSHOT, "anon_f9b6b98", "anon_0774316e995")
     ring_items = [i for i in detail.items if i.slot == "ring"]
     assert len(ring_items) >= 1
     ring = ring_items[0]
@@ -102,14 +102,14 @@ def test_fetch_character_ring_item_mods(fetcher: NinjaCharsFetcher):
 
 
 def test_fetch_character_jewels_split_by_base_type(fetcher: NinjaCharsFetcher):
-    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    detail = fetcher.fetch_character(SNAPSHOT, "anon_f9b6b98", "anon_0774316e995")
     jewel_slots = {i.slot for i in detail.items if i.slot.startswith("jewel:")}
     assert "jewel:diamond" in jewel_slots
     assert "jewel:emerald" in jewel_slots
 
 
 def test_fetch_character_skips_rune_socket_items(fetcher: NinjaCharsFetcher):
-    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    detail = fetcher.fetch_character(SNAPSHOT, "anon_f9b6b98", "anon_0774316e995")
     assert all(not i.base_type.endswith("Rune") for i in detail.items if i.slot not in ("weapon",))
 
 
@@ -125,7 +125,7 @@ def test_validation_failure_does_not_raise_generic_exception(tmp_path):
 def test_character_detail_round_trips_through_the_store_serializers(fetcher: NinjaCharsFetcher):
     """The shared SQLite character cache stores `character_detail_to_dict` JSON
     and rebuilds with `character_detail_from_dict` -- nothing may be lost."""
-    detail = fetcher.fetch_character(SNAPSHOT, "heygyus-0416", "ResurrectGodAura")
+    detail = fetcher.fetch_character(SNAPSHOT, "anon_f9b6b98", "anon_0774316e995")
     restored = character_detail_from_dict(json.loads(json.dumps(character_detail_to_dict(detail))))
     assert restored == detail
     assert restored.items and restored.passive_selection
@@ -185,14 +185,14 @@ def poe1_fetcher(tmp_path):
 
 
 def test_fetch_poe1_character_basic_fields(poe1_fetcher: NinjaCharsFetcher):
-    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
+    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "anon_8ef4ee68", "anon_11b9408c5320")
     assert detail.char_class == "Pathfinder"
     assert detail.level == 100
     assert detail.archetype_hint == "Vaal Caustic Arrow"
 
 
 def test_fetch_poe1_character_jewels_split_by_clean_base_type(poe1_fetcher: NinjaCharsFetcher):
-    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
+    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "anon_8ef4ee68", "anon_11b9408c5320")
     jewel_slots = {i.slot for i in detail.items if i.slot.startswith("jewel:")}
     assert "jewel:cobalt" in jewel_slots
     assert "jewel:viridian" in jewel_slots
@@ -202,5 +202,5 @@ def test_fetch_poe1_character_jewels_split_by_clean_base_type(poe1_fetcher: Ninj
 
 
 def test_fetch_poe1_character_no_focus_slot(poe1_fetcher: NinjaCharsFetcher):
-    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "Poteitik-3151", "GarfSkinEnjoyerrr")
+    detail = poe1_fetcher.fetch_character(POE1_SNAPSHOT, "anon_8ef4ee68", "anon_11b9408c5320")
     assert all(i.slot != "focus" for i in detail.items)

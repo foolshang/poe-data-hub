@@ -99,8 +99,8 @@ def test_fetch_slot_extracts_known_characters(fetcher: NinjaBuildsFetcher):
 
     assert len(chars) == 100
     first = chars[0]
-    assert first.name == "ResurrectGodAura"
-    assert first.account == "heygyus-0416"
+    assert first.name == "anon_0774316e995"
+    assert first.account == "anon_f9b6b98"
     assert first.level == 100
     assert first.char_class == "Martial Artist"
     assert first.keypassives == ("Dance with Death",)
@@ -113,7 +113,7 @@ def test_keypassives_use_the_search_endpoints_own_dictionary_not_ggg_node_ids(fe
     notable/keystone *names* directly -- NOT the real GGG passive-tree node
     IDs the character-detail endpoint's `passiveSelection` uses (in the
     thousands/hundred-thousands range). Confirmed against a known keystone:
-    ResurrectGodAura's real keystone is "Dance with Death" (from a separate
+    anon_0774316e995's real keystone is "Dance with Death" (from a separate
     character-detail fetch), and this resolves correctly through the
     search-response's own keypassives column + dictionary alone."""
     snap = fetcher.resolve_snapshot("Runes of Aldur")
@@ -315,8 +315,8 @@ def test_poe1_fetch_slot_extracts_known_characters(poe1_fetcher: NinjaBuildsFetc
 
     assert len(chars) == 100
     first = chars[0]
-    assert first.name == "ПОТЕЙТИК"  # "ПОТЕЙТИК"
-    assert first.account == "Poteitik-3151"
+    assert first.name == "anon_6a4089d7a72"
+    assert first.account == "anon_8ef4ee68"
     assert first.level == 100
     assert first.char_class == "Champion"
     assert first.archetype_hint == "Desecrate"
