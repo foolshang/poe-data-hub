@@ -478,10 +478,14 @@ def test_all_placeholder_twin_keeps_winning_over_a_fixed_number_template(tmp_pat
     assert n.literal_hits == 0
 
 
-def test_literal_sign_template_is_not_reached_by_a_negative_roll(tmp_path):
+def test_literal_sign_template_with_a_fixed_number_is_reached_by_a_negative_roll_only_via_the_last_resort(tmp_path):
+    # Step B keeps the template's literal '+' (a negative roll can't match there); step C only retries the
+    # ordinary rules. The sign-tolerant last-resort rule (step D) is what maps this, with the sign kept.
     n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_P", "+#% to Chance for 4 seconds")]})
     assert [m.stat_id for m in n.normalize("+10% to Chance for 4 seconds", "explicit")] == ["explicit.stat_P"]
-    assert n.normalize("-10% to Chance for 4 seconds", "explicit") == []   # negative values of +# templates are a separate rule
+    negative = n.normalize("-10% to Chance for 4 seconds", "explicit")
+    assert [m.stat_id for m in negative] == ["explicit.stat_P"] and negative[0].values == [-10.0]
+    assert n.normalize("-10% to Chance for 5 seconds", "explicit") == []   # the fixed number still has to match
 
 
 # -- negative rolls of templates that bake a '+' into the text ---------------
@@ -518,3 +522,62 @@ def test_negative_flip_never_overrides_a_template_that_already_matched(tmp_path)
     assert [m.stat_id for m in result] == ["explicit.stat_plain"]
     assert result[0].values == [-30.0]
     assert n.negative_flip_hits == 0
+
+
+# -- singular/plural wording ---------------------------------------------------
+# GGG's table spells templates with the singular noun/verb; item text pluralizes with the roll.
+
+def test_plural_item_text_matches_the_singular_table_template(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_C", "Gain # Charge when you are Hit by an Enemy")]})
+    result = n.normalize("Gain 3 Charges when you are Hit by an Enemy", "explicit")
+    assert [m.stat_id for m in result] == ["explicit.stat_C"] and result[0].values == [3.0]
+    assert n.plural_hits == 1
+
+
+def test_plural_rule_still_checks_every_fixed_number(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_S", "Has 1 Socket")]})
+    assert n.normalize("Has 2 Sockets", "explicit") == []      # same words, different fixed number: NOT the same stat
+    assert n.normalize("Has 3 Sockets", "explicit") == []
+
+
+def test_plural_rule_does_not_invent_a_plural_where_the_words_differ(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_B", "Gain # Bonus when you Kill")]})
+    assert n.normalize("Gain 3 Bonuses when you Kill", "explicit") == []
+    assert [m.stat_id for m in n.normalize("Gain 3 Bonus when you Kill", "explicit")] == ["explicit.stat_B"]
+
+
+def test_plural_rule_is_case_sensitive(tmp_path):
+    # "supported by" and "Supported by" are different GGG entries; case folding would have merged them.
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_lower", "Socketed Gems are supported by Level # Blind"),
+        ("explicit.stat_upper", "Socketed Gems are Supported by Level # Blind"),
+    ]})
+    assert [m.stat_id for m in n.normalize("Socketed Gems are Supported by Level 20 Blind", "explicit")] == ["explicit.stat_upper"]
+
+
+def test_plural_rule_leaves_a_text_unmapped_when_two_stats_qualify(tmp_path):
+    # Two different stats that differ only in WHERE the plural 's' sits. The item text equals neither exactly
+    # but depluralizes to both: guessing would be wrong half the time -> unmapped, and counted.
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_a", "Gain # Charge when Hits you"),
+        ("explicit.stat_b", "Gain # Charges when Hit you"),
+    ]})
+    # (not at the end of the text: the older trailing-word fallback would otherwise decide it first)
+    assert n.normalize("Gain 3 Charges when Hits you", "explicit") == []
+    assert n.plural_ambiguous == 1
+    assert n.plural_hits == 0
+
+
+def test_plural_rule_never_overrides_an_earlier_match(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_exact", "Gain # Charges when you Kill"),
+        ("explicit.stat_single", "Gain # Charge when you Kill"),
+    ]})
+    assert [m.stat_id for m in n.normalize("Gain 3 Charges when you Kill", "explicit")] == ["explicit.stat_exact"]
+    assert n.plural_hits == 0
+
+
+def test_negative_roll_with_a_plural_difference_maps_with_its_sign(tmp_path):
+    n = _normalizer_for(tmp_path, {"implicit": [("implicit.stat_P", "+# Prefix Modifier allowed")]})
+    result = n.normalize("-2 Prefix Modifiers allowed", "implicit")
+    assert [m.stat_id for m in result] == ["implicit.stat_P"] and result[0].values == [-2.0]

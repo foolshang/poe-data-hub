@@ -84,6 +84,24 @@ _TEMPLATE_TOKEN_UNSIGNED_RE = re.compile(r"(?:\d+(?:\.\d+)?|#)")
 _NEGATION_WORD_PAIRS = [("reduced", "increased"), ("less", "more")]
 
 
+# Words that already end in these are not plurals ("Bonus", "Virtuous", "Stasis", "Glass").
+_NOT_PLURAL_SUFFIXES = ("ss", "us", "is")
+
+
+def _depluralize(text: str) -> str:
+    """Drops one trailing 's' from every word of 4+ letters, case-sensitively. GGG's trade table
+    spells a template with the singular noun and verb ("Gain # Charge when ...", "Has # Abyssal
+    Sockets") while item text pluralizes with the roll ("Gain 3 Charges when ..."). Applied to BOTH
+    sides so only texts that are word-for-word identical afterwards can match."""
+    out = []
+    for word in re.split(r"(\s+)", text):
+        if (word and not word.isspace() and len(re.sub(r"[^A-Za-z]", "", word)) > 3
+                and word.endswith("s") and not word.endswith(_NOT_PLURAL_SUFFIXES)):
+            word = word[:-1]
+        out.append(word)
+    return "".join(out)
+
+
 @dataclass(frozen=True)
 class NormalizedMod:
     stat_id: str
@@ -140,6 +158,10 @@ class ModNormalizer:
         self._literal_index: dict[str, dict[str, dict[str, list[tuple[str, str, list[Optional[float]]]]]]] = {}
         self.literal_hits = 0
         self.negative_flip_hits = 0
+        # mod_kind -> {depluralized all-numbers-to-'#' skeleton: [(stat_id, full text, fixed numbers per token)]}
+        self._plural_index: dict[str, dict[str, list[tuple[str, str, list[Optional[float]]]]]] = {}
+        self.plural_hits = 0
+        self.plural_ambiguous = 0
         self.literal_ambiguous = 0
         self.processed_count = 0
         self.unmapped_count = 0
@@ -243,6 +265,7 @@ class ModNormalizer:
                 bucket[text] = stat_id
         self._local_alias = {kind: self._build_local_alias(bucket) for kind, bucket in self._by_kind.items()}
         self._literal_index = {kind: self._build_literal_index(bucket) for kind, bucket in self._by_kind.items()}
+        self._plural_index = {kind: self._build_plural_index(bucket) for kind, bucket in self._by_kind.items()}
 
     @staticmethod
     def _build_local_alias(bucket: dict[str, str]) -> dict[str, tuple[str, str]]:
@@ -282,6 +305,18 @@ class ModNormalizer:
             tokens = pattern.findall(text)
             fixed = [None if t.lstrip("+-") == "#" else float(t) for t in tokens]
             index[mode].setdefault(pattern.sub("#", text), []).append((stat_id, text, fixed))
+        return index
+
+    @staticmethod
+    def _build_plural_index(bucket: dict[str, str]) -> dict[str, list[tuple[str, str, list[Optional[float]]]]]:
+        index: dict[str, list[tuple[str, str, list[Optional[float]]]]] = {}
+        for text, stat_id in bucket.items():
+            if _LOCAL_SUFFIX_RE.search(text):
+                continue
+            tokens = _TEMPLATE_TOKEN_SIGNED_RE.findall(text)
+            fixed = [None if t.lstrip("+-") == "#" else float(t) for t in tokens]
+            key = _depluralize(_TEMPLATE_TOKEN_SIGNED_RE.sub("#", text))
+            index.setdefault(key, []).append((stat_id, text, fixed))
         return index
 
     def stat_dictionary(self) -> list[dict[str, str]]:
@@ -340,7 +375,37 @@ class ModNormalizer:
         literal = self._match_literal_template(text, mod_kind)
         if literal is not None:
             return literal
-        return self._match_negative_of_plus_template(text, mod_kind)
+        flipped = self._match_negative_of_plus_template(text, mod_kind)
+        if flipped is not None:
+            return flipped
+        return self._match_plural_variant(text, mod_kind)
+
+    def _match_plural_variant(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
+        """Last resort: the same words as a table template apart from singular/plural endings
+        ("Gain 3 Charges when ..." vs "Gain # Charge when ..."). Every word must be identical after
+        _depluralize on both sides, every number fixed in the template must equal the item's number
+        at that position ("Has 2 Sockets" never matches "Has 1 Socket"), and if several different
+        stat_ids qualify the text stays unmapped. `values` holds only the '#' positions."""
+        index = self._plural_index.get(mod_kind)
+        if not index:
+            return None
+        skeleton, numbers = _skeletonize(text, _NUMBER_WITH_SIGN_RE)
+        matches = [
+            (stat_id, full_text, fixed)
+            for stat_id, full_text, fixed in index.get(_depluralize(skeleton), ())
+            if len(fixed) == len(numbers) and all(f is None or f == n for f, n in zip(fixed, numbers))
+        ]
+        if not matches:
+            return None
+        if len({m[0] for m in matches}) > 1:
+            self.plural_ambiguous += 1
+            return None
+        stat_id, full_text, fixed = matches[0]
+        self.plural_hits += 1
+        return NormalizedMod(
+            stat_id=stat_id, mod_kind=mod_kind, template=full_text,
+            values=[n for f, n in zip(fixed, numbers) if f is None],
+        )
 
     def _match_negative_of_plus_template(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
         """GGG lists a stat whose text bakes in a plus ("+#% to Fire Resistance") once; a negative
