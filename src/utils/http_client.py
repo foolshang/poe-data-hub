@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import requests
 
+from .log_rotation import append_text
 from .rate_limiter import RateLimiter
 
 log = logging.getLogger(__name__)
@@ -129,7 +130,6 @@ class HttpClient:
             "outcome": outcome,
         }
         try:
-            with self._fetch_log_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            append_text(self._fetch_log_path, json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError:
             log.warning("could not write fetch log entry", exc_info=True)

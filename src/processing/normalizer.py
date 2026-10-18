@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.utils.http_client import HttpClient
+from src.utils.log_rotation import append_text
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +126,11 @@ class ModNormalizer:
         self._by_kind: dict[str, dict[str, str]] = {}
         self.processed_count = 0
         self.unmapped_count = 0
+        # (mod_kind, raw text) -> occurrences. Each distinct unmapped mod is
+        # logged/written ONCE per normalizer instance (= once per job run);
+        # repeats only bump this counter. Logging every occurrence produced
+        # ~260k WARNING lines in one hour on 2026-10-15 (journal 2.7GB).
+        self._unmapped_seen: dict[tuple[str, str], int] = {}
         # Populated by load(): where the stats table came from and when that
         # copy was originally fetched (spec: exposed for status.json's
         # stats_cache_stale monitoring).
@@ -251,7 +257,11 @@ class ModNormalizer:
                 return results  # type: ignore[return-value]
 
         self.unmapped_count += 1
-        self._log_unmapped(raw_text, mod_kind)
+        key = (mod_kind, raw_text)
+        seen = self._unmapped_seen.get(key, 0)
+        self._unmapped_seen[key] = seen + 1
+        if seen == 0:
+            self._log_unmapped(raw_text, mod_kind)
         return []
 
     def _match_one(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
@@ -292,11 +302,26 @@ class ModNormalizer:
                 return NormalizedMod(stat_id=stat_id, mod_kind=mod_kind, template=skeleton, values=values)
         return None
 
+    @property
+    def unmapped_unique_count(self) -> int:
+        return len(self._unmapped_seen)
+
+    def log_unmapped_summary(self, top: int = 5) -> None:
+        """One INFO line per run: total vs distinct unmapped mods and the
+        most frequent ones (their first occurrence was already logged)."""
+        if not self._unmapped_seen:
+            return
+        ranked = sorted(self._unmapped_seen.items(), key=lambda kv: kv[1], reverse=True)[:top]
+        log.info(
+            "normalizer(%s): %d unmapped mod occurrences, %d distinct; top: %s",
+            self._game, self.unmapped_count, len(self._unmapped_seen),
+            "; ".join(f"{n}x [{kind}] {text[:60]!r}" for (kind, text), n in ranked),
+        )
+
     def _log_unmapped(self, raw_text: str, mod_kind: str) -> None:
         entry = {"ts": time.time(), "mod_kind": mod_kind, "text": raw_text}
         try:
-            with self._unmapped_log_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            append_text(self._unmapped_log_path, json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError:
             log.warning("normalizer: could not write unmapped mod log entry", exc_info=True)
         log.warning("normalizer: unmapped mod (%s): %r", mod_kind, raw_text)

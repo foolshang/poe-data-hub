@@ -100,6 +100,34 @@ def test_unmapped_mod_is_logged_not_raised(normalizer: ModNormalizer, tmp_path):
     assert "not a real mod" in entry["text"]
 
 
+def test_repeated_unmapped_mod_is_logged_once_but_still_counted(normalizer: ModNormalizer, tmp_path, caplog):
+    """2026-10-15: logging every occurrence put ~260k WARNING lines in one
+    hour into the journal. Each distinct unmapped mod is written once per
+    normalizer instance; repeats only bump the counters (unmapped_pct and the
+    summary still see them)."""
+    with caplog.at_level("INFO"):
+        for _ in range(500):
+            normalizer.normalize("This is definitely not a real mod #", "explicit")
+        normalizer.normalize("Another fake mod #", "explicit")
+        normalizer.normalize("This is definitely not a real mod #", "implicit")  # different kind = distinct
+        normalizer.log_unmapped_summary()
+
+    lines = (tmp_path / "unmapped_mods.log").read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 3
+    warnings = [r for r in caplog.records if "unmapped mod (" in r.getMessage()]
+    assert len(warnings) == 3
+    assert normalizer.unmapped_count == 502
+    assert normalizer.unmapped_unique_count == 3
+    summary = [r.getMessage() for r in caplog.records if "unmapped mod occurrences" in r.getMessage()]
+    assert len(summary) == 1 and "502" in summary[0] and "500x" in summary[0]
+
+
+def test_unmapped_summary_is_silent_when_nothing_was_unmapped(normalizer: ModNormalizer, caplog):
+    with caplog.at_level("INFO"):
+        normalizer.log_unmapped_summary()
+    assert not [r for r in caplog.records if "unmapped" in r.getMessage()]
+
+
 def test_stale_cache_used_when_refresh_fails(tmp_path):
     """Regression test for the 2026-07-10 VM deploy incident: GGG's trade2
     API returns a persistent 403 to some cloud-hosted IPs. A refresh failure
