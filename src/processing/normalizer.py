@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.utils.http_client import HttpClient
+from src.processing.rendering_aliases import AliasIndex
 from src.utils.log_rotation import append_text
 
 log = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ class ModNormalizer:
         cache_ttl_seconds: float = 7 * 24 * 60 * 60,
         unmapped_log_path: Optional[Path] = None,
         firebase_stats_url: Optional[str] = None,
+        firebase_aliases_url: Optional[str] = None,
     ):
         if game not in STATS_URL_BY_GAME:
             raise ValueError(f"normalizer: unknown game {game!r}")
@@ -152,6 +154,15 @@ class ModNormalizer:
         self._unmapped_log_path = unmapped_log_path or DEFAULT_UNMAPPED_LOG_PATH_BY_GAME[game]
         self._unmapped_log_path.parent.mkdir(parents=True, exist_ok=True)
         self._firebase_stats_url = firebase_stats_url
+        self._firebase_aliases_url = firebase_aliases_url
+        # RePoE-generated wordings (see rendering_aliases.py); empty until load() finds a published copy
+        self._aliases = AliasIndex.empty()
+        self.aliases_source: Optional[str] = None
+        self.alias_hits = 0
+        self.alias_ambiguous = 0
+        self.alias_preferred_current = 0
+        self._alias_memo: dict[tuple[str, str], dict[str, tuple[list[float], bool]]] = {}
+        self._text_by_id: dict[str, dict[str, str]] = {}
         # mod_kind -> {template text ("+# to maximum Life"): stat_id}
         self._by_kind: dict[str, dict[str, str]] = {}
         # mod_kind -> {template text without its "(Local)" suffix: (stat_id, full table text)}.
@@ -216,6 +227,40 @@ class ModNormalizer:
         self.stats_source = source
         self.stats_fetched_at = fetched_at
         self._build_index(raw)
+        self._load_aliases()
+
+    def _aliases_cache_path(self) -> Path:
+        return self._cache_path.with_name(f"rendering_aliases_{self._game}.json")
+
+    def _load_aliases(self) -> None:
+        """Published RePoE aliases: Firebase copy -> disk cache -> none. Best effort and silent when the file
+        does not exist yet (it only appears after tools/refresh_rendering_aliases.py has run); it can never fail
+        the job, and without it the normalizer behaves exactly as before."""
+        payload: Optional[dict[str, Any]] = None
+        source: Optional[str] = None
+        if self._firebase_aliases_url:
+            try:
+                data = self._http.get_json(self._firebase_aliases_url)
+                if AliasIndex.valid(data):
+                    payload, source = data, "firebase"
+                    try:
+                        self._aliases_cache_path().write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                    except OSError:
+                        log.warning("normalizer(%s): could not write the aliases disk cache", self._game)
+            except Exception as e:
+                log.info("normalizer(%s): no rendering aliases from Firebase (%s)", self._game, e)
+        if payload is None:
+            try:
+                data = json.loads(self._aliases_cache_path().read_text(encoding="utf-8"))
+                if AliasIndex.valid(data):
+                    payload, source = data, "disk_cache"
+            except (OSError, ValueError):
+                pass
+        self._aliases = AliasIndex(payload) if payload else AliasIndex.empty()
+        self.aliases_source = source
+        self._alias_memo.clear()
+        if payload:
+            log.info("normalizer(%s): %d rendering aliases (%s), %d deprecated-only stat ids", self._game, self._aliases.size, source, len(self._aliases.deprecated))
 
     def _try_firebase(self) -> Optional[tuple[dict[str, Any], float]]:
         if not self._firebase_stats_url:
@@ -258,6 +303,7 @@ class ModNormalizer:
 
     def _build_index(self, data: dict[str, Any]) -> None:
         self._by_kind = {}
+        self._text_by_id = {}
         for group in data.get("result", []):
             kind = group.get("id")
             if kind not in KNOWN_MOD_KINDS:
@@ -268,6 +314,7 @@ class ModNormalizer:
                 if not stat_id or not text:
                     continue
                 bucket[text] = stat_id
+                self._text_by_id.setdefault(kind, {})[stat_id] = text   # every stat, even when two share a text
         self._local_alias = {kind: self._build_local_alias(bucket) for kind, bucket in self._by_kind.items()}
         self._literal_index = {kind: self._build_literal_index(bucket) for kind, bucket in self._by_kind.items()}
         self._plural_index = {kind: self._build_plural_index(bucket) for kind, bucket in self._by_kind.items()}
@@ -364,6 +411,17 @@ class ModNormalizer:
         return []
 
     def _match_one(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
+        result = self._match_one_rules(text, mod_kind)
+        if result is not None and self._aliases.deprecated and result.stat_id.rsplit("_", 1)[-1] in self._aliases.deprecated:
+            # the table maps this text to a stat that only exists for old items; if exactly one CURRENT stat renders
+            # the same text (per RePoE), that one is the right owner
+            better = self._alias_candidate(text, mod_kind, exclude=result.stat_id.rsplit("_", 1)[-1])
+            if better is not None:
+                self.alias_preferred_current += 1
+                return better
+        return result
+
+    def _match_one_rules(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
         result = self._match_one_exact(text, mod_kind)
         if result is not None:
             return result
@@ -383,7 +441,36 @@ class ModNormalizer:
         flipped = self._match_negative_of_plus_template(text, mod_kind)
         if flipped is not None:
             return flipped
-        return self._match_plural_variant(text, mod_kind)
+        plural = self._match_plural_variant(text, mod_kind)
+        if plural is not None:
+            return plural
+        return self._alias_candidate(text, mod_kind)
+
+    def _alias_candidate(self, text: str, mod_kind: str, exclude: Optional[str] = None) -> Optional[NormalizedMod]:
+        """Last resort of all: the wording RePoE says the game renders for exactly one GGG stat. Current stats are
+        preferred over deprecated ones; two different current stats rendering the text = ambiguous = unmapped."""
+        if not self._aliases.size:
+            return None
+        key = (mod_kind, text)
+        cands = self._alias_memo.get(key)
+        if cands is None:
+            cands = self._aliases.candidates(mod_kind, text)
+            self._alias_memo[key] = cands
+        pool = {n: v for n, v in cands.items() if n != exclude}
+        current = {n: v for n, v in pool.items() if not v[1]}
+        pool = current or pool
+        if not pool:
+            return None
+        if len(pool) > 1:
+            self.alias_ambiguous += 1
+            return None
+        num, (values, _dep) = next(iter(pool.items()))
+        stat_id = f"{mod_kind}.stat_{num}"
+        template = self._text_by_id.get(mod_kind, {}).get(stat_id)
+        if template is None:
+            return None
+        self.alias_hits += 1
+        return NormalizedMod(stat_id=stat_id, mod_kind=mod_kind, template=template, values=list(values))
 
     def _match_plural_variant(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
         """Last resort: the same words as a table template apart from singular/plural endings

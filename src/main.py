@@ -78,6 +78,12 @@ META_STATS_CACHE_BLOB_PATH_BY_GAME = {
     "poe2": "internal/stats_cache.json",
     "poe1": "internal/stats_cache_poe1.json",
 }
+# RePoE-derived item-text aliases (tools/refresh_rendering_aliases.py -> src/processing/rendering_aliases.py). Same
+# two-hop reasoning as the stats cache: built in GitHub Actions, only ever downloaded by the VM.
+META_ALIASES_BLOB_PATH_BY_GAME = {
+    "poe2": "internal/rendering_aliases_poe2.json",
+    "poe1": "internal/rendering_aliases_poe1.json",
+}
 # Must match tools/refresh_gems.py's TARGETS blob_paths exactly -- that's
 # what actually stages these files (skill-meta phase 1). run_gems_once below
 # republishes each one to _gems_blob_path(game), the real public path.
@@ -502,6 +508,7 @@ def run_reprocess_char_items(cfg: dict[str, Any]) -> dict[str, Any]:
                 http, game=game,
                 cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
                 firebase_stats_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+                firebase_aliases_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_ALIASES_BLOB_PATH_BY_GAME[game]}",
             )
             normalizer.load()
             skill_normalizer = SkillNormalizer(http, game=game, gems_url=_gems_url(cfg, game))
@@ -593,6 +600,7 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
         game=game,
         cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
         firebase_stats_url=f"https://storage.googleapis.com/{firebase_bucket}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+        firebase_aliases_url=f"https://storage.googleapis.com/{firebase_bucket}/{META_ALIASES_BLOB_PATH_BY_GAME[game]}",
     )
     normalizer.load()
     log.info("meta job(%s): stats loaded from %s (fetched_at=%s)", game, normalizer.stats_source, normalizer.stats_fetched_at)
@@ -724,6 +732,7 @@ def _run_skill_meta_for_game(
         game=game,
         cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
         firebase_stats_url=f"https://storage.googleapis.com/{firebase_bucket}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+        firebase_aliases_url=f"https://storage.googleapis.com/{firebase_bucket}/{META_ALIASES_BLOB_PATH_BY_GAME[game]}",
     )
     normalizer.load()
     log.info("skill meta job(%s): stats loaded from %s", game, normalizer.stats_source)
@@ -856,6 +865,7 @@ def run_publish_skill_meta_once(cfg: dict[str, Any], games: list[str]) -> dict[s
                 http, game=game,
                 cache_ttl_seconds=cfg.get("ggg", {}).get("stats_cache_ttl_seconds", 7 * 24 * 60 * 60),
                 firebase_stats_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_STATS_CACHE_BLOB_PATH_BY_GAME[game]}",
+                firebase_aliases_url=f"https://storage.googleapis.com/{firebase_cfg['bucket']}/{META_ALIASES_BLOB_PATH_BY_GAME[game]}",
             )
             normalizer.load()
             results[game] = publish_skill_meta(db, publisher, game, cfg, normalizer, http)

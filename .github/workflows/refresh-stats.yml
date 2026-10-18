@@ -64,6 +64,15 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/stats-refresh-key.json
         run: python -m tools.refresh_gems
 
+      # RePoE-derived item-text aliases for ModNormalizer's last-resort rule (tools/refresh_rendering_aliases.py).
+      # Reads the stats cache published by the first step; refuses to publish over a good file when the new one is
+      # empty or much smaller (so a RePoE format change shows up here as a red run). Independent of the steps above.
+      - name: Refresh rendering aliases
+        if: always()
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/stats-refresh-key.json
+        run: python -m tools.refresh_rendering_aliases
+
       - name: Clean up key file
         if: always()
         run: rm -f /tmp/stats-refresh-key.json
