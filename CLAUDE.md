@@ -469,6 +469,47 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   Scout API path is found; if poe.ninja breaks, there is nothing to fall back
   to. Not investigated further yet.
 
+- **Normalizer facts learned 2026-10-18/19 (replay on real characters + RePoE as
+  ground truth)** -- see `project_normalizer_unmapped_gaps` memory for the
+  step-by-step history:
+  - **The GGG table has duplicate texts: 262 texts (PoE1) are carried by more
+    than one stat id in the same kind, and `_build_index` keeps the LAST one
+    silently** (`bucket[text] = id`). 4.03% of mapped occurrences go through
+    such a text. RePoE says 3,430 occurrences are genuinely ambiguous (both
+    stats render the same text), so neither choice is right for them. The
+    Checker's `ModDatabase._typed_index` is also last-wins, so the two agree
+    today -- that is luck of the same rule, not a shared code path.
+  - **RePoE `format` says whether the game prints a leading `+`**
+    (`additional_spell_block_%` uses `+#`, `base_spell_block_%` plain `#`), so
+    the order in which mapping rules try "with sign" / "without sign" must be
+    decided by the item text's explicit `+`, never guessed
+    (`_EXPLICIT_PLUS_RE`; 22 texts / 286 occurrences changed).
+  - **Deprecated `old_` / `_old_do_not_use_` stats**: 799 of the 801
+    occurrences first reported were on trade ids shared with a current stat;
+    only 2 sat on a deprecated-only id. An id is deprecated only if NO current
+    entry carries it.
+  - **Rendering aliases** (`src/processing/rendering_aliases.py`,
+    `tools/refresh_rendering_aliases.py`, runs in `refresh-stats.yml`, staged
+    at `internal/rendering_aliases_{game}.json` + `.last_good.json`): wordings
+    that RePoE proves the game renders for exactly one GGG stat. Only three
+    implied-value shapes are accepted (`[v..v]`, `[lo..]` with a sibling max
+    of lo-1, sign-only mirrors); `[None..None]` and anything ambiguous stays
+    UNMAPPED. Unit handlers matter (`every second` = 1, not 1000). The
+    normalizer reads it last (Firebase -> disk cache -> none) and never fails
+    without it. **Deploy order: push, then `gh workflow run refresh-stats.yml`
+    and verify both `internal/rendering_aliases_*.json` blobs exist, THEN
+    restart the VM** -- otherwise the first run silently has no aliases.
+  - Alias gaps that are real, not bugs: `Impale Enemies on Hit with Attacks`
+    (two trade ids, 725880290 and 3739863694, identical table text);
+    `50% of Chaos Damage taken does not bypass Energy Shield` (ids 1119465199
+    and 1865744989, identical text); `Projectiles Pierce an additional Target`
+    (one trade id shared by four internal stats whose stored values differ).
+  - **PoE2 has no real mod weights** (only 0/1) and no `essences.json` /
+    `crafting_bench_options`. Weight-based features are PoE1-only; no schema
+    may assume PoE2 weights. When RePoE `mods.json` is used, the `HiddenItem`
+    class (1,307 tiers) must be filtered out. RePoE lag: PoE2 2-7 days, PoE1
+    ~0.4 days (measure from "Export" commits, not "Version").
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
