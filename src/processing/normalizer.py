@@ -159,6 +159,7 @@ class ModNormalizer:
         self._aliases = AliasIndex.empty()
         self.aliases_source: Optional[str] = None
         self.alias_hits = 0
+        self.duplicate_texts: dict[str, int] = {}
         self.alias_ambiguous = 0
         self.alias_preferred_current = 0
         self._alias_memo: dict[tuple[str, str], dict[str, tuple[list[float], bool]]] = {}
@@ -304,6 +305,7 @@ class ModNormalizer:
     def _build_index(self, data: dict[str, Any]) -> None:
         self._by_kind = {}
         self._text_by_id = {}
+        dups: dict[str, dict[str, list[str]]] = {}
         for group in data.get("result", []):
             kind = group.get("id")
             if kind not in KNOWN_MOD_KINDS:
@@ -313,8 +315,16 @@ class ModNormalizer:
                 stat_id, text = entry.get("id"), entry.get("text")
                 if not stat_id or not text:
                     continue
-                bucket[text] = stat_id
+                if text in bucket and bucket[text] != stat_id:
+                    dups.setdefault(kind, {}).setdefault(text, [bucket[text]]).append(stat_id)
+                bucket[text] = stat_id                                  # last one wins (the Checker does the same)
                 self._text_by_id.setdefault(kind, {})[stat_id] = text   # every stat, even when two share a text
+        self.duplicate_texts = {kind: len(found) for kind, found in dups.items()}
+        if dups:
+            # silent last-wins used to hide this; the consumer-visible effect is that the other stat id is never chosen
+            example = next(iter(next(iter(dups.values())).items()))
+            log.warning("normalizer(%s): GGG table has texts shared by several stat ids (kept the last of each): %s; e.g. %r -> %s",
+                        self._game, self.duplicate_texts, example[0], example[1])
         self._local_alias = {kind: self._build_local_alias(bucket) for kind, bucket in self._by_kind.items()}
         self._literal_index = {kind: self._build_literal_index(bucket) for kind, bucket in self._by_kind.items()}
         self._plural_index = {kind: self._build_plural_index(bucket) for kind, bucket in self._by_kind.items()}

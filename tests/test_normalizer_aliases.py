@@ -120,3 +120,20 @@ def test_every_second_maps_to_one_and_the_default_branch_stays_unmapped(tmp_path
     assert n.normalize("Gain a Void Charge every second", "explicit")[0].values == [1.0]
     assert n.normalize("Trigger Shrine", "explicit") == []
     assert n.normalize("Trigger Level 20 Shrine", "explicit")[0].values == [2000.0]
+
+
+def test_duplicate_table_texts_are_reported_not_silent(caplog, tmp_path):
+    import logging
+    from src.processing.normalizer import ModNormalizer
+
+    table = {"result": [{"id": "explicit", "entries": [
+        {"id": "explicit.stat_1", "text": "Same text"},
+        {"id": "explicit.stat_2", "text": "Same text"},
+        {"id": "explicit.stat_3", "text": "Other text"},
+    ]}]}
+    n = ModNormalizer(http_client=None, game="poe1", cache_path=tmp_path / "s.json", unmapped_log_path=tmp_path / "u.log")
+    with caplog.at_level(logging.WARNING):
+        n._build_index(table)
+    assert n.duplicate_texts == {"explicit": 1}
+    assert any("shared by several stat ids" in r.message for r in caplog.records)
+    assert n._by_kind["explicit"]["Same text"] == "explicit.stat_2"      # last wins, unchanged behaviour
