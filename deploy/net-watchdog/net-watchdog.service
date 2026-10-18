@@ -1,0 +1,16 @@
+[Unit]
+Description=Network watchdog (restore NIC address / DNS if lost)
+Documentation=file:///opt/poe-data-hub/deploy/net-watchdog/net-watchdog.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/net-watchdog.sh
+# Must keep working while the box is short on RAM: protect its pages from
+# reclaim and let it win the CPU/IO queue over the memory hog behind the outage.
+Nice=-10
+OOMScoreAdjust=-900
+MemoryLow=16M
+CPUWeight=1000
+IOWeight=1000
+TimeoutStartSec=120
+SyslogIdentifier=net-watchdog

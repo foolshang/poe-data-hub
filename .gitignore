@@ -19,3 +19,7 @@ data/samples/last_good_builds_poe1.bin
 service-account*.json
 
 .claude/settings.local.json
+
+# Local-only incident evidence (2026-10-15 VM outage): journal extracts hold
+# third-party IPs from SSH scans; never commit.
+logs/
