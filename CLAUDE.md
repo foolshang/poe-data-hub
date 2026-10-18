@@ -515,7 +515,7 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   dead) and are read from env vars named in `config.healthchecks.*_ping_url_env`
   (`src/utils/config.py`), supplied on the VM by `EnvironmentFile=-/etc/poe-data-hub/healthchecks.env`
   (mode 600, outside the repo). **The old UUIDs are still in git history (3 commits of config.yaml)** and must
-  be treated as leaked: the checks were re-created on healthchecks.io. The User-Agent carries no personal
+  be treated as leaked: the owner is re-creating all four checks on healthchecks.io (verify that the VM env file holds the NEW URLs before relying on pings). The User-Agent carries no personal
   email (`build_user_agent`: `HUB_CONTACT` env, default the project URL). `data/samples/` is tracked on
   purpose (fixtures), so it is NOT gitignored; instead `tests/test_samples_no_player_names.py` fails when a
   sample holds a real account/character name -- run `python -m tools.scrub_samples` (same-byte-length
