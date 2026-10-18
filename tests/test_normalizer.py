@@ -427,3 +427,58 @@ def test_existing_fallback_still_wins_before_the_local_alias(tmp_path):
     ]})
     assert [m.stat_id for m in n.normalize("Has 2 Slots", "explicit")] == ["explicit.stat_G"]
     assert n.local_alias_hits == 0
+
+
+# -- templates with a fixed number baked into the text ------------------------
+# GGG keeps "per 100 Strength" and "per 15 Strength" as separate stats, so a
+# fixed number must match exactly; `values` holds only the '#' positions.
+
+def test_pure_fixed_number_template_matches_only_that_number(tmp_path):
+    n = _normalizer_for(tmp_path, {"implicit": [("implicit.stat_S1", "Has 1 Socket")]})
+    assert [m.stat_id for m in n.normalize("Has 1 Socket", "implicit")] == ["implicit.stat_S1"]
+    assert n.normalize("Has 2 Sockets", "implicit") == []   # not in the table: must NOT be collapsed onto "1 Socket"
+    assert n.literal_hits == 1
+
+
+def test_fixed_number_is_not_part_of_the_captured_values(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_E", "#% increased Attack Damage per 450 Armour")]})
+    result = n.normalize("12% increased Attack Damage per 450 Armour", "explicit")
+    assert [m.stat_id for m in result] == ["explicit.stat_E"]
+    assert result[0].values == [12.0]    # 450 is part of the stat, not a roll
+
+
+def test_templates_that_differ_only_by_their_fixed_number_stay_separate(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_100", "#% increased Damage per 100 Strength"),
+        ("explicit.stat_15", "#% increased Damage per 15 Strength"),
+    ]})
+    assert [m.stat_id for m in n.normalize("3% increased Damage per 100 Strength", "explicit")] == ["explicit.stat_100"]
+    assert [m.stat_id for m in n.normalize("4% increased Damage per 15 Strength", "explicit")] == ["explicit.stat_15"]
+    assert n.normalize("4% increased Damage per 20 Strength", "explicit") == []
+
+
+def test_two_stats_matching_the_same_fixed_text_are_left_unmapped(tmp_path):
+    # "4" and "4.0" are the same fixed number but two different table entries: the text matches
+    # both stat_ids, so guessing one would be wrong half the time -> stay unmapped, and count it.
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_a", "#% chance for 4 seconds on Kill"),
+        ("explicit.stat_b", "#% chance for 4.0 seconds on Kill"),
+    ]})
+    assert n.normalize("9% chance for 4 seconds on Kill", "explicit") == []
+    assert n.literal_ambiguous == 1
+    assert n.literal_hits == 0
+
+
+def test_all_placeholder_twin_keeps_winning_over_a_fixed_number_template(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_var", "Gain # Fear Incarnate"),
+        ("explicit.stat_one", "Gain 1 Fear Incarnate"),
+    ]})
+    assert [m.stat_id for m in n.normalize("Gain 1 Fear Incarnate", "explicit")] == ["explicit.stat_var"]
+    assert n.literal_hits == 0
+
+
+def test_literal_sign_template_is_not_reached_by_a_negative_roll(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_P", "+#% to Chance for 4 seconds")]})
+    assert [m.stat_id for m in n.normalize("+10% to Chance for 4 seconds", "explicit")] == ["explicit.stat_P"]
+    assert n.normalize("-10% to Chance for 4 seconds", "explicit") == []   # negative values of +# templates are a separate rule

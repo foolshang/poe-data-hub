@@ -75,6 +75,10 @@ _NUMBER_NO_SIGN_RE = re.compile(r"\d+(?:\.\d+)?")
 # matching mid-string "s" too would also mangle verbs like "Has".
 _TRAILING_S_RE = re.compile(r"(\w)s\Z")
 _LOCAL_SUFFIX_RE = re.compile(r"\s*\(Local\)\s*\Z")
+# Tokens of a TABLE template: a '#' placeholder or a fixed number, optionally signed. Used to match
+# templates that bake a fixed number into the text ("Has 1 Socket", "...for 4 seconds on Hit").
+_TEMPLATE_TOKEN_SIGNED_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|#)")
+_TEMPLATE_TOKEN_UNSIGNED_RE = re.compile(r"(?:\d+(?:\.\d+)?|#)")
 _NEGATION_WORD_PAIRS = [("reduced", "increased"), ("less", "more")]
 
 
@@ -129,6 +133,11 @@ class ModNormalizer:
         # Only for locals with NO same-text global twin in that kind; see _build_local_alias.
         self._local_alias: dict[str, dict[str, tuple[str, str]]] = {}
         self.local_alias_hits = 0
+        # mod_kind -> {"signed"/"unsigned": {skeleton: [(stat_id, full text, fixed numbers per token)]}}.
+        # Templates carrying a fixed number; see _build_literal_index.
+        self._literal_index: dict[str, dict[str, dict[str, list[tuple[str, str, list[Optional[float]]]]]]] = {}
+        self.literal_hits = 0
+        self.literal_ambiguous = 0
         self.processed_count = 0
         self.unmapped_count = 0
         # (mod_kind, raw text) -> occurrences. Each distinct unmapped mod is
@@ -230,6 +239,7 @@ class ModNormalizer:
                     continue
                 bucket[text] = stat_id
         self._local_alias = {kind: self._build_local_alias(bucket) for kind, bucket in self._by_kind.items()}
+        self._literal_index = {kind: self._build_literal_index(bucket) for kind, bucket in self._by_kind.items()}
 
     @staticmethod
     def _build_local_alias(bucket: dict[str, str]) -> dict[str, tuple[str, str]]:
@@ -247,6 +257,29 @@ class ModNormalizer:
                 continue
             candidates.setdefault(text[: m.start()], []).append((stat_id, text))
         return {base: found[0] for base, found in candidates.items() if len(found) == 1 and base not in bucket}
+
+    @staticmethod
+    def _build_literal_index(bucket: dict[str, str]) -> dict[str, dict[str, list[tuple[str, str, list[Optional[float]]]]]]:
+        """GGG keeps a template with a fixed number as its OWN stat: "#% increased Damage per 100
+        Strength" and "... per 15 Strength" are different stat_ids, so the number can never be
+        collapsed to '#'. Index every non-(Local) template that has at least one fixed number by its
+        all-numbers-to-'#' skeleton, remembering the fixed numbers token by token (None = a real
+        placeholder). A template with a literal sign ("+#% ...") is only reachable with the sign
+        kept, mirroring _try_skeletons, so a negative roll can never match it here -- that is a
+        different rule, not this one."""
+        index: dict[str, dict[str, list[tuple[str, str, list[Optional[float]]]]]] = {"signed": {}, "unsigned": {}}
+        for text, stat_id in bucket.items():
+            if _LOCAL_SUFFIX_RE.search(text):
+                continue
+            signed_tokens = _TEMPLATE_TOKEN_SIGNED_RE.findall(text)
+            if not any(t.lstrip("+-") != "#" for t in signed_tokens):
+                continue  # no fixed number: the ordinary exact match covers it
+            has_literal_sign = any(t[0] in "+-" for t in signed_tokens)
+            mode, pattern = ("unsigned", _TEMPLATE_TOKEN_UNSIGNED_RE) if has_literal_sign else ("signed", _TEMPLATE_TOKEN_SIGNED_RE)
+            tokens = pattern.findall(text)
+            fixed = [None if t.lstrip("+-") == "#" else float(t) for t in tokens]
+            index[mode].setdefault(pattern.sub("#", text), []).append((stat_id, text, fixed))
+        return index
 
     def stat_dictionary(self) -> list[dict[str, str]]:
         """For embedding in meta/latest.json (spec 8.2) — consumers rely on this mapping."""
@@ -301,6 +334,33 @@ class ModNormalizer:
                 if hit is not None:
                     self.local_alias_hits += 1
                     return NormalizedMod(stat_id=hit[0], mod_kind=mod_kind, template=hit[1], values=values)
+        return self._match_literal_template(text, mod_kind)
+
+    def _match_literal_template(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
+        """Last resort: a template with a fixed number must match that number exactly at every
+        fixed position; `values` holds only the '#' positions. Several different stat_ids matching
+        the same text means the text is ambiguous -> stay unmapped rather than guess."""
+        index = self._literal_index.get(mod_kind)
+        if not index:
+            return None
+        for mode, pattern in (("signed", _NUMBER_WITH_SIGN_RE), ("unsigned", _NUMBER_NO_SIGN_RE)):
+            skeleton, numbers = _skeletonize(text, pattern)
+            matches = [
+                (stat_id, full_text, fixed)
+                for stat_id, full_text, fixed in index[mode].get(skeleton, ())
+                if len(fixed) == len(numbers) and all(f is None or f == n for f, n in zip(fixed, numbers))
+            ]
+            if not matches:
+                continue
+            if len({m[0] for m in matches}) > 1:
+                self.literal_ambiguous += 1
+                return None
+            stat_id, full_text, fixed = matches[0]
+            self.literal_hits += 1
+            return NormalizedMod(
+                stat_id=stat_id, mod_kind=mod_kind, template=full_text,
+                values=[n for f, n in zip(fixed, numbers) if f is None],
+            )
         return None
 
     def _match_one_exact(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
