@@ -482,3 +482,39 @@ def test_literal_sign_template_is_not_reached_by_a_negative_roll(tmp_path):
     n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_P", "+#% to Chance for 4 seconds")]})
     assert [m.stat_id for m in n.normalize("+10% to Chance for 4 seconds", "explicit")] == ["explicit.stat_P"]
     assert n.normalize("-10% to Chance for 4 seconds", "explicit") == []   # negative values of +# templates are a separate rule
+
+
+# -- negative rolls of templates that bake a '+' into the text ---------------
+
+def test_negative_roll_matches_a_plus_template_and_keeps_its_sign(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_R", "+#% to Fire Resistance")]})
+    pos = n.normalize("+30% to Fire Resistance", "explicit")
+    neg = n.normalize("-30% to Fire Resistance", "explicit")
+    assert [m.stat_id for m in pos] == ["explicit.stat_R"] and pos[0].values == [30.0]
+    assert [m.stat_id for m in neg] == ["explicit.stat_R"]
+    assert neg[0].values == [-30.0]          # the roll really was negative; it is not stored as +30
+    assert n.negative_flip_hits == 1
+
+
+def test_negative_roll_only_flips_the_numbers_that_were_negative(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_M", "+# to Thing per +# Other")]})
+    result = n.normalize("-2 to Thing per +5 Other", "explicit")
+    assert result[0].values == [-2.0, 5.0]
+
+
+def test_a_hyphen_or_range_is_not_treated_as_a_negative_sign(tmp_path):
+    n = _normalizer_for(tmp_path, {"explicit": [("explicit.stat_D", "+# to Something")]})
+    assert n.normalize("Adds 1-5 to Something", "explicit") == []
+    assert n.negative_flip_hits == 0
+
+
+def test_negative_flip_never_overrides_a_template_that_already_matched(tmp_path):
+    # "#% to Cold Resistance" (no plus) already accepts "-30%": the flip path must not run for it.
+    n = _normalizer_for(tmp_path, {"explicit": [
+        ("explicit.stat_plain", "#% to Cold Resistance"),
+        ("explicit.stat_plus", "+#% to Cold Resistance"),
+    ]})
+    result = n.normalize("-30% to Cold Resistance", "explicit")
+    assert [m.stat_id for m in result] == ["explicit.stat_plain"]
+    assert result[0].values == [-30.0]
+    assert n.negative_flip_hits == 0

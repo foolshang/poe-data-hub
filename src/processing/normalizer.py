@@ -77,6 +77,8 @@ _TRAILING_S_RE = re.compile(r"(\w)s\Z")
 _LOCAL_SUFFIX_RE = re.compile(r"\s*\(Local\)\s*\Z")
 # Tokens of a TABLE template: a '#' placeholder or a fixed number, optionally signed. Used to match
 # templates that bake a fixed number into the text ("Has 1 Socket", "...for 4 seconds on Hit").
+# A minus sign that is a number's sign ("-71%"), not a hyphen inside a word or range ("1-5").
+_NEGATIVE_SIGN_RE = re.compile(r"(?<![\w.])-(?=\d)")
 _TEMPLATE_TOKEN_SIGNED_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|#)")
 _TEMPLATE_TOKEN_UNSIGNED_RE = re.compile(r"(?:\d+(?:\.\d+)?|#)")
 _NEGATION_WORD_PAIRS = [("reduced", "increased"), ("less", "more")]
@@ -137,6 +139,7 @@ class ModNormalizer:
         # Templates carrying a fixed number; see _build_literal_index.
         self._literal_index: dict[str, dict[str, dict[str, list[tuple[str, str, list[Optional[float]]]]]]] = {}
         self.literal_hits = 0
+        self.negative_flip_hits = 0
         self.literal_ambiguous = 0
         self.processed_count = 0
         self.unmapped_count = 0
@@ -334,7 +337,33 @@ class ModNormalizer:
                 if hit is not None:
                     self.local_alias_hits += 1
                     return NormalizedMod(stat_id=hit[0], mod_kind=mod_kind, template=hit[1], values=values)
-        return self._match_literal_template(text, mod_kind)
+        literal = self._match_literal_template(text, mod_kind)
+        if literal is not None:
+            return literal
+        return self._match_negative_of_plus_template(text, mod_kind)
+
+    def _match_negative_of_plus_template(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
+        """GGG lists a stat whose text bakes in a plus ("+#% to Fire Resistance") once; a negative
+        roll shows up on the item as "-30% to Fire Resistance". Flip the number's minus to a plus,
+        retry the ordinary rules (which are the only ones that can reach a '+#' template), and
+        restore the sign on the values that were flipped. Last resort, so it can only turn an
+        unmapped text into a mapped one."""
+        if not _NEGATIVE_SIGN_RE.search(text):
+            return None
+        flipped = _NEGATIVE_SIGN_RE.sub("+", text)
+        result = self._match_one_exact(flipped, mod_kind)
+        if result is None:
+            return None
+        # numbers of the original text in order, each flagged when it was written with a minus
+        negative_flags = [
+            m.start() > 0 and text[m.start() - 1] == "-" and _NEGATIVE_SIGN_RE.match(text, m.start() - 1) is not None
+            for m in _NUMBER_NO_SIGN_RE.finditer(text)
+        ]
+        if len(negative_flags) != len(result.values):
+            return None  # the rule that matched dropped or added numbers; don't guess which was negative
+        self.negative_flip_hits += 1
+        values = [-v if neg else v for v, neg in zip(result.values, negative_flags)]
+        return NormalizedMod(stat_id=result.stat_id, mod_kind=mod_kind, template=result.template, values=values)
 
     def _match_literal_template(self, text: str, mod_kind: str) -> Optional[NormalizedMod]:
         """Last resort: a template with a fixed number must match that number exactly at every
