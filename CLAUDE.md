@@ -178,7 +178,8 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   dedicated system user `deploy/README.md` describes setting up — the real
   deployed setup diverged from that doc at some point; don't assume
   `sudo -u poe-data-hub` works.
-- **VM RAM budget (measured 2026-09-10, steady state)**: `poe-bot-vm` is an
+- **VM RAM budget (measured 2026-09-10, steady state; the "no OOM risk" reading below was
+  overtaken by the 2026-10-15 outage -- see that entry for the current cap and numbers)**: `poe-bot-vm` is an
   **e2-micro (~955MB RAM + 2GB swap)** running *both* the Discord bot and
   poe-data-hub. `free -m`: used ~605MB, available ~349MB, swap already
   ~180MB in use. poe-data-hub baseline RSS ~239MB, peaks to VmHWM ~322MB
@@ -385,6 +386,88 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   this project's convention for ad-hoc VM queries, see
   [[reference-vm-sqlite-readonly-access]]) and keep such queries narrow/
   indexed where the DB is large.
+
+- **The 2026-10-15 outage was one job's RAM spike plus a network daemon that
+  never recovered -- not a leak, and not "the VM died"** (learned 2026-10-18;
+  ~72h of no publishing, every pipeline at once). Timeline (UTC): the weekly
+  `archive` job fired at 07:50:11 -- exactly 7 days after the hub process
+  started -- and `build_league_archive` pulled a whole league's stat tables
+  into Python lists; the hub went to 711MB RSS + 1.9GB in swap (2.6GB) on a
+  955MB VM, the box thrashed from ~07:54, `systemd-networkd` timed out on a
+  DHCP renewal (`ens4: Failed`, 08:31), and the OOM killer finally took the hub
+  at 09:27. The kernel and journald kept running; the VM simply had no network
+  until a manual reset on 2026-10-18. The first OOM kill on 2026-10-08 07:48
+  has the same 7-day signature, but the journal did not reach back far enough
+  to prove it. Lessons:
+  - **`IntervalTrigger(weeks=1)` was the wrong design for the archive job**:
+    an interval's first fire is "process start + the interval", so every
+    restart silently moved it and the crash landed at a time nobody chose. Use
+    a fixed `CronTrigger` (now Sunday 13:00 ICT; 04:00 collides with cleanup).
+  - **`build_league_archive` / `export_league_archive` load an entire league
+    into RAM** (`iter_*_for_league` return `list[tuple]`, then nested dicts)
+    and its "cheap, reads local SQLite only" docstring stopped being true once
+    the DB reached ~5GB. It stays **disabled** (`archive.enabled: false`, both
+    the weekly job and the league-change export in the meta jobs) until it is
+    rewritten to aggregate in SQL and stream in chunks, and its RSS is measured
+    against the real DB read-only before it is turned back on. While off:
+    every skipped cycle logs a WARNING, `status.json` carries
+    `archive.enabled` / `last_skipped_at` / `unarchived_league_changes`, and an
+    `ARCHIVE GAP` warning repeats every cycle for each league that changed
+    while it was off. **Deadline:** such a league's raw `skill_stat_counts`
+    rows are deleted by retention after 45 days -- permanent loss.
+    `--export-league-archive` is NOT guarded and will OOM the VM.
+  - **Do not read a one-shot spike as a slow leak**: the first analysis here
+    claimed ~350MB/day linear growth. `sar -r -f /var/log/sysstat/saDD` (10-min
+    history, sysstat is installed) showed RAM flat at 375-530MB for the five
+    days before, then a jump inside ~100 minutes. Check the history before
+    saying "grows".
+  - **`MemoryMax` is derived from the kernel's OOM table, never from systemd's
+    "memory peak"**: for the killed hub the kernel table said 177,928 anon
+    pages + 488,964 swap entries (the swap entries of all tasks summed to the
+    whole swapfile), while systemd's own accounting line said "538.8M peak,
+    273.7M swap peak" -- the two disagree and are unexplained. Cap =
+    955MB - OS ~250 - bot peak 65 - report-service/caddy peaks 74 - margin 100
+    = ~460MB (`poe-data-hub.service.d/10-memory.conf`: `MemoryMax=460M`,
+    `MemorySwapMax=0`, `OOMScoreAdjust=300`; bot `-500`). Swap is off for the
+    hub on purpose: it turned a clean OOM kill into an hour-long thrash. If a
+    job needs more than the cap it cannot run on this box -- move it, don't
+    stretch the cap.
+  - **`deploy/hub-mem-log/`** (systemd timer, plain bash) writes one journal
+    line per 10 minutes with the hub's RSS/peak/swap and its cgroup counters
+    (`journalctl -t hub-mem`). Lines are logged at WARNING with an `ALERT`
+    prefix when VmHWM reaches 400MB (a margin under 15% on the cap) or
+    `memory.events` shows a cap hit / OOM kill: `journalctl -t hub-mem -p
+    warning`. A danger sign is reported even if the cap never bit; the cap is
+    never raised on the strength of one run.
+  - **`deploy/net-watchdog/`** (systemd timer every 2 min, plain bash -- it must
+    run when RAM is short) checks global IPv4 address + default route + TCP to
+    the metadata server + DNS and escalates: `networkctl reconfigure <if>` on
+    the 2nd consecutive failure, restart networkd/resolved on the 4th,
+    guest-agent on the 8th, CRITICAL log after that; it never reboots the VM.
+    `ens4` is managed by systemd-networkd (netplan). **Live-tested
+    2026-10-18** by flushing ens4's address: recovered by the 2nd-check
+    `reconfigure` in 221s with no service restarted. **The 4th-check restart
+    path and the real `ens4: Failed` state have NOT been proven live** (only
+    dry-run); do not claim them as tested.
+  - **Every log under `data/` needs rotation.** `hub.log` rotated daily, but
+    `fetch.log` (189MB) and `unmapped_mods*.log` (279MB + 807MB, 10M lines)
+    were bare appends, and journald had grown to 2.7GB (one WARNING per
+    unmapped-mod occurrence: ~260k lines in one hour). Now:
+    `src/utils/log_rotation.py` (50MB, 2 backups) for `fetch.log` and the
+    unmapped logs, the normalizer logs/writes each distinct unmapped mod once
+    per run plus a one-line summary, and journald is capped (400M). Each
+    distinct unmapped mod therefore shows up once per run in
+    `data/unmapped_mods*.log`.
+  - **`status.json running_jobs` entries were never cleared after a crash or
+    reset** (`_mark_job_finished` does not run); `run_scheduler` now drops
+    entries whose pid is dead at startup.
+- **No fallback for PoE2 prices (risk, 2026-10-18)**: `poe2scout.com/api/poe2/Leagues`
+  now returns the site's HTML front page with HTTP 200 (confirmed with curl from
+  a dev machine and from the VM), so `ScoutPricesFetcher` fails every cycle with
+  `Expecting value: line 1 column 1` (first seen in the journal on 2026-10-08;
+  it still worked on 2026-07-11). PoE2 prices are poe.ninja-only until a new
+  Scout API path is found; if poe.ninja breaks, there is nothing to fall back
+  to. Not investigated further yet.
 
 ## Layout
 
