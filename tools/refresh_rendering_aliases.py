@@ -29,10 +29,11 @@ import requests
 
 from src.processing.rendering_aliases import KINDS, build_aliases, check_not_shrunk
 from src.storage.publisher import PricesPublisher
+from src.utils.http_client import build_user_agent
 
 log = logging.getLogger("refresh_rendering_aliases")
 
-USER_AGENT = "poe-data-hub-aliases-refresh/0.1 (contact: foolshang.live@gmail.com)"
+USER_AGENT = build_user_agent("poe-data-hub-aliases-refresh/0.1")
 BUCKET_NAME = "poe-data-hub"
 PUBLIC = f"https://storage.googleapis.com/{BUCKET_NAME}"
 # RePoE's PoE1 file has ~11k entries (checked 2026-10-19), PoE2's ~10.7k; a response far below that is broken.

@@ -42,10 +42,11 @@ from typing import Any
 import requests
 
 from src.storage.publisher import PricesPublisher
+from src.utils.http_client import build_user_agent
 
 log = logging.getLogger("refresh_stats")
 
-USER_AGENT = "poe-data-hub-stats-refresh/0.1 (contact: foolshang.live@gmail.com)"
+USER_AGENT = build_user_agent("poe-data-hub-stats-refresh/0.1")
 BUCKET_NAME = "poe-data-hub"
 # Sanity floor: the real tables have thousands of entries across all groups.
 # A truncated or broken response would be far smaller than either game's

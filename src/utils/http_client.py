@@ -7,6 +7,7 @@ request log all apply uniformly.
 from __future__ import annotations
 
 import json
+import os
 import logging
 import time
 import urllib.parse
@@ -20,7 +21,17 @@ from .rate_limiter import RateLimiter
 
 log = logging.getLogger(__name__)
 
-DEFAULT_USER_AGENT = "poe-data-hub/0.1 (contact: foolshang.live@gmail.com)"
+PROJECT_URL = "https://github.com/foolshang/poe-data-hub"
+
+
+def build_user_agent(product: str = "poe-data-hub/0.1") -> str:
+    """"<product> (contact: <HUB_CONTACT or the project URL>)". The contact is a personal address when someone
+    wants one and that address must not live in this public repo, so it comes from the environment; without it
+    the project URL is the (accepted) way for a site operator to find who is behind the requests."""
+    return f"{product} (contact: {os.environ.get('HUB_CONTACT') or PROJECT_URL})"
+
+
+DEFAULT_USER_AGENT = build_user_agent()
 DEFAULT_FETCH_LOG_PATH = Path("data/fetch.log")
 
 

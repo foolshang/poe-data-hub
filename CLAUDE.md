@@ -510,6 +510,20 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
     class (1,307 tiers) must be filtered out. RePoE lag: PoE2 2-7 days, PoE1
     ~0.4 days (measure from "Export" commits, not "Version").
 
+- **This repo is public: secrets and third-party data must never be committed** (audit 2026-10-19).
+  healthchecks.io ping URLs are secrets (anyone holding one can turn a check green while the system is
+  dead) and are read from env vars named in `config.healthchecks.*_ping_url_env`
+  (`src/utils/config.py`), supplied on the VM by `EnvironmentFile=-/etc/poe-data-hub/healthchecks.env`
+  (mode 600, outside the repo). **The old UUIDs are still in git history (3 commits of config.yaml)** and must
+  be treated as leaked: the checks were re-created on healthchecks.io. The User-Agent carries no personal
+  email (`build_user_agent`: `HUB_CONTACT` env, default the project URL). `data/samples/` is tracked on
+  purpose (fixtures), so it is NOT gitignored; instead `tests/test_samples_no_player_names.py` fails when a
+  sample holds a real account/character name -- run `python -m tools.scrub_samples` (same-byte-length
+  pseudonyms, structural protobuf rewrite) before committing any new poe.ninja capture. **Real player names
+  from before the scrub remain in git history** (64 commits; rewriting was judged not worth it), and public
+  GGG forum HTML samples contain forum usernames. The git author address and the GCP project / VM names are
+  knowingly public.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
