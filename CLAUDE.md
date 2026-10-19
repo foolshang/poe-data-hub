@@ -612,6 +612,9 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   only it disagrees with the hub. **`PricesPublisher.fetch_previous` falls back to a local copy named by
   BASENAME, so every `*/latest.json` shares one fallback file** -- ask the bucket
   (`blob.exists()`), not `fetch_previous`, when a test or job must know whether a path exists.
+  **Known gaps (not built):** no Layer-2 heartbeat check of the public alias file (freshness, non-empty);
+  nothing yet forces the PoE Checker's port of normalizer rules 1-5 (`stat_match.ts`) to follow a change to
+  `normalizer.py` -- today that depends on a person remembering to tell Winai (SPEC.md 8.12).
 
 ## Layout
 

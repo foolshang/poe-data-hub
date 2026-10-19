@@ -1602,6 +1602,12 @@ avoid: a fuzzy match was measured to pick the wrong stat 92% of the time where t
 chosen stat is deprecated-only and exactly one current stat renders the same text, the current one wins. A
 consumer that implements only rule 6 will disagree with the hub on texts the earlier rules handle.
 
+**Rules 1-5 are mirrored in the PoE Checker (`stat_match.ts`, ported from `normalizer.py`; verified 2026-10-19
+against the real normalizer on ~120,000 mod texts with 0 differences).** The two implementations must not drift:
+**any change to rules 1-5 in `src/processing/normalizer.py` (or to the order of the chain) must be reported to
+Winai so the Checker follows in the same cycle**; changing the alias file's format is a `schema_version` bump
+(above). Rule 6's data comes from this file, so alias content changes need no code change on the Checker side.
+
 **`stat_groups[]` and `stat_aliases`** -- stat ids the game cannot tell apart from the item text. The GGG table
 gives the SAME text to several stat ids (PoE1: 260 groups) or texts differing only in letter case (24 groups: e.g.
 `...supported by Level # ...` / `...Supported by Level # ...`). A consumer that matches by text lands on one member
