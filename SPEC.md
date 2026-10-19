@@ -728,6 +728,7 @@ poe-data-hub/
 ├── poe2/meta/2026-07-08.json
 ├── poe2/news/latest.json
 ├── poe2/gems.json                                (skill-meta phase 1, 8.6)
+├── poe2/aliases/latest.json                       (rendering-alias contract, 8.12)
 ├── poe2/passives/latest.json                     (skill-meta phase 3 path A, 8.8)
 ├── poe1/prices/latest.json
 ├── poe1/prices/index.json
@@ -737,6 +738,7 @@ poe-data-hub/
 ├── poe1/meta/2026-07-15.json                    (phase 10)
 ├── poe1/news/latest.json
 ├── poe1/gems.json                                (skill-meta phase 1, 8.6)
+├── poe1/aliases/latest.json                       (rendering-alias contract, 8.12)
 ├── poe1/passives/latest.json                     (skill-meta phase 3 path A, 8.8)
 ├── mtx/latest.json
 ├── internal/stats_cache.json                    (PoE2 trade2 stats, weekly refresh)
@@ -1496,12 +1498,147 @@ index 1h, per-skill files 6h, dictionary 24h -- provisional until the
 skill-centric job's real update cadence is decided (it is still manual,
 `skill_meta.collect.scheduled=false`; see 8.10).
 
+**Read skills through `index.json` only (2026-10-19)**: nothing deletes the file of a skill that dropped out of a
+later snapshot (5 PoE1 / 9 PoE2 on 2026-10-19), so the folder can hold stale files that were once correct. Only the
+paths listed in `{game}/skills/index.json` are current; never enumerate the folder.
+
 **Retroactive publish without recollecting**: `python -m src.main
 --publish-skill-meta --game poe1 [--game poe2]` reads whatever skill-centric
 run most recently *finished* for that game and (re)publishes from it --
 used to ship a publish-side fix, or to publish for the first time after a
 collection run that predates this feature, without repeating an 8-10h
 collection (same idea as `run_gems_once` republishing a staged copy).
+
+### 8.12 `{game}/aliases/latest.json` (`{game}` = `poe1` | `poe2`, public contract, added 2026-10-19)
+
+The table a consumer (the PoE Checker) uses to turn an item's mod text into a GGG stat id when the GGG trade
+table's single example wording per stat does not match what the game prints: singular/plural, `reduced` instead
+of `increased`, a wording without the number, a unit change. It is **generated from RePoE's stat translations**
+(the game's own datamine, which lists every wording of a stat with the value condition that selects it and the
+GGG trade ids), so which wording belongs to which stat is **read, never guessed**. `src/processing/
+rendering_aliases.py` builds it; `src/main.py`'s `run_aliases_once` publishes it.
+
+**URLs** (public, no auth):
+
+- `https://storage.googleapis.com/poe-data-hub/poe1/aliases/latest.json`
+- `https://storage.googleapis.com/poe-data-hub/poe2/aliases/latest.json`
+
+**Publishing.** Two hops, same reason and shape as `gems.json` (8.6): `tools/refresh_rendering_aliases.py` runs in
+GitHub Actions (`refresh-stats.yml`, weekly + manual) and stages `internal/aliases_public_{game}.json`; the VM's
+`run_aliases_once` (daily at `schedule.gems_cron_hour_thailand` + 10 min, and once at start) shape-checks it
+(`schema_version`, `game`, `aliases`/`stat_groups`/`stat_aliases` present) and copies it to the public path. A
+missing or malformed staged file is skipped with a log line; the previously published file is left untouched
+(stale-while-error). The Actions service account is IAM-limited to `internal/` and cannot write the public path.
+**Cache-Control `public, max-age=86400`** (24h, the same as `{game}/skills/dictionary.json`): the table changes
+only when RePoE does. Compact JSON.
+
+**Versioning contract.** `schema_version` is `1`. Removing or renaming a field, changing what a field means, or
+changing the structure bumps it; adding an optional field does not (a reader must ignore unknown fields). A reader
+that sees a `schema_version` it does not know must treat the file as absent, not guess.
+
+**Data freshness caveat.** RePoE lags the game by days after a patch (measured 2026-10: PoE2 2-7 days, PoE1 ~0.4
+day, from "Export" commits). Early in a league some wordings are therefore missing from this file. **A text the
+file does not cover is "not known yet", not a malfunction**: it stays unmapped and appears once RePoE catches up
+and `refresh-stats.yml` has run. `generated_at` is the build time, not the RePoE commit time.
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-19T08:56:49Z",
+  "game": "poe1",
+  "source": {"stat_translations": "https://raw.githubusercontent.com/repoe-fork/poe1/master/data/stat_translations.json", "note": "..."},
+  "deprecated_trade_ids": ["2881111359", "3607444087", "4070519133", "562371749"],
+  "aliases": [ { "...": "one object per wording, see below" } ],
+  "stat_groups": [ { "...": "see below" } ],
+  "stat_aliases": { "explicit.stat_2739830820": "explicit.indexable_skill_16" }
+}
+```
+
+(2026-10-19: PoE1 1,967 aliases / 284 stat groups / 269 `stat_aliases` / ~610KB compact; PoE2 130 / 28 / 28 / ~42KB.)
+
+**`aliases[]` fields** (one object per wording that the GGG table text does NOT already cover):
+
+| field | type | meaning |
+|---|---|---|
+| `text` | string | the wording the game prints. `{0}`, `{1}` are value placeholders (RePoE style); markup such as `[Keyword\|shown]` is already reduced to the shown text. A text with no placeholder is matched by **string equality** |
+| `trade_id` | string | the numeric GGG trade stat id. The stat id of kind `k` is `f"{k}.stat_{trade_id}"` (e.g. `explicit.stat_4077843608`) |
+| `kinds` | string[] | the item mod kinds (`explicit` / `implicit` / `fractured`) in which this id exists in the GGG table. Only apply the alias to a mod of one of these kinds |
+| `placeholder_stat_index` | int[] | one entry per placeholder in order of appearance in `text`: which stat's value it shows (index into `conditions`/`negate`/`divisor`/`sign`). Empty for a text without placeholder |
+| `negate` | bool[] | per stat: the DISPLAYED number is the negation of RePoE's internal value (`reduced` for `increased`, `slower` for `faster`) |
+| `divisor` | int[] | per stat: `internal = displayed x divisor` (before negation). 1 normally; 100 = a percent shown as a fraction; 1000 = RePoE keeps milliseconds, the item shows seconds |
+| `sign` | int[] | per stat: `stored = displayed x sign`. **This is the value to store/compare**: it follows the sign convention of the GGG table wording of that stat (so `29% reduced Duration` stores **-29** against the table's `#% increased Duration`) |
+| `conditions` | [min,max][] | per stat: the range of the INTERNAL value for which RePoE prints this wording (`null` = unbounded). Singular `[1,1]` vs plural `[2,null]`, `[null,99]` vs `[100,null]` ... A candidate only applies when every stat's internal value is inside its range |
+| `implied_values` | number[] \| null | for a `text` with no placeholder: the stored value(s) the wording proves. `[1.0]` for "Gain a Void Charge every second" (1 second, **not 1000**), `[]` when nothing is printed ("Chance to Block is Lucky"), `null` when the entry has placeholders |
+| `deprecated` | bool | `trade_id` is deprecated-only: carried by old stats (`old_*`) and by no current stat. Prefer a current candidate over a deprecated one |
+
+Only three shapes of "value implied by a wording without a number" are published (everything else stays out):
+one exact value (`[v..v]`), the open-ended top of a pair (`N% chance to X` below 100, `X` at 100), and a
+sign-only mirror pair (`Lucky` / `Unlucky`). An unconditional wording whose value is unknown (`[None..None]`,
+e.g. "Trigger Level 1 Create Lesser Shrine ...") is **never** published with an invented value.
+
+**How a consumer uses `aliases` (reference implementation: `PublicAliasReader` in `src/processing/
+rendering_aliases.py`, tested against the cases below):**
+
+1. For the item's mod kind `k` and text `t`: candidates = every alias with `k in kinds` where
+   (a) `implied_values` is not null and `text == t` (value = `implied_values`), or
+   (b) `text` with each `{n}` replaced by a signed decimal number matches `t` completely (full match); put the
+   shown numbers into per-stat slots via `placeholder_stat_index`, check every stat's
+   `internal = displayed x divisor x (-1 if negate)` against `conditions`, and take `stored = displayed x sign`.
+2. Group candidates by `trade_id`. If any candidate is not `deprecated`, drop the deprecated ones.
+3. Exactly one `trade_id` left: the result is `f"{k}.stat_{trade_id}"` with those stored values. Zero: no match.
+   **More than one: ambiguous, treat as NO match** (do not pick one).
+
+**This file is only the LAST rule of the chain.** The hub's `ModNormalizer` (and a consumer that wants the same
+answers) tries, per mod text, in this order and stops at the first hit: (1) exact match of the table text with
+numbers collapsed to `#` per kind (an explicit `+` on the item tries the template that spells the plus first,
+otherwise the plain one first; a singularized retry; the `increased`->`reduced` / `more`->`less` retry with the
+value negated); (2) the table's `(Local)` twin **only when no global stat with the same text exists** (an item
+text cannot say which); (3) templates with a number baked into the text (`Has 1 Socket`,
+`#% increased Damage per 100 Strength`): the fixed numbers must be equal, so `per 100` never matches `per 15`;
+(4) a negative roll of a `+#` template (`-30% to Fire Resistance`); (5) singular/plural endings against the
+table; (6) **this file**. The whole raw block is tried first, then each line separately; a text that matches
+nothing is **unmapped**, which is an expected, normal result (guessing is exactly what this contract exists to
+avoid: a fuzzy match was measured to pick the wrong stat 92% of the time where the hub had an answer). If the
+chosen stat is deprecated-only and exactly one current stat renders the same text, the current one wins. A
+consumer that implements only rule 6 will disagree with the hub on texts the earlier rules handle.
+
+**`stat_groups[]` and `stat_aliases`** -- stat ids the game cannot tell apart from the item text. The GGG table
+gives the SAME text to several stat ids (PoE1: 260 groups) or texts differing only in letter case (24 groups: e.g.
+`...supported by Level # ...` / `...Supported by Level # ...`). A consumer that matches by text lands on one member
+while the hub's rows (e.g. `meta/latest.json`, `skills/`) may sit under another:
+
+```json
+{"kind": "explicit", "reason": "identical_text", "canonical": "explicit.indexable_skill_16",
+ "members": ["explicit.indexable_skill_16", "explicit.stat_2739830820"], "text": "+# to Level of all Raise Zombie Gems"}
+{"kind": "explicit", "reason": "case_only", "canonical": null,
+ "members": ["explicit.indexable_support_106", "explicit.stat_2178803872", "explicit.stat_4197676934"],
+ "text": "Socketed Gems are Supported by Level # Chance to Bleed"}
+```
+
+- `identical_text`: every member has exactly the same table text. `canonical` is the id the hub emits (last in table
+  order, ModNormalizer's rule). `stat_aliases` maps every other member to it: **to look up a hub row for a stat id,
+  first replace it by `stat_aliases.get(id, id)`.**
+- `case_only`: the texts differ only in case. The hub emits the member whose casing matches the item's text, so rows
+  may exist under **any** member and `canonical` is `null`: look all `members` up. These ids are not in `stat_aliases`.
+- Groups never span kinds (`explicit.stat_1` and `implicit.stat_1` are different rows).
+- The wording of the true duplicates (the same text under two ids that the game itself cannot distinguish, e.g.
+  "Impale Enemies on Hit with Attacks" under trade ids 725880290 and 3739863694) is **not** resolved here: the alias
+  rule leaves such a text unmapped on purpose.
+
+**Test cases for a consumer's own implementation:** `tests/fixtures/alias_contract/` -- `cases.json` (49 cases,
+mod text -> expected `stat_id` and values, or **expected unmapped** with a stability flag), `CASES.md` (the same as a
+table), `sample_poe1.json` (ten real entries, one per kind of thing an alias can express, each explained) and
+`subset_{game}.json` (the GGG table entries and public aliases the cases depend on; `tests/test_alias_contract_cases.py`
+replays them offline through both the hub's chain and `PublicAliasReader`). Categories: exact, `(Local)` suffix,
+fixed numbers, singular/plural, `increased`/`reduced`, explicit `+`, text without a number, units (`every second` =
+1, not 1000), cluster-jewel notables, case-only stat groups, and must-NOT-map cases (`Mana Burn rate`, `Lesser
+Shrine`, `Impale`, `Pierce`, ...). `may_change` marks an unmapped case the hub plans to map later (e.g. shield-local
+`+5% Chance to Block`, which needs slot context); `by_design` ones stay unmapped. Regenerate with
+`tools/build_alias_contract_fixture.py` from the real stats cache and the staged public files.
+
+**`{game}/skills/` consumers read `index.json`, never the folder listing.** Skill files of skills that dropped out of
+a later snapshot are not deleted (5 PoE1 / 9 PoE2 on 2026-10-19) and hold stale numbers; only the files that
+`{game}/skills/index.json` lists are current.
 
 ## Binding conditions (from project owner, still in force)
 

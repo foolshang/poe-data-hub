@@ -599,6 +599,20 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   6. **Checker-vs-hub gap** (14.2% -> 0.58% "label lost", 2.36% -> 2.93% "different id"):
      replay corpus, occurrence-weighted, so inherits all of 2's caveats.
 
+- **`{game}/aliases/latest.json` is a PUBLIC contract (2026-10-19, SPEC.md 8.12) -- treat its shape like
+  `meta/latest.json`.** Built in Actions (`tools/refresh_rendering_aliases.py` stages
+  `internal/aliases_public_{game}.json`), copied by the VM's `run_aliases_once` (24h cache, like
+  `dictionary.json`). It has readable field names on purpose; the hub-private
+  `internal/rendering_aliases_{game}.json` keeps its compact names that the RUNNING hub reads, so never
+  rename those without a coordinated deploy (an unreadable alias is skipped silently and the index would
+  be empty -- the same silent-failure shape as the 2026-10-17 meta break). Any contract change needs a
+  `schema_version` bump and `python -m tools.build_alias_contract_fixture` rerun (the 49 cases in
+  `tests/fixtures/alias_contract/` are verified against the real table, the hub chain AND the independent
+  `PublicAliasReader`). The file is only the LAST rule of the normalizer chain; a consumer implementing
+  only it disagrees with the hub. **`PricesPublisher.fetch_previous` falls back to a local copy named by
+  BASENAME, so every `*/latest.json` shares one fallback file** -- ask the bucket
+  (`blob.exists()`), not `fetch_previous`, when a test or job must know whether a path exists.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
