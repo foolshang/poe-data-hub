@@ -572,6 +572,33 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   events. **Consumers of `{game}/skills/` must read `index.json` and never list the folder**:
   old skill files of skills that left a snapshot stay in Firebase (not deleted) and hold stale data.
 
+- **Which "percent" is this? The metrics used in the normalizer work are NOT interchangeable**
+  (2026-10-19: two readings were nearly mixed up). Always say which one a number is:
+  1. **Production `unmapped_mod_pct`** (`status.json` -> `meta/{game}/meta_job_summary`, the slot
+     job): unmapped / `mods_processed`, counted over the (character, slot) pairs that poe.ninja
+     LISTED for the slot lists (PoE1 `sample_total` ~2,180: top 100 per slot, weapon ~1,080).
+     Use for: deploy verification, the monitoring history (`meta_unmapped_history`).
+  2. **Replay `unmapped_pct`** (`logs/.../replay/result_*.json` from the scratchpad `replay.py`):
+     every slot of every stored character (PoE1 19,468 slot-chars from 1,330 characters), so
+     jewels/offhands/flasks weigh ~9x more than in production. Use for: A/B of two normalizer
+     versions on one fixed corpus (regressions, newly mapped texts), direction only. **Never
+     quote it as a production forecast.**
+  3. **Replay re-weighted to production's `sample.per_slot`** (rows x production slot sizes):
+     predicted PoE1 after-deploy 0.68% (real 0.69%), PoE2 0.94% (real 0.77%) -- but it did NOT
+     reproduce the "before" values (PoE1 16.7% vs real 9.75%, PoE2 2.24% vs 1.92%), so it is
+     good for the direction and roughly for the size, not a promise. The plain replay predicted
+     1.18 / 1.69 and the ratio-scaled targets were 0.78 / 1.05. When setting a target, first
+     check the method reproduces the known BEFORE value; if it cannot, say the target is rough.
+  4. **Local/global share** (7.49% PoE1 / 6.83% PoE2 before, 6.47% / 6.73% after): replay,
+     weighted by occurrences of a mapped text. The same quantity on the published meta is 16.5%
+     / 10.9% because `count` there is "characters holding the stat". Different weights, different
+     question; do not compare across them.
+  5. **Cluster-jewel stats**: published `meta/latest.json`, archetype `all`, count>=5 filter:
+     rows 75 -> 167, distinct stats 28 -> 69. The replay-without-filter figure (88 -> 383) is
+     not the same thing.
+  6. **Checker-vs-hub gap** (14.2% -> 0.58% "label lost", 2.36% -> 2.93% "different id"):
+     replay corpus, occurrence-weighted, so inherits all of 2's caveats.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
