@@ -185,6 +185,9 @@ def _build_http_client(cfg: dict[str, Any]) -> HttpClient:
     )
 
 
+_ping_unconfigured_logged: set[str] = set()
+
+
 def _ping_healthcheck(http: HttpClient, url: Optional[str], job_name: str) -> None:
     """Layer-1 dead-man-switch ping (healthchecks.io or compatible) -- fired
     only after this job's Firebase publish + readback-verify has already
@@ -192,9 +195,13 @@ def _ping_healthcheck(http: HttpClient, url: Optional[str], job_name: str) -> No
     optional; blank/missing means this layer is off for that job, not an
     error. A failed ping must never fail the job itself."""
     if not url:
+        if job_name not in _ping_unconfigured_logged:       # once per process: news pings every 5 min
+            _ping_unconfigured_logged.add(job_name)
+            log.warning("%s job: no healthcheck ping URL configured (env var unset?) -- this job is NOT being watched", job_name)
         return
     try:
         http.get_bytes(url)
+        log.info("%s job: healthcheck ping sent", job_name)            # never the URL: it is a secret
     except Exception as e:
         log.warning("%s job: healthcheck ping failed (%s) -- not fatal", job_name, e)
 

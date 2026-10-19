@@ -73,6 +73,26 @@ def test_ping_healthcheck_calls_get_bytes_when_url_set():
     http.get_bytes.assert_called_once_with("https://hc-ping.com/some-uuid")
 
 
+def test_ping_healthcheck_logs_success_without_the_secret_url(caplog):
+    http = MagicMock()
+    with caplog.at_level("INFO"):
+        _ping_healthcheck(http, "https://hc-ping.com/secret-uuid", "skill_meta")
+    assert any("skill_meta job: healthcheck ping sent" in r.message for r in caplog.records)
+    assert not any("secret-uuid" in r.message for r in caplog.records)
+
+
+def test_ping_healthcheck_warns_once_when_unconfigured(caplog):
+    import src.main as m
+
+    m._ping_unconfigured_logged.discard("newsX")
+    http = MagicMock()
+    with caplog.at_level("WARNING"):
+        _ping_healthcheck(http, "", "newsX")
+        _ping_healthcheck(http, None, "newsX")
+    warns = [r for r in caplog.records if "no healthcheck ping URL configured" in r.message and "newsX" in r.message]
+    assert len(warns) == 1
+
+
 def test_ping_healthcheck_failure_does_not_raise():
     http = MagicMock()
     http.get_bytes.side_effect = RuntimeError("network blip")
