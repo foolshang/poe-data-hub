@@ -556,6 +556,22 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   baseline still sticks after this fix); prices' memory was NOT re-measured, the older numbers are
   not a confirmation.
 
+- **Normalizer A-D + rendering aliases went live 2026-10-19 09:01 UTC** (commit `00e8b62`, deploy order:
+  push -> `gh workflow run refresh-stats.yml` -> verify `internal/rendering_aliases_*.json` ->
+  restart -> recompute slot one game at a time via `tools/run_capped.sh`). Production
+  `unmapped_mod_pct` on the SAME characters (1,333 / 1,214 before, 1,332 / 1,215 after): PoE1
+  9.75% -> 0.69%, PoE2 1.92% -> 0.77%. The replay-scaled targets (0.78 / 1.05) were beaten: the
+  replay corpus under-predicts the gain, so do not treat replay percentages as production
+  forecasts. No stat's count dropped except through intended id changes (the explicit-plus rule
+  moves e.g. weapon "+#% Chance to Block Spell Damage" from stat 561307714 to 19803471 with the
+  same count). Rank effect: PoE1 body top 10 gained two "(Local)" ES rows at ranks 5-6; PoE2 top
+  10s unchanged; PoE1 `jewel:cluster` rows 75 -> 167 (distinct stats 28 -> 69, published
+  count>=5 filter applies). Local/global (global stat with a "(Local)" twin), replay,
+  occurrence-weighted: PoE1 7.49% -> 6.47%, PoE2 6.83% -> 6.73%. Test lines tagged `hub-mem`
+  at 2026-10-19 08:36-08:37 UTC in the journal are from testing the new ALERT logic, not real
+  events. **Consumers of `{game}/skills/` must read `index.json` and never list the folder**:
+  old skill files of skills that left a snapshot stay in Firebase (not deleted) and hold stale data.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
