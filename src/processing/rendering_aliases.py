@@ -223,6 +223,76 @@ def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str
     }
 
 
+PUBLIC_SCHEMA_VERSION = 1
+
+
+def build_stat_groups(table: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+    """Stat ids of one kind that render the same text, which the game itself cannot tell apart from the item.
+
+    The GGG table gives several stat ids the SAME text (PoE1: 262 texts, CLAUDE.md 2026-10-19) or texts that
+    differ only in letter case ("supported" / "Supported"). A consumer that matches by text (ModNormalizer,
+    the PoE Checker) lands on one member; this lists every member so the others can still be found.
+      * reason "identical_text": every member has exactly the same table text. `canonical` is the id the hub
+        emits for it (the last one in table order, ModNormalizer's rule); the others are sibling aliases.
+      * reason "case_only": the texts differ only in case. The hub emits the member whose wording matches the
+        item's own casing, so rows may exist under ANY member: `canonical` is null, look all members up.
+    Groups never span kinds (explicit.stat_1 and implicit.stat_1 are different rows)."""
+    groups: list[dict[str, Any]] = []
+    for kind in KINDS:
+        by_fold: dict[str, list[tuple[str, str]]] = {}
+        for stat_id, text in table.get(kind, {}).items():
+            by_fold.setdefault(text.casefold(), []).append((stat_id, text))
+        for members in by_fold.values():
+            if len(members) < 2:
+                continue
+            ids = [m[0] for m in members]
+            identical = len({m[1] for m in members}) == 1
+            groups.append({
+                "kind": kind,
+                "reason": "identical_text" if identical else "case_only",
+                "canonical": ids[-1] if identical else None,
+                "members": sorted(ids),
+                "text": members[-1][1],
+            })
+    groups.sort(key=lambda g: (g["kind"], g["members"][0]))
+    return groups
+
+
+# internal (hub-private, compact) alias field -> public (readable) alias field. The internal names are what the
+# running hub reads from internal/rendering_aliases_{game}.json and must not change without a coordinated deploy;
+# the public file is a separate artefact so its contract can be readable.
+_PUBLIC_FIELDS = {
+    "x": "text", "n": "trade_id", "k": "kinds", "p": "placeholder_stat_index", "ng": "negate", "dv": "divisor",
+    "sg": "sign", "c": "conditions", "iv": "implied_values", "dep": "deprecated",
+}
+
+
+def to_public(payload: dict[str, Any], groups: list[dict[str, Any]], repoe_url: str) -> dict[str, Any]:
+    """The `{game}/aliases/latest.json` contract (SPEC.md 8.12) from an internal payload + stat groups."""
+    aliases = [{_PUBLIC_FIELDS[k]: a[k] for k in _PUBLIC_FIELDS} for a in payload["aliases"]]
+    return {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
+        "generated_at": payload["generated_at"],
+        "game": payload["game"],
+        "source": {
+            "stat_translations": repoe_url,
+            "note": "RePoE is a community datamine and lags the game by days after a patch (PoE2 2-7 days, PoE1 ~0.4 day, "
+                    "measured 2026-10): early in a league some wordings are missing. Missing is not broken.",
+        },
+        "deprecated_trade_ids": payload["deprecated"],
+        "aliases": aliases,
+        "stat_groups": groups,
+        "stat_aliases": {m: g["canonical"] for g in groups if g["canonical"] for m in g["members"] if m != g["canonical"]},
+    }
+
+
+def valid_public(doc: Any) -> bool:
+    """Shape check the VM copy job applies before publishing a staged public file."""
+    return (isinstance(doc, dict) and doc.get("schema_version") == PUBLIC_SCHEMA_VERSION
+            and isinstance(doc.get("aliases"), list) and isinstance(doc.get("stat_groups"), list)
+            and isinstance(doc.get("stat_aliases"), dict) and isinstance(doc.get("generated_at"), str))
+
+
 def check_not_shrunk(new: dict[str, Any], previous: Optional[dict[str, Any]], min_ratio: float = 0.9, min_aliases: int = 1) -> None:
     """Guard for the refresh job: raise (so nothing is published over a good file) when the new payload
     is empty, or has far fewer aliases / deprecated ids than the previously published one."""

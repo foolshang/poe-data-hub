@@ -10,6 +10,9 @@ no RAM to spare (CLAUDE.md, "VM RAM budget"); the VM only ever downloads the sma
 Outputs, both under internal/ (all the scoped service account may touch):
   internal/rendering_aliases_{game}.json            current
   internal/rendering_aliases_{game}.last_good.json  the file that was current BEFORE the last successful publish
+  internal/aliases_public_{game}.json               the readable PUBLIC contract (SPEC.md 8.12), staged: the VM's
+                                                    run_aliases_once copies it to {game}/aliases/latest.json (this
+                                                    scoped service account cannot write public paths)
 
 Guard: nothing is published over a good file when the new payload is empty or has far fewer aliases / deprecated
 ids than the one already published (a RePoE schema change or a truncated download must show up as a red run, not
@@ -27,7 +30,7 @@ from typing import Any, Callable
 
 import requests
 
-from src.processing.rendering_aliases import KINDS, build_aliases, check_not_shrunk
+from src.processing.rendering_aliases import KINDS, build_aliases, build_stat_groups, check_not_shrunk, to_public
 from src.storage.publisher import PricesPublisher
 from src.utils.http_client import build_user_agent
 
@@ -48,6 +51,7 @@ class Target:
     stats_url: str
     blob_path: str
     last_good_path: str
+    public_staged_path: str
     # PoE2's translations carry GGG trade ids on only ~292 of ~10.7k entries (2026-10-19), so an empty result is not
     # an error there; for PoE1 it is.
     min_aliases: int
@@ -56,10 +60,10 @@ class Target:
 TARGETS: list[Target] = [
     Target("poe1", "https://raw.githubusercontent.com/repoe-fork/poe1/master/data/stat_translations.json",
            f"{PUBLIC}/internal/stats_cache_poe1.json", "internal/rendering_aliases_poe1.json",
-           "internal/rendering_aliases_poe1.last_good.json", 1),
+           "internal/rendering_aliases_poe1.last_good.json", "internal/aliases_public_poe1.json", 1),
     Target("poe2", "https://raw.githubusercontent.com/repoe-fork/poe2/master/data/stat_translations/stat_descriptions.json",
            f"{PUBLIC}/internal/stats_cache.json", "internal/rendering_aliases_poe2.json",
-           "internal/rendering_aliases_poe2.last_good.json", 0),
+           "internal/rendering_aliases_poe2.last_good.json", "internal/aliases_public_poe2.json", 0),
 ]
 
 
@@ -93,6 +97,7 @@ def refresh_one(publisher: PricesPublisher, target: Target, fetch: Callable[[str
         payload = build_aliases(target.game, translations, table)
         previous = publisher.fetch_previous(target.blob_path)
         check_not_shrunk(payload, previous, min_aliases=target.min_aliases)
+        public = to_public(payload, build_stat_groups(table), target.repoe_url)
     except Exception as e:
         log.error("%s: NOT publishing (keeping whatever is already there): %s", target.game, e)
         return False
@@ -100,11 +105,13 @@ def refresh_one(publisher: PricesPublisher, target: Target, fetch: Callable[[str
         if previous:
             publisher.publish(previous, target.last_good_path, cache_control="no-cache")
         publisher.publish(payload, target.blob_path, cache_control="no-cache")
+        publisher.publish(public, target.public_staged_path, cache_control="no-cache")
     except Exception as e:
         log.error("%s: upload (or post-upload verification) failed: %s", target.game, e)
         return False
-    log.info("%s: published %d aliases, %d deprecated-only ids to gs://%s/%s (stats: %s)",
-             target.game, len(payload["aliases"]), len(payload["deprecated"]), BUCKET_NAME, target.blob_path, payload["stats"])
+    log.info("%s: published %d aliases, %d deprecated-only ids, %d stat groups to gs://%s/%s and the public contract to %s (stats: %s)",
+             target.game, len(payload["aliases"]), len(payload["deprecated"]), len(public["stat_groups"]), BUCKET_NAME,
+             target.blob_path, target.public_staged_path, payload["stats"])
     return True
 
 

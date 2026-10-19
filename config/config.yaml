@@ -238,3 +238,8 @@ healthchecks:
   # much slower cycle plus the scheduler's own misfire_grace_time=3600 if the
   # process was down right at the 05:00 ICT trigger).
   skill_meta_ping_url_env: "HUB_HC_SKILL_META_URL"
+
+aliases:
+  # {game}/aliases/latest.json (SPEC.md 8.12) only changes when RePoE does, i.e. with the weekly refresh-stats.yml
+  # run; 24h matches {game}/skills/dictionary.json (skill_meta.publish.dictionary_cache_max_age_seconds).
+  cache_max_age_seconds: 86400

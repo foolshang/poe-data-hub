@@ -5,6 +5,7 @@
     python -m src.main --run-cleanup-once
     python -m src.main --run-news-once
     python -m src.main --run-gems-once
+    python -m src.main --run-aliases-once
     python -m src.main --serve      # persistent scheduler (systemd uses this)
 """
 from __future__ import annotations
@@ -53,6 +54,7 @@ from src.processing.skill_publish import (
     iter_skill_mods,
     NonContiguousRows,
 )
+from src.processing.rendering_aliases import valid_public as valid_public_aliases
 from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
 from src.storage.local_db import COLLECTION_METHOD_LEGACY, LocalDb
@@ -97,6 +99,18 @@ GEMS_STAGED_BLOB_PATH_BY_GAME = {
 
 def _gems_blob_path(game: str) -> str:
     return f"{game}/gems.json"
+
+
+# The PUBLIC rendering-alias contract (SPEC.md 8.12). tools/refresh_rendering_aliases.py stages it here (it may only
+# write internal/); run_aliases_once copies it to the real public path with the VM's full-access credentials.
+ALIASES_STAGED_BLOB_PATH_BY_GAME = {
+    "poe2": "internal/aliases_public_poe2.json",
+    "poe1": "internal/aliases_public_poe1.json",
+}
+
+
+def _aliases_blob_path(game: str) -> str:
+    return f"{game}/aliases/latest.json"
 
 
 # Skill-meta phase 2 (item 6): config-overridable, kept small here as the
@@ -483,6 +497,47 @@ def run_gems_once(cfg: dict[str, Any]) -> dict[str, Any]:
         log.info("gems job(%s): republished %d gems -> %s", game, count, public_path)
         per_game[game] = {"ok": True, "count": count, "generated_at": staged.get("generated_at")}
 
+    return {"ok": overall_ok, "games": per_game}
+
+
+def run_aliases_once(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Republishes `{game}/aliases/latest.json` (the rendering-alias contract the PoE Checker reads, SPEC.md 8.12)
+    from `internal/aliases_public_{game}.json`, which `refresh-stats.yml` stages weekly. Same two-hop shape and
+    reason as `run_gems_once`: the Actions service account is IAM-limited to `internal/`. Never builds anything:
+    a staged file that is missing or fails its shape check is skipped with a log line and the previously
+    published public file stays exactly as it was. Cache-Control follows `dictionary.json` (24h, config
+    `aliases.cache_max_age_seconds`): the table only changes when RePoE does, i.e. weekly."""
+    firebase_cfg = cfg["firebase"]
+    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    max_age = cfg.get("aliases", {}).get("cache_max_age_seconds", 86400)
+
+    per_game: dict[str, dict[str, Any]] = {}
+    overall_ok = True
+    for game in cfg.get("game_versions", ["poe2"]):
+        staged_path = ALIASES_STAGED_BLOB_PATH_BY_GAME.get(game)
+        if staged_path is None:
+            continue
+        staged = publisher.fetch_previous(staged_path)
+        if staged is None:
+            overall_ok = False
+            log.warning("aliases job(%s): staging copy not found yet (%s) -- skipping this cycle", game, staged_path)
+            per_game[game] = {"ok": False, "reason": "no staged data"}
+            continue
+        if not valid_public_aliases(staged) or staged.get("game") != game:
+            overall_ok = False
+            log.error("aliases job(%s): staged file %s fails the contract shape check -- NOT publishing", game, staged_path)
+            per_game[game] = {"ok": False, "reason": "invalid staged file"}
+            continue
+        try:
+            publisher.publish(staged, _aliases_blob_path(game), cache_control=f"public, max-age={max_age}")
+        except Exception as e:
+            overall_ok = False
+            log.error("aliases job(%s): publish failed: %s", game, e, exc_info=True)
+            per_game[game] = {"ok": False, "reason": str(e)}
+            continue
+        log.info("aliases job(%s): republished %d aliases, %d stat groups -> %s", game, len(staged["aliases"]),
+                 len(staged["stat_groups"]), _aliases_blob_path(game))
+        per_game[game] = {"ok": True, "aliases": len(staged["aliases"]), "generated_at": staged.get("generated_at")}
     return {"ok": overall_ok, "games": per_game}
 
 
@@ -1711,6 +1766,13 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
         next_run_time=datetime.now(timezone.utc),
     )
 
+    # Public alias contract: same cheap staged->public copy, 10 minutes after gems.
+    scheduler.add_job(
+        _safe_run, CronTrigger(hour=gems_hour, minute=10, timezone="Asia/Bangkok"),
+        args=[run_aliases_once, cfg, "aliases"], id="aliases", max_instances=1, misfire_grace_time=3600,
+        next_run_time=datetime.now(timezone.utc),
+    )
+
     # No healthcheck ping for this one -- it's scheduler bookkeeping, not a
     # data-fetching job; heartbeat.yml's existing META_MAX_AGE_HOURS=26
     # tolerance already covers the meta job itself at any active frequency.
@@ -1767,6 +1829,7 @@ def main() -> None:
     parser.add_argument("--run-cleanup-once", action="store_true")
     parser.add_argument("--run-news-once", action="store_true")
     parser.add_argument("--run-gems-once", action="store_true")
+    parser.add_argument("--run-aliases-once", action="store_true", help="Copy the staged public alias contract to {game}/aliases/latest.json")
     parser.add_argument("--reprocess-char-items", action="store_true", help="Recompute skill_mod_counts from stored char_items, offline (skill-meta phase 2)")
     parser.add_argument("--export-league-archive", metavar="GAME:LEAGUE", help="Export one league's archive now, e.g. poe1:Mirage (skill-meta phase 5)")
     parser.add_argument(
@@ -1790,6 +1853,8 @@ def main() -> None:
         run_news_once(cfg)
     elif args.run_gems_once:
         run_gems_once(cfg)
+    elif args.run_aliases_once:
+        run_aliases_once(cfg)
     elif args.reprocess_char_items:
         run_reprocess_char_items(cfg)
     elif args.publish_skill_meta:
