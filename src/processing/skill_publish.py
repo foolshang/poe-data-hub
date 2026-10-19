@@ -22,7 +22,7 @@ import logging
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 log = logging.getLogger(__name__)
 
@@ -112,8 +112,54 @@ class SkillGroup:
         }
 
 
+class NonContiguousRows(Exception):
+    """A skill's stat rows were not contiguous in the stream (its key reappeared after another skill's rows)."""
+
+
+def _group_mods(rows: list[tuple], min_usage_pct: float) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """One skill's `mods` (level_bracket -> slot -> stat rows, biggest `count` first) from that skill's raw
+    stat rows, in the order they were read. The ONLY place this is built, so the buffered
+    (`build_skill_groups`) and streamed (`iter_skill_mods`) paths cannot drift apart."""
+    by_bracket: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for _t, _s, bracket, slot, stat_id, mod_kind, count, population, slot_holders, usage_pct, v_min, v_max in rows:
+        if usage_pct < min_usage_pct:
+            continue
+        by_bracket.setdefault(bracket, {}).setdefault(slot, []).append({
+            "stat_id": stat_id, "mod_kind": mod_kind, "count": count, "population": population,
+            "slot_holders": slot_holders, "usage_pct": usage_pct, "value_min": v_min, "value_max": v_max,
+        })
+    for by_slot in by_bracket.values():
+        for slot_rows in by_slot.values():
+            slot_rows.sort(key=lambda r: -r["count"])
+    return by_bracket
+
+
+def iter_skill_mods(stat_rows: Iterable[tuple], min_usage_pct: float) -> Iterator[tuple[tuple[str, str], dict]]:
+    """Yields ((skill_type, skill), mods) one skill at a time from a row stream in which each skill's rows are
+    contiguous (they are: `LocalDb.replace_skill_counts_for_snapshot` inserts a skill's rows in one executemany, and
+    a re-count deletes and re-inserts the whole skill). Holds one skill's rows at a time instead of the whole
+    snapshot -- the memory of the old fetchall + dict-per-row (2026-10-19: ~190MB for PoE1, ~300MB for PoE2).
+    Raises NonContiguousRows if that guarantee is ever broken, so the caller can fall back to the buffered path
+    instead of publishing a skill with only part of its rows."""
+    seen: set[tuple[str, str]] = set()
+    current: Optional[tuple[str, str]] = None
+    buf: list[tuple] = []
+    for row in stat_rows:
+        key = (row[0], row[1])
+        if key != current:
+            if current is not None:
+                yield current, _group_mods(buf, min_usage_pct)
+            if key in seen:
+                raise NonContiguousRows(key)
+            seen.add(key)
+            current, buf = key, []
+        buf.append(row)
+    if current is not None:
+        yield current, _group_mods(buf, min_usage_pct)
+
+
 def build_skill_groups(
-    stat_rows: list[tuple],
+    stat_rows: Iterable[tuple],
     passive_rows: list[tuple],
     population_rows: list[tuple],
     min_usage_pct: float,
@@ -134,14 +180,11 @@ def build_skill_groups(
         facet_count[key] = facet  # identical on every bracket row of a skill
         populations.setdefault(key, {})[bracket] = population
 
-    mods: dict[tuple[str, str], dict[str, dict[str, list[dict[str, Any]]]]] = {}
-    for skill_type, skill, bracket, slot, stat_id, mod_kind, count, population, slot_holders, usage_pct, v_min, v_max in stat_rows:
-        if usage_pct < min_usage_pct:
-            continue
-        mods.setdefault((skill_type, skill), {}).setdefault(bracket, {}).setdefault(slot, []).append({
-            "stat_id": stat_id, "mod_kind": mod_kind, "count": count, "population": population,
-            "slot_holders": slot_holders, "usage_pct": usage_pct, "value_min": v_min, "value_max": v_max,
-        })
+    rows_by_skill: dict[tuple[str, str], list[tuple]] = {}
+    for row in stat_rows:
+        rows_by_skill.setdefault((row[0], row[1]), []).append(row)
+    mods = {key: m for key, rows in rows_by_skill.items() if (m := _group_mods(rows, min_usage_pct))}
+    del rows_by_skill
 
     passives: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
     for skill_type, skill, bracket, keypassive, count, population, usage_pct in passive_rows:
@@ -151,10 +194,6 @@ def build_skill_groups(
             "keypassive": keypassive, "count": count, "population": population, "usage_pct": usage_pct,
         })
 
-    for by_bracket in mods.values():
-        for by_slot in by_bracket.values():
-            for rows in by_slot.values():
-                rows.sort(key=lambda r: -r["count"])
     for by_bracket in passives.values():
         for rows in by_bracket.values():
             rows.sort(key=lambda r: -r["count"])

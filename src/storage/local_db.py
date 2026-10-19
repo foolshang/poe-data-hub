@@ -29,7 +29,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 DEFAULT_DB_PATH = Path("data/poe_data_hub.sqlite3")
 
@@ -996,6 +996,17 @@ class LocalDb:
                FROM skill_stat_counts WHERE snapshot_id = ?""",
             (snapshot_id,),
         ).fetchall()
+
+    def stream_skill_stat_counts_for_snapshot(self, snapshot_id: int) -> Iterator[tuple]:
+        """Same rows as `iter_skill_stat_counts_for_snapshot`, but a lazy cursor: nothing is materialised, and the
+        rows come back in id order, i.e. each skill's rows contiguously (see `iter_skill_mods`). Must be consumed
+        to the end or closed; do not interleave other writes on this connection while iterating."""
+        return self._conn.execute(
+            """SELECT skill_type, skill, level_bracket, slot, stat_id, mod_kind, count, population,
+                      slot_holders, usage_pct, value_min, value_max
+               FROM skill_stat_counts WHERE snapshot_id = ? ORDER BY id""",
+            (snapshot_id,),
+        )
 
     def iter_skill_passive_counts_for_snapshot(self, snapshot_id: int) -> list[tuple]:
         return self._conn.execute(

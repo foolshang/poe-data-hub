@@ -50,6 +50,8 @@ from src.processing.skill_publish import (
     build_skill_groups,
     build_skill_passives_schema,
     build_skills_index,
+    iter_skill_mods,
+    NonContiguousRows,
 )
 from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
@@ -815,10 +817,13 @@ def publish_skill_meta(
     dict_max_age = publish_cfg.get("dictionary_cache_max_age_seconds", 86400)
 
     snapshot_id, league, days = run["snapshot_id"], run["league"], run["days_since_league_start"]
-    stat_rows = db.iter_skill_stat_counts_for_snapshot(snapshot_id)
+    # The stat rows are the big table (PoE2: 340k rows). They are NOT loaded here any more: the groups are built from
+    # the small populations/passives rows (they decide which skills exist, their slugs, index and passives), and each
+    # skill's mods are streamed in below, one skill at a time (2026-10-19: fetchall + a dict per row held ~190MB
+    # (PoE1) / ~300MB (PoE2) and took the hub to 439MB of a 460MB cap).
     passive_rows = db.iter_skill_passive_counts_for_snapshot(snapshot_id)
     population_rows = db.iter_skill_populations_for_snapshot(snapshot_id)
-    groups = build_skill_groups(stat_rows, passive_rows, population_rows, min_usage_pct)
+    groups = build_skill_groups((), passive_rows, population_rows, min_usage_pct)
     population_total = db.get_skill_run_population_total(run["run_id"])
 
     gems = _load_gems_for_tags(http, cfg, game)
@@ -827,10 +832,32 @@ def publish_skill_meta(
     index_data = build_skills_index(game, league, days, population_total, groups)
     publisher.publish(index_data, _skills_index_blob_path(game), cache_control=f"public, max-age={index_max_age}")
 
-    for g in groups:
+    def publish_skill_file(g: Any) -> None:
         publisher.publish(
             g.to_file(game, league, days), g.path(game), cache_control=f"public, max-age={skill_max_age}", compact=True,
         )
+
+    by_key = {(g.skill_type, g.skill): g for g in groups}
+    published_keys: set[tuple[str, str]] = set()
+    try:
+        for key, mods in iter_skill_mods(db.stream_skill_stat_counts_for_snapshot(snapshot_id), min_usage_pct):
+            g = by_key.get(key)
+            if g is None:          # rows for a skill with no population row: never published (same as before)
+                continue
+            publish_skill_file(dataclasses.replace(g, mods=mods))
+            published_keys.add(key)
+    except NonContiguousRows as e:
+        # Cannot happen with the current writer; if it ever does, publish from the whole table in memory (the old,
+        # memory-hungry path) rather than ever publishing a skill with only part of its rows.
+        log.error("skill publish(%s): stat rows not contiguous per skill (%s) -- falling back to the buffered path", game, e)
+        full = build_skill_groups(db.iter_skill_stat_counts_for_snapshot(snapshot_id), passive_rows, population_rows, min_usage_pct)
+        full, _ = attach_skill_tags(full, gems)
+        groups = full
+        by_key = {(g.skill_type, g.skill): g for g in groups}
+        published_keys = set()
+    for g in groups:                       # skills with no (qualifying) mod rows still get their file
+        if (g.skill_type, g.skill) not in published_keys:
+            publish_skill_file(g)
 
     dictionary_data = build_skill_dictionary(game, normalizer.stat_dictionary())
     publisher.publish(dictionary_data, _skill_dictionary_blob_path(game), cache_control=f"public, max-age={dict_max_age}")
