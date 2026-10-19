@@ -39,6 +39,52 @@ def mark(label: str) -> None:
     print(f"{label:<46} rss={cur:6.1f}MB hwm={hwm:6.1f}MB | py-heap now={t_cur/1e6:6.1f}MB peak={t_peak/1e6:6.1f}MB", flush=True)
 
 
+class HashingPublisher:
+    """Serializes exactly like PricesPublisher.publish, keeps only sha256 + size (generated_at neutralised), discards the rest."""
+
+    def __init__(self):
+        self.manifest: dict[str, list] = {}
+        self.n = 0
+
+    def publish(self, data, blob_path, cache_control, compact=False):
+        import hashlib
+        import re
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")) if compact else json.dumps(data, ensure_ascii=False, indent=2)
+        norm = re.sub(r'"generated_at":\s*"[^"]*"', '"generated_at":"X"', payload)
+        self.manifest[blob_path] = [hashlib.sha256(norm.encode("utf-8")).hexdigest(), len(payload)]
+        self.n += 1
+        if self.n % 50 == 0:
+            mark(f"   ... {self.n} files published")
+
+
+def main_new(game: str) -> None:
+    """The REAL publish_skill_meta (current code) against the read-only DB with a discarding publisher."""
+    import time
+    from unittest.mock import MagicMock
+
+    from src.main import publish_skill_meta
+    from src.storage.local_db import LocalDb
+
+    cfg = load_config()
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
+    conn.execute("PRAGMA cache_size=-4000")
+    db = LocalDb.__new__(LocalDb)          # skip LocalDb.__init__ (it opens read-write); only reads are used by publish
+    db._conn = conn
+    http = MagicMock()
+    gems_file = os.environ.get("MSP_GEMS_FILE")          # the published gems.json, so the tags join matches
+    http.get_json.return_value = json.loads(Path(gems_file).read_text(encoding="utf-8")) if gems_file else {"gems": []}
+    normalizer = MagicMock(stat_dictionary=lambda: [])
+    pub = HashingPublisher()
+    mark("start (new code)")
+    t0 = time.time()
+    result = publish_skill_meta(db, pub, game, cfg, normalizer, http)
+    mark(f"publish_skill_meta done in {time.time() - t0:.1f}s, {pub.n} files")
+    print("result:", {k: v for k, v in result.items() if k != "tags"}, flush=True)
+    out = os.environ.get("MSP_MANIFEST")
+    if out:
+        Path(out).write_text(json.dumps(pub.manifest), encoding="utf-8")
+
+
 def main(game: str) -> None:
     cfg = load_config()
     min_usage = cfg.get("skill_meta", {}).get("publish", {}).get("min_usage_pct", 0.1)
@@ -90,4 +136,5 @@ def main(game: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    # `<game>` = the OLD stages (fetchall everything), `<game> new` = the real current publish code
+    main_new(sys.argv[1]) if len(sys.argv) > 2 and sys.argv[2] == "new" else main(sys.argv[1])

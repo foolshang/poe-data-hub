@@ -531,10 +531,30 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   ETAs printed at the start read 4.4-4.7 h and were low too). At 1 request / 2 s the time is
   roughly `new characters x 2 s`; estimate from the progress line's fetched/reused split, not from
   an earlier run.
-- **A skill publish is a memory spike, not a leak** (measured 2026-10-19): PoE1 publish peaked
-  at RSS 332MB and PoE2 at 439MB (cap 460MB, cgroup `max` events 3,941, no OOM) -- the third
-  "build everything in RAM, then write" shape after the archive export. See the entry that
-  follows the fix for the cause and the numbers.
+- **A skill publish was a memory spike, not a leak -- fixed 2026-10-19** (measured with
+  `tools/measure_skill_publish.py`, read-only DB, discarding publisher, under a transient cap):
+  `publish_skill_meta` did `fetchall()` on every `skill_stat_counts` row of the snapshot (PoE1
+  216k rows, PoE2 340k) and then built a dict per row, both alive until the function returned:
+  +128MB + 60MB for PoE1 (~190MB), hub RSS peak 332MB (PoE1) / 439MB (PoE2) of the 460MB cap,
+  cgroup `max` events 3,941, no OOM. It was NOT "432 files at once" (serializing a file costs
+  ~nothing). Now the groups come from the small populations/passives rows and each skill's mods
+  are streamed one skill at a time (`iter_skill_mods`, a lazy cursor ordered by `id`, which is
+  contiguous per skill because `replace_skill_counts_for_snapshot` inserts a skill in one
+  executemany; non-contiguity raises and falls back to the buffered path). Measured after: PoE1
+  +12MB, PoE2 +19MB over the process baseline, 7-9 s for the whole read+build. Output is
+  byte-identical: `tests/test_skill_publish_streaming.py` compares against a verbatim copy of the
+  old code (a mutation check proves it can fail), and all 597 files of the live PoE1/PoE2
+  publish matched the files the old code had published (ignoring `generated_at`).
+  **Don't "fix" this with one query per skill**: the table has 13.7M rows over 51 snapshots and
+  the only usable index is `(snapshot_id)`, so 432 per-skill queries would each rescan the
+  snapshot's 340k rows (~30 min instead of 4.5 s); a new index on a 13.7M-row table is not free
+  either. The same fetchall-the-whole-snapshot shape still exists in `archive_export.py` (disabled)
+  and must use this streaming approach when rewritten. `{game}/skills/` also keeps stale files of
+  skills that dropped out of a later snapshot (5 PoE1 / 9 PoE2 on 2026-10-19; nothing deletes
+  them and they are not in `index.json`). Open follow-ups, not done: RSS stays high after a big
+  allocation because glibc does not return freed arenas (not a leak; try `malloc_trim` only if the
+  baseline still sticks after this fix); prices' memory was NOT re-measured, the older numbers are
+  not a confirmation.
 
 ## Layout
 
