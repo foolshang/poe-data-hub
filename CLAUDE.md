@@ -524,6 +524,18 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   GGG forum HTML samples contain forum usernames. The git author address and the GCP project / VM names are
   knowingly public.
 
+- **Skill-run duration is dominated by the poe.ninja character-cache hit rate; never quote one
+  number as "the" duration** (2026-10-19): the 2026-09-22 measurement of ~71 min for both games
+  was a mostly-cached run. The 2026-10-18 22:00 UTC run took 88 min for PoE1 (2,269 characters
+  fetched, 12,391 reused) but **5.95 h for PoE2** (10,035 of 16,820 fetched new, 6,777 reused;
+  ETAs printed at the start read 4.4-4.7 h and were low too). At 1 request / 2 s the time is
+  roughly `new characters x 2 s`; estimate from the progress line's fetched/reused split, not from
+  an earlier run.
+- **A skill publish is a memory spike, not a leak** (measured 2026-10-19): PoE1 publish peaked
+  at RSS 332MB and PoE2 at 439MB (cap 460MB, cgroup `max` events 3,941, no OOM) -- the third
+  "build everything in RAM, then write" shape after the archive export. See the entry that
+  follows the fix for the cause and the numbers.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
