@@ -28,11 +28,23 @@ max_hits=$(ev max); oom_kills=$(ev oom_kill)
 # Project owner's rule (2026-10-18): a peak >= ALERT_HWM_MB (~15% margin under
 # the 460M cap) is a danger sign even if the cap was never hit, and any cap hit
 # or OOM kill must be reported. Find them with: journalctl -t hub-mem -p warning
+#
+# NEW SINCE THE PREVIOUS LINE only (2026-10-19): VmHWM, memory.peak and the
+# memory.events counters are cumulative for the whole process/cgroup life, so
+# testing them directly kept every line an ALERT for hours after one real event
+# and buried the next one. State (pid + last hwm / max / oom_kill) is kept in
+# STATE_FILE; a different pid (restart) starts a fresh baseline.
 ALERT_HWM_MB="${HUB_MEM_ALERT_HWM_MB:-400}"
+STATE_FILE="${HUB_MEM_STATE:-/var/lib/hub-mem/state}"
+prev_pid=""; prev_hwm=0; prev_max=0; prev_oom=0
+[ -r "$STATE_FILE" ] && read -r prev_pid prev_hwm prev_max prev_oom < "$STATE_FILE"
+if [ "$prev_pid" != "$PID" ]; then prev_hwm=0; prev_max=0; prev_oom=0; fi
+new_max=$(( ${max_hits:-0} - ${prev_max:-0} )); new_oom=$(( ${oom_kills:-0} - ${prev_oom:-0} ))
 prio=info; tag=""
-if [ "$hwm_mb" -ge "$ALERT_HWM_MB" ] || [ "${max_hits:-0}" -gt 0 ] || [ "${oom_kills:-0}" -gt 0 ]; then
+if { [ "$hwm_mb" -ge "$ALERT_HWM_MB" ] && [ "$hwm_mb" -gt "${prev_hwm:-0}" ]; } || [ "$new_max" -gt 0 ] || [ "$new_oom" -gt 0 ]; then
     prio=warning; tag="ALERT "
 fi
+mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null && echo "$PID $hwm_mb ${max_hits:-0} ${oom_kills:-0}" > "$STATE_FILE" 2>/dev/null
 
-logger -t hub-mem -p "daemon.$prio" --   "${tag}pid=$PID rss_mb=$(( ${rss:-0} / 1024 )) hwm_mb=$hwm_mb swap_mb=$(( ${swp:-0} / 1024 )) cg_current_mb=$(mb "$cur") cg_peak_mb=$(mb "$peak") events_max=${max_hits:-0} events_oom_kill=${oom_kills:-0} sys_avail_mb=$(( ${avail:-0} / 1024 ))"
+logger -t hub-mem -p "daemon.$prio" --   "${tag}pid=$PID rss_mb=$(( ${rss:-0} / 1024 )) hwm_mb=$hwm_mb swap_mb=$(( ${swp:-0} / 1024 )) cg_current_mb=$(mb "$cur") cg_peak_mb=$(mb "$peak") events_max=${max_hits:-0} events_oom_kill=${oom_kills:-0} new_max=$new_max new_oom_kill=$new_oom sys_avail_mb=$(( ${avail:-0} / 1024 ))"
 exit 0
