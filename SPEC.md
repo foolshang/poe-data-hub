@@ -1554,7 +1554,7 @@ and `refresh-stats.yml` has run. `generated_at` is the build time, not the RePoE
 }
 ```
 
-(2026-10-19: PoE1 1,967 aliases / 284 stat groups / 269 `stat_aliases` / ~610KB compact; PoE2 130 / 28 / 28 / ~42KB.)
+(Measured on the live files 2026-10-19: PoE1 1,967 aliases / 284 stat groups / 269 `stat_aliases` / 565KB; PoE2 130 / 28 / 28 / 38KB; both compact JSON, `Cache-Control: public, max-age=86400`.)
 
 **`aliases[]` fields** (one object per wording that the GGG table text does NOT already cover):
 
