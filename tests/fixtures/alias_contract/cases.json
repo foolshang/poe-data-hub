@@ -1,0 +1,767 @@
+{
+ "format": "alias-contract-cases/1",
+ "about": "Mod text -> expected result of the hub's ModNormalizer (SPEC.md 8.12). 'unmapped' is an EXPECTED result, not an omission; stability 'may_change' means the hub plans to map it later.",
+ "cases": [
+  {
+   "id": "poe1-01",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "+88 to maximum Life",
+   "category": "exact",
+   "why": "the number is replaced by '#'; the table text is '+# to maximum Life'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3299347043",
+    "values": [
+     88.0
+    ],
+    "table_text": "+# to maximum Life"
+   }
+  },
+  {
+   "id": "poe1-02",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Historic",
+   "category": "exact",
+   "why": "no number at all: exact text match, no values",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3787436548",
+    "values": [],
+    "table_text": "Historic"
+   }
+  },
+  {
+   "id": "poe1-03",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "100% increased Energy Shield",
+   "category": "local_suffix",
+   "why": "table text is '#% increased Energy Shield (Local)'; the item never prints '(Local)'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_4015621042",
+    "values": [
+     100.0
+    ],
+    "table_text": "#% increased Energy Shield (Local)"
+   }
+  },
+  {
+   "id": "poe1-04",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "100% increased Armour and Evasion",
+   "category": "local_suffix",
+   "why": "same rule, different stat",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_2451402625",
+    "values": [
+     100.0
+    ],
+    "table_text": "#% increased Armour and Evasion (Local)"
+   }
+  },
+  {
+   "id": "poe1-05",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "333% increased Armour and Energy Shield",
+   "category": "local_suffix",
+   "why": "same rule, three-word stat name",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3321629045",
+    "values": [
+     333.0
+    ],
+    "table_text": "#% increased Armour and Energy Shield (Local)"
+   }
+  },
+  {
+   "id": "poe1-06",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "+45 to maximum Energy Shield",
+   "category": "local_ambiguous_stays_global",
+   "why": "the table has BOTH '+# to maximum Energy Shield' (global) and '... (Local)': the item text cannot say which, so the exact (global) match is kept, never the Local twin",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3489782002",
+    "values": [
+     45.0
+    ],
+    "table_text": "+# to maximum Energy Shield"
+   }
+  },
+  {
+   "id": "poe1-07",
+   "game": "poe1",
+   "kind": "implicit",
+   "text": "Has 1 Socket",
+   "category": "fixed_number",
+   "why": "'Has 1 Socket' is its own table stat; the 1 is not a roll",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_4077843608",
+    "values": [],
+    "table_text": "Has 1 Socket"
+   }
+  },
+  {
+   "id": "poe1-08",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Has 2 Sockets",
+   "category": "fixed_number_alias",
+   "why": "not in the table at all; RePoE proves it is the same stat as 'Has 1 Socket' with the value 2",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_4077843608",
+    "values": [
+     2.0
+    ],
+    "table_text": "Has 1 Socket"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-09",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Has 3 Sockets",
+   "category": "fixed_number_alias",
+   "why": "same stat, value 3",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_4077843608",
+    "values": [
+     3.0
+    ],
+    "table_text": "Has 1 Socket"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-10",
+   "game": "poe1",
+   "kind": "implicit",
+   "text": "3% increased Damage per 100 Strength",
+   "category": "fixed_number",
+   "why": "'per 100 Strength' and 'per 15 Strength' are DIFFERENT stats; only the first number is the roll",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_4274080377",
+    "values": [
+     3.0
+    ],
+    "table_text": "#% increased Damage per 100 Strength"
+   }
+  },
+  {
+   "id": "poe1-11",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "2% increased Damage per 15 Strength",
+   "category": "fixed_number",
+   "why": "the other stat of the pair above",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3948776386",
+    "values": [
+     2.0
+    ],
+    "table_text": "#% increased Damage per 15 Strength"
+   }
+  },
+  {
+   "id": "poe1-12",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Attacks have 150% Arcane Might",
+   "category": "fixed_number",
+   "why": "'Attacks have 100% Arcane Might' is a different stat: collapsing numbers to '#' would merge them",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_185598681",
+    "values": [],
+    "table_text": "Attacks have 150% Arcane Might"
+   }
+  },
+  {
+   "id": "poe1-13",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Adds 1 to 80 Chaos Damage to Attacks per 80 Strength",
+   "category": "fixed_number",
+   "why": "two rolls (1, 80) and one fixed number (80)",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_117885424",
+    "values": [
+     1.0,
+     80.0
+    ],
+    "table_text": "Adds # to # Chaos Damage to Attacks per 80 Strength"
+   }
+  },
+  {
+   "id": "poe1-14",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Gain 3 Charges when you are Hit by an Enemy",
+   "category": "plural",
+   "why": "table lists the singular 'Gain # Charge ...'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_1582728645",
+    "values": [
+     3.0
+    ],
+    "table_text": "Gain # Charge when you are Hit by an Enemy"
+   }
+  },
+  {
+   "id": "poe1-15",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Has 1 Abyssal Socket",
+   "category": "plural",
+   "why": "table lists the plural 'Has # Abyssal Sockets'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3527617737",
+    "values": [
+     1.0
+    ],
+    "table_text": "Has # Abyssal Sockets"
+   }
+  },
+  {
+   "id": "poe1-16",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Gain Adrenaline for 3 seconds on Kill",
+   "category": "plural",
+   "why": "'second' in the table, 'seconds' on the item",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_4145689649",
+    "values": [
+     3.0
+    ],
+    "table_text": "Gain Adrenaline for # second on Kill"
+   }
+  },
+  {
+   "id": "poe1-17",
+   "game": "poe1",
+   "kind": "implicit",
+   "text": "-2 Prefix Modifiers allowed",
+   "category": "plural_negative",
+   "why": "plural AND a negative roll of '+# Prefix Modifier allowed'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_3182714256",
+    "values": [
+     -2.0
+    ],
+    "table_text": "+# Prefix Modifier allowed"
+   }
+  },
+  {
+   "id": "poe1-18",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Bow Attacks fire an additional Arrow",
+   "category": "plural_alias",
+   "why": "the 'an' wording carries no number: RePoE's condition [1..1] gives the value 1",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3885405204",
+    "values": [
+     1.0
+    ],
+    "table_text": "Bow Attacks fire # additional Arrows"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-19",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "You can apply an additional Curse",
+   "category": "plural_alias",
+   "why": "same shape",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_30642521",
+    "values": [
+     1.0
+    ],
+    "table_text": "You can apply # additional Curses"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-20",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Skills fire 2 additional Projectiles during Effect",
+   "category": "plural_alias",
+   "why": "table lists 'Skills fire an additional Projectile during Effect' (value 1 baked in)",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_323705912",
+    "values": [
+     2.0
+    ],
+    "table_text": "Skills fire an additional Projectile during Effect"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-21",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "29% reduced Duration",
+   "category": "negate",
+   "why": "the table only lists '#% increased Duration'; 'reduced' is the same stat with a negative value",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_1256719186",
+    "values": [
+     -29.0
+    ],
+    "table_text": "#% increased Duration"
+   }
+  },
+  {
+   "id": "poe1-22",
+   "game": "poe1",
+   "kind": "implicit",
+   "text": "20% reduced Bleed Duration on you",
+   "category": "negate",
+   "why": "same rule on an implicit",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_1692879867",
+    "values": [
+     -20.0
+    ],
+    "table_text": "#% increased Bleed Duration on you"
+   }
+  },
+  {
+   "id": "poe1-23",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "45% less Duration",
+   "category": "negate",
+   "why": "'less' mirrors 'more'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_1506355899",
+    "values": [
+     -45.0
+    ],
+    "table_text": "#% more Duration"
+   }
+  },
+  {
+   "id": "poe1-24",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "-30% to Fire Resistance",
+   "category": "negative_of_plus",
+   "why": "table '+#% to Fire Resistance' with a negative roll",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3372524247",
+    "values": [
+     -30.0
+    ],
+    "table_text": "+#% to Fire Resistance"
+   }
+  },
+  {
+   "id": "poe1-25",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "30% reduced Mana Burn rate",
+   "category": "exact",
+   "why": "the table itself lists the 'reduced' wording (value 30, positive): this side of Mana Burn maps; the 'increased' side is the unmapped case below",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_116232170",
+    "values": [
+     30.0
+    ],
+    "table_text": "#% reduced Mana Burn rate"
+   }
+  },
+  {
+   "id": "poe1-26",
+   "game": "poe1",
+   "kind": "implicit",
+   "text": "+25% Chance to Block Spell Damage",
+   "category": "explicit_plus",
+   "why": "RePoE: the '+#' stat prints a plus; the plain '#%' stat does not",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_19803471",
+    "values": [
+     25.0
+    ],
+    "table_text": "+#% Chance to Block Spell Damage"
+   }
+  },
+  {
+   "id": "poe1-27",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "+6% Chance to Block Attack Damage",
+   "category": "explicit_plus",
+   "why": "plus on the item -> the '+#%' template",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_1702195217",
+    "values": [
+     6.0
+    ],
+    "table_text": "+#% Chance to Block Attack Damage"
+   }
+  },
+  {
+   "id": "poe1-28",
+   "game": "poe1",
+   "kind": "implicit",
+   "text": "6% Chance to Block Attack Damage",
+   "category": "explicit_plus",
+   "why": "no plus on the item -> the plain '#%' template (a different stat id)",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_2530372417",
+    "values": [
+     6.0
+    ],
+    "table_text": "#% Chance to Block Attack Damage"
+   }
+  },
+  {
+   "id": "poe1-29",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Chance to Block is Lucky",
+   "category": "no_number",
+   "why": "table lists 'Chance to Block is Unlucky'; Lucky is the mirrored sign, nothing is printed, so no value",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_984774803",
+    "values": [],
+    "table_text": "Chance to Block is Unlucky"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-30",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Ignore Stuns while using Socketed Attack Skills",
+   "category": "no_number",
+   "why": "the 100% case of '#% chance to Ignore Stuns ...': value 100 is implied by RePoE's [100..] condition",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_1439818705",
+    "values": [
+     100.0
+    ],
+    "table_text": "#% chance to Ignore Stuns while using Socketed Attack Skills"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-31",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Gain a Void Charge every second",
+   "category": "units",
+   "why": "table 'every # seconds'; RePoE converts milliseconds: the value is 1 second, NOT 1000",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_34273389",
+    "values": [
+     1.0
+    ],
+    "table_text": "Gain a Void Charge every # seconds"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-32",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Effects of Consecrated Ground you create Linger for 4 seconds",
+   "category": "units",
+   "why": "item shows seconds, the table text bakes in '1 second': value 4",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_4113372195",
+    "values": [
+     4.0
+    ],
+    "table_text": "Effects of Consecrated Ground you create Linger for 1 second"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-33",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Eat a Soul when you Hit a Rare or Unique Enemy, no more than once every 0.5 seconds",
+   "category": "units",
+   "why": "a decimal number of seconds",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_2103621252",
+    "values": [
+     0.5
+    ],
+    "table_text": "Eat a Soul when you Hit a Rare or Unique Enemy, no more than once every second"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-34",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Trigger a Socketed Bow Skill when you Attack with a Bow, with a 1 second Cooldown",
+   "category": "units",
+   "why": "the '100% chance to ...' wording without its percentage: value 100",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_3171958921",
+    "values": [
+     100.0
+    ],
+    "table_text": "#% chance to Trigger a Socketed Bow Skill when you Attack with a Bow, with a 1 second Cooldown"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe1-35",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "1 Added Passive Skill is Martial Prowess",
+   "category": "cluster_notable",
+   "why": "the notable's name is fixed text: exact match, no values",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_1152182658",
+    "values": [],
+    "table_text": "1 Added Passive Skill is Martial Prowess"
+   }
+  },
+  {
+   "id": "poe1-36",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Added Small Passive Skills also grant: +5% to Cold Resistance",
+   "category": "cluster_small",
+   "why": "cluster small-passive line",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_2709692542",
+    "values": [
+     5.0
+    ],
+    "table_text": "Added Small Passive Skills also grant: +#% to Cold Resistance"
+   }
+  },
+  {
+   "id": "poe1-37",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Socketed Gems are supported by Level 20 Multistrike",
+   "category": "stat_group_case_only",
+   "why": "two table stats differ only in the case of 'supported': the hub emits the one whose casing matches the item; the Checker must look in stat_groups",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_2501237765",
+    "values": [
+     20.0
+    ],
+    "table_text": "Socketed Gems are supported by Level # Multistrike"
+   },
+   "stat_group": {
+    "reason": "case_only",
+    "canonical": null,
+    "members": [
+     "explicit.indexable_support_41",
+     "explicit.stat_2501237765"
+    ]
+   }
+  },
+  {
+   "id": "poe1-38",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "66% increased Mana Burn rate",
+   "category": "must_not_map",
+   "why": "only the 'reduced' wording is in the data: the 'increased' side is not provable (allowlisted gap)",
+   "expect": {
+    "status": "unmapped",
+    "stability": "by_design"
+   }
+  },
+  {
+   "id": "poe1-39",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Trigger Level 1 Create Lesser Shrine when you Kill an Enemy",
+   "category": "must_not_map",
+   "why": "RePoE condition is [None..None] (default branch, value unknown): never mapped with an invented value",
+   "expect": {
+    "status": "unmapped",
+    "stability": "by_design"
+   }
+  },
+  {
+   "id": "poe1-40",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Impale Enemies on Hit with Attacks",
+   "category": "must_not_map",
+   "why": "two GGG trade ids (725880290, 3739863694) carry this wording identically: ambiguous, so neither",
+   "expect": {
+    "status": "unmapped",
+    "stability": "by_design"
+   }
+  },
+  {
+   "id": "poe1-41",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Projectiles Pierce an additional Target",
+   "category": "must_not_map",
+   "why": "one trade id shared by four internal stats whose stored values differ: the value is not provable",
+   "expect": {
+    "status": "unmapped",
+    "stability": "by_design"
+   }
+  },
+  {
+   "id": "poe1-42",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "50% of Chaos Damage taken does not bypass Energy Shield",
+   "category": "must_not_map",
+   "why": "two GGG trade ids render this identically: ambiguous",
+   "expect": {
+    "status": "unmapped",
+    "stability": "by_design"
+   }
+  },
+  {
+   "id": "poe1-43",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "Projectiles Return to you",
+   "category": "must_not_map",
+   "why": "ambiguous between several stats in the data",
+   "expect": {
+    "status": "unmapped",
+    "stability": "by_design"
+   }
+  },
+  {
+   "id": "poe1-44",
+   "game": "poe1",
+   "kind": "explicit",
+   "text": "+5% Chance to Block",
+   "category": "must_not_map",
+   "why": "shield-local block chance: needs slot context (local vs global); planned, so this may map later",
+   "expect": {
+    "status": "unmapped",
+    "stability": "may_change"
+   }
+  },
+  {
+   "id": "poe2-45",
+   "game": "poe2",
+   "kind": "implicit",
+   "text": "20% of Flask Recovery applied Instantly",
+   "category": "exact",
+   "why": "PoE2 exact match",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_462041840",
+    "values": [
+     20.0
+    ],
+    "table_text": "#% of Flask Recovery applied Instantly"
+   }
+  },
+  {
+   "id": "poe2-46",
+   "game": "poe2",
+   "kind": "implicit",
+   "text": "+2 Prefix Modifiers allowed",
+   "category": "plural",
+   "why": "PoE2: table lists '# Prefix Modifier allowed'",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_3182714256",
+    "values": [
+     2.0
+    ],
+    "table_text": "# Prefix Modifier allowed"
+   }
+  },
+  {
+   "id": "poe2-47",
+   "game": "poe2",
+   "kind": "explicit",
+   "text": "Cannot Leech Mana",
+   "category": "must_not_map",
+   "why": "PoE2 wording absent from the table and not provable from RePoE",
+   "expect": {
+    "status": "unmapped",
+    "stability": "may_change"
+   }
+  },
+  {
+   "id": "poe2-48",
+   "game": "poe2",
+   "kind": "explicit",
+   "text": "Lose 2% of maximum Life on Kill",
+   "category": "negate_alias",
+   "why": "table lists 'Recover #% of maximum Life on Kill': the 'Lose' wording is its negation",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "explicit.stat_2023107756",
+    "values": [
+     -2.0
+    ],
+    "table_text": "Recover #% of maximum Life on Kill"
+   },
+   "served_by_alias_table": true
+  },
+  {
+   "id": "poe2-49",
+   "game": "poe2",
+   "kind": "implicit",
+   "text": "Grants 1 additional Skill Slot",
+   "category": "fixed_number",
+   "why": "PoE2 fixed number baked into the table text",
+   "expect": {
+    "status": "mapped",
+    "stat_id": "implicit.stat_958696139",
+    "values": [],
+    "table_text": "Grants 1 additional Skill Slot"
+   }
+  }
+ ]
+}

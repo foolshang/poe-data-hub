@@ -529,7 +529,7 @@ def run_aliases_once(cfg: dict[str, Any]) -> dict[str, Any]:
             per_game[game] = {"ok": False, "reason": "invalid staged file"}
             continue
         try:
-            publisher.publish(staged, _aliases_blob_path(game), cache_control=f"public, max-age={max_age}")
+            publisher.publish(staged, _aliases_blob_path(game), cache_control=f"public, max-age={max_age}", compact=True)
         except Exception as e:
             overall_ok = False
             log.error("aliases job(%s): publish failed: %s", game, e, exc_info=True)

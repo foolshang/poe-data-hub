@@ -286,6 +286,70 @@ def to_public(payload: dict[str, Any], groups: list[dict[str, Any]], repoe_url: 
     }
 
 
+def from_public_alias(a: dict[str, Any]) -> dict[str, Any]:
+    """Inverse of the field renaming in `to_public` (used by tests and the fixture builder)."""
+    return {internal: a[public] for internal, public in _PUBLIC_FIELDS.items()}
+
+
+class PublicAliasReader:
+    """REFERENCE reader of the public contract (SPEC.md 8.12): how a consumer such as the PoE Checker is expected to
+    turn an item's mod text into a stat id from `{game}/aliases/latest.json` ALONE -- the last rule of the chain; the
+    earlier rules (exact table text, "(Local)", fixed numbers, plural, sign) are not in this file. Deliberately
+    written against the readable public field names and independent of AliasIndex, so a change to the contract
+    breaks a test instead of a consumer. Never raises on a malformed alias: it is skipped."""
+
+    def __init__(self, doc: dict[str, Any]):
+        self.deprecated = {str(n) for n in doc.get("deprecated_trade_ids", [])}
+        self._implied: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self._templates: list[tuple[re.Pattern, str, dict[str, Any]]] = []
+        for a in doc.get("aliases", []):
+            try:
+                if a["implied_values"] is not None and not a["placeholder_stat_index"]:
+                    for kind in a["kinds"]:
+                        self._implied.setdefault((kind, a["text"]), []).append(a)
+                else:
+                    parts = _PLACE.split(a["text"])[::2]
+                    rx = re.compile("".join([re.escape(parts[0])] + [f"({_NUM})" + re.escape(p) for p in parts[1:]]))
+                    self._templates.append((rx, max(parts, key=len), a))
+            except (KeyError, TypeError, IndexError, re.error):
+                continue
+
+    def candidates(self, kind: str, text: str) -> dict[str, tuple[list[float], bool]]:
+        out: dict[str, tuple[list[float], bool]] = {}
+        for a in self._implied.get((kind, text), ()):
+            out.setdefault(str(a["trade_id"]), (list(a["implied_values"]), str(a["trade_id"]) in self.deprecated))
+        for rx, literal, a in self._templates:
+            if kind not in a["kinds"] or literal not in text:
+                continue
+            m = rx.fullmatch(text)
+            if not m:
+                continue
+            displayed_by_stat = [0.0] * len(a["conditions"])
+            for shown, stat in zip((float(g) for g in m.groups()), a["placeholder_stat_index"]):
+                displayed_by_stat[stat] = shown
+            ok = True
+            for i, (lo, hi) in enumerate(a["conditions"]):
+                internal = round(displayed_by_stat[i] * a["divisor"][i] * (-1 if a["negate"][i] else 1), 6)
+                if (lo is not None and internal < lo) or (hi is not None and internal > hi):
+                    ok = False
+                    break
+            if ok:
+                out.setdefault(str(a["trade_id"]), ([displayed_by_stat[i] * a["sign"][i] for i in range(len(a["conditions"]))],
+                                                    str(a["trade_id"]) in self.deprecated))
+        return out
+
+    def resolve(self, kind: str, text: str) -> Optional[tuple[str, list[float]]]:
+        """(stat_id, stored values) when the alias table alone proves it, else None. Prefers a current stat over a
+        deprecated-only one; two different trade ids left = ambiguous = None (never guess)."""
+        cands = self.candidates(kind, text)
+        current = {n: v for n, v in cands.items() if not v[1]}
+        pool = current or cands
+        if len(pool) != 1:
+            return None
+        num, (values, _dep) = next(iter(pool.items()))
+        return f"{kind}.stat_{num}", values
+
+
 def valid_public(doc: Any) -> bool:
     """Shape check the VM copy job applies before publishing a staged public file."""
     return (isinstance(doc, dict) and doc.get("schema_version") == PUBLIC_SCHEMA_VERSION
