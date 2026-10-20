@@ -13,6 +13,8 @@ data/samples/_*
 # Runtime-overwritten on every successful builds-search decode, not a fixture.
 data/samples/last_good_builds.bin
 data/samples/last_good_builds_poe1.bin
+# every runtime last_good_* capture (dev-machine runs of the fetchers write them; the builds ones hold real players' names)
+data/samples/last_good_*
 
 *.log
 .env
