@@ -1624,6 +1624,12 @@ against the real normalizer on ~120,000 mod texts with 0 differences).** The two
 Winai so the Checker follows in the same cycle**; changing the alias file's format is a `schema_version` bump
 (above). Rule 6's data comes from this file, so alias content changes need no code change on the Checker side.
 
+**Drift guard (2026-10-20, automatic).** `tests/golden/{poe1,poe2}/` freezes the table entries, the public alias file and
+the normalizer's result for ~35,000 real mod texts; the hub's `tests/test_normalizer_golden.py` fails on ANY change of any
+result, so a rules change cannot be committed without a visible diff of `expected.json.gz`
+(`python -m tools.update_normalizer_golden` regenerates it from the frozen inputs). The Checker replays the same files in a
+scheduled CI job (spec in `tests/golden/README.md`; a fetch failure there is a warning, not a failure).
+
 **`stat_groups[]` and `stat_aliases`** -- stat ids the game cannot tell apart from the item text. The GGG table
 gives the SAME text to several stat ids (PoE1: 260 groups) or texts differing only in letter case (24 groups: e.g.
 `...supported by Level # ...` / `...Supported by Level # ...`). A consumer that matches by text lands on one member

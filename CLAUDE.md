@@ -642,6 +642,11 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   (needs ~9.9GB) has NO margin -- would need a bigger disk (online persistent-disk resize) or shorter retention first.
   A full `dbstat` sweep of this DB on the e2-micro did not finish in 520 s (aborted, harmless on WAL but do not repeat);
   use `COUNT(*)` per table and sampled `LENGTH()` instead.
+  **Rule for the unread mod kinds (owner, 2026-10-20): `rune` (PoE2) is the only kind that fits without a disk decision.
+  Opening a SECOND kind (desecrated, ~+13MB/day, ...) means deciding the disk first -- resize the persistent disk or shorten
+  retention -- it is NOT a continuation of the rune rollout.** Open them one at a time from a config list; do not force a
+  re-fetch of cached characters (the 7-day cache rotation fills the new lists); `rank_in_slot` of existing rows must not
+  change (additive `rank_in_kind` only); record the `unmapped_mod_pct` denominator change and re-set the 5% alert first.
 
 - **GGG answered 403 to ONE GitHub runner on 2026-10-19 10:47 UTC and it was not reproduced** (investigated
   2026-10-20; conclusion: transient, cause unknown). `refresh-stats.yml` runs: 08:21 and 08:56 succeeded, 10:47 failed on
@@ -657,6 +662,22 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   `retry-after`, content-type and the first 300 characters of the body, so the next occurrence is diagnosable from the log
   alone. The earlier claim "GitHub Actions runners were confirmed reachable (3/3)" holds only as "usually reachable".
   GitHub's `schedule:` trigger on a newly added workflow did not fire for 4+ hours: do not rely on it for anything urgent.
+
+- **Normalizer drift guard (2026-10-20): `tests/golden/` + `tests/test_normalizer_golden.py`.** Frozen table, public aliases and
+  ~35k real texts with the normalizer's result (PoE1 20,336 texts / PoE2 14,772; ~600KB gz). The test fails on ANY changed
+  result (mutation-checked: switching off the explicit-plus ordering fails with exactly the 22 known texts, switching off
+  the plural rule with 4 mapped->unmapped). **If it fails and the change is intended: run `python -m
+  tools.update_normalizer_golden`, commit the new `expected.json.gz`, and tell Winai -- the Checker's `stat_match.ts`
+  mirrors rules 1-5 and its scheduled CI (spec: `tests/golden/README.md`) will fail until it follows.** The inputs are frozen
+  on purpose; refresh them only with `--create` (newer table / aliases / corpus) as a separate, reviewed commit.
+  Runtime `data/samples/last_good_*` captures are now gitignored (dev-machine fetcher runs write them; the builds ones
+  contain real players' names).
+- **GitHub `schedule:` is unreliable on this account (measured 2026-10-20) -- do not build anything urgent on it.**
+  `heartbeat.yml` is configured hourly but its 60 runs since 2026-10-08 had gaps of min 2.1 h / median 4.6 h / max 9.2 h; the
+  weekly `refresh-stats.yml` ran 4.7-7 h late every week since 2026-09-07 (never skipped so far); a newly added hourly
+  workflow did not fire at all in 4 h. The heartbeat still caught the 2026-10-15 outage (first red run 10:41 UTC, ~3 h after it
+  started). `heartbeat_check.py` does NOT check the age of `internal/stats_cache*.json`, `{game}/gems.json` or
+  `{game}/aliases/latest.json` (all refreshed by the weekly workflow), so a skipped or failing weekly run would go unnoticed.
 
 ## Layout
 
