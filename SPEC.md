@@ -1570,7 +1570,7 @@ and `refresh-stats.yml` has run. `generated_at` is the build time, not the RePoE
 }
 ```
 
-(Measured on the live files 2026-10-19: PoE1 1,967 aliases / 284 stat groups / 269 `stat_aliases` / 565KB; PoE2 130 / 28 / 28 / 38KB; both compact JSON, `Cache-Control: public, max-age=86400`.)
+(Local build with the 2026-10-20 generator, which added `crafted`/`enchant`/`scourge`/`rune`/`desecrated`: PoE1 2,829 aliases / 319 stat groups / 307 `stat_aliases` / 763KB; PoE2 132 / 35 / 35 / 40KB -- to be re-measured on the live files after the next refresh. The three original kinds resolve identically to before for all ~35,000 golden texts. Measured on the live files 2026-10-19, before that: PoE1 1,967 aliases / 284 stat groups / 269 `stat_aliases` / 565KB; PoE2 130 / 28 / 28 / 38KB; both compact JSON, `Cache-Control: public, max-age=86400`.)
 
 **`aliases[]` fields** (one object per wording that the GGG table text does NOT already cover):
 
@@ -1578,7 +1578,7 @@ and `refresh-stats.yml` has run. `generated_at` is the build time, not the RePoE
 |---|---|---|
 | `text` | string | the wording the game prints. `{0}`, `{1}` are value placeholders (RePoE style); markup such as `[Keyword\|shown]` is already reduced to the shown text. A text with no placeholder is matched by **string equality** |
 | `trade_id` | string | the numeric GGG trade stat id. The stat id of kind `k` is `f"{k}.stat_{trade_id}"` (e.g. `explicit.stat_4077843608`) |
-| `kinds` | string[] | the item mod kinds in which this id exists in the GGG table (today `explicit` / `implicit` / `fractured`; **the set of kinds is OPEN**, see below). Only apply the alias to a mod whose kind is in this list |
+| `kinds` | string[] | the item mod kinds in which this id exists in the GGG table (from 2026-10-20: `explicit`, `implicit`, `fractured`, `crafted`, `enchant`, `scourge`, `rune`, `desecrated` -- in that order, the first three always first; **the set of kinds is OPEN**, see below). Only apply the alias to a mod whose kind is in this list |
 | `placeholder_stat_index` | int[] | one entry per placeholder in order of appearance in `text`: which stat's value it shows (index into `conditions`/`negate`/`divisor`/`sign`). Empty for a text without placeholder |
 | `negate` | bool[] | per stat: the DISPLAYED number is the negation of RePoE's internal value (`reduced` for `increased`, `slower` for `faster`) |
 | `divisor` | int[] | per stat: `internal = displayed x divisor` (before negation). 1 normally; 100 = a percent shown as a fraction; 1000 = RePoE keeps milliseconds, the item shows seconds |

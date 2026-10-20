@@ -32,7 +32,10 @@ import re
 from typing import Any, Optional
 
 SCHEMA_VERSION = 1
-KINDS = ("explicit", "implicit", "fractured")
+KINDS = ("explicit", "implicit", "fractured")          # the mod lists the HUB reads (and the private internal file covers)
+# Kinds of the PUBLIC contract (SPEC.md 8.12): every table group an item mod can come from. The set is open for readers.
+# explicit/implicit/fractured stay first: a reader that only knows those still gets them in the same order.
+PUBLIC_KINDS = KINDS + ("crafted", "enchant", "scourge", "rune", "desecrated")
 
 _PLACE = re.compile(r"\{(\d*)(?::[^}]*)?\}")
 _NUM = r"[+-]?\d+(?:\.\d+)?"
@@ -99,8 +102,9 @@ def _implied_stored_values(cond: list[dict[str, Any]], siblings: list[list[dict[
     return [round(stored, 6)]
 
 
-def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """`translations`: RePoE stat_translations entries. `table`: {kind: {GGG stat id: table text}}.
+def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str, dict[str, str]], kinds: tuple[str, ...] = KINDS) -> dict[str, Any]:
+    """`translations`: RePoE stat_translations entries. `table`: {kind: {GGG stat id: table text}}. `kinds`: which table
+    groups an alias may apply to (the hub's private file uses KINDS, the public contract PUBLIC_KINDS).
     Returns the publishable payload (see module docstring)."""
     stats: dict[str, int] = {}
 
@@ -121,8 +125,8 @@ def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str
             bump("skipped_entry_multiple_trade_ids")
             continue
         num = nums[0]
-        kinds = [k for k in KINDS if f"{k}.stat_{num}" in table.get(k, {})]
-        if not kinds:
+        id_kinds = [k for k in kinds if f"{k}.stat_{num}" in table.get(k, {})]
+        if not id_kinds:
             bump("skipped_entry_id_not_in_ggg_table")
             continue
         ids = entry["ids"]
@@ -144,7 +148,7 @@ def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str
             parsed.append({"s": s, "order": order, "negate": [r[0] for r in resolved], "div": [r[1] for r in resolved], "cond": conds})
 
         # the table's own wording of this stat decides the sign convention of the stored values
-        table_text = _norm(table[kinds[0]][f"{kinds[0]}.stat_{num}"])
+        table_text = _norm(table[id_kinds[0]][f"{id_kinds[0]}.stat_{num}"])
         table_negate: list[bool] = [False] * len(ids)
         for pv in parsed:
             if pv and _norm(pv["s"]) == table_text and pv["negate"]:
@@ -175,7 +179,7 @@ def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str
                     continue
                 stats_idx = order
                 alias = {
-                    "x": pv["s"], "n": num, "k": kinds, "p": stats_idx,
+                    "x": pv["s"], "n": num, "k": id_kinds, "p": stats_idx,
                     "ng": pv["negate"], "dv": pv["div"],
                     "sg": [-1 if (pv["negate"][i] != table_negate[i]) else 1 for i in range(len(ids))],
                     "c": [[c.get("min"), c.get("max")] for c in pv["cond"]],
@@ -190,7 +194,7 @@ def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str
                 if iv is None:
                     bump("skipped_implied_value_not_provable")
                     continue
-                alias = {"x": pv["s"], "n": num, "k": kinds, "p": [], "ng": [], "dv": [], "sg": [], "c": [], "iv": iv, "dep": is_dep}
+                alias = {"x": pv["s"], "n": num, "k": id_kinds, "p": [], "ng": [], "dv": [], "sg": [], "c": [], "iv": iv, "dep": is_dep}
             drafts.append(alias)
 
     # GGG gives one trade id to several internal stats: an id that a current stat also carries is not deprecated
@@ -226,7 +230,7 @@ def build_aliases(game: str, translations: list[dict[str, Any]], table: dict[str
 PUBLIC_SCHEMA_VERSION = 1
 
 
-def build_stat_groups(table: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+def build_stat_groups(table: dict[str, dict[str, str]], kinds: tuple[str, ...] = KINDS) -> list[dict[str, Any]]:
     """Stat ids of one kind that render the same text, which the game itself cannot tell apart from the item.
 
     The GGG table gives several stat ids the SAME text (PoE1: 262 texts, CLAUDE.md 2026-10-19) or texts that
@@ -238,7 +242,7 @@ def build_stat_groups(table: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
         item's own casing, so rows may exist under ANY member: `canonical` is null, look all members up.
     Groups never span kinds (explicit.stat_1 and implicit.stat_1 are different rows)."""
     groups: list[dict[str, Any]] = []
-    for kind in KINDS:
+    for kind in kinds:
         by_fold: dict[str, list[tuple[str, str]]] = {}
         for stat_id, text in table.get(kind, {}).items():
             by_fold.setdefault(text.casefold(), []).append((stat_id, text))

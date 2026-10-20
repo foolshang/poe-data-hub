@@ -127,3 +127,30 @@ def test_run_aliases_once_refuses_a_staged_file_for_the_wrong_game(tmp_path):
         result = run_aliases_once({"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe2"]})
     assert result["games"]["poe2"]["ok"] is False
     assert not created[-1]._client_lazy().bucket("test-bucket").blob("poe2/aliases/latest.json").exists()
+
+
+def test_build_aliases_kinds_parameter_extends_only_the_public_build():
+    from src.processing.rendering_aliases import KINDS, PUBLIC_KINDS
+
+    table = {"explicit": {"explicit.stat_2": "Has # Socket"}, "rune": {"rune.stat_2": "Has # Socket"}, "enchant": {"enchant.stat_9": "Other"}}
+    translations = [{
+        "ids": ["base_stat"], "trade_stats": [{"id": "explicit.stat_2"}],
+        "English": [{"string": "Has {0} Socket", "condition": [{"min": 1, "max": 1}], "index_handlers": [[]]},
+                    {"string": "Has {0} Sockets", "condition": [{"min": 2}], "index_handlers": [[]]}],
+    }, {
+        "ids": ["rune_only_stat"], "trade_stats": [{"id": "rune.stat_7"}],
+        "English": [{"string": "Rune thing {0}", "condition": [{}], "index_handlers": [[]]}],
+    }]
+    table["rune"]["rune.stat_7"] = "Rune thing #"
+    hub = build_aliases("poe2", translations, table)                      # default: the 3 hub kinds
+    public = build_aliases("poe2", translations, table, PUBLIC_KINDS)
+    assert all(set(a["k"]) <= set(KINDS) for a in hub["aliases"])
+    assert any("rune" in a["k"] for a in public["aliases"])
+    assert not any(a["n"] == "7" for a in hub["aliases"])                  # the rune-only stat is invisible to the hub build
+    assert KINDS == PUBLIC_KINDS[:3]                                       # the original kinds stay first and in order
+
+
+def test_stat_groups_follow_the_kinds_passed_in():
+    table = {"explicit": {"explicit.stat_1": "X", "explicit.stat_2": "X"}, "rune": {"rune.stat_1": "Y", "rune.stat_2": "Y"}}
+    assert [g["kind"] for g in build_stat_groups(table)] == ["explicit"]
+    assert sorted(g["kind"] for g in build_stat_groups(table, ("explicit", "rune"))) == ["explicit", "rune"]

@@ -30,7 +30,7 @@ from typing import Any, Callable
 
 import requests
 
-from src.processing.rendering_aliases import KINDS, build_aliases, build_stat_groups, check_not_shrunk, to_public
+from src.processing.rendering_aliases import KINDS, PUBLIC_KINDS, build_aliases, build_stat_groups, check_not_shrunk, to_public
 from src.storage.publisher import PricesPublisher
 from src.utils.http_client import build_user_agent
 
@@ -73,14 +73,14 @@ def fetch_json(url: str) -> Any:
     return resp.json()
 
 
-def table_from_stats(envelope: Any) -> dict[str, dict[str, str]]:
-    """{kind: {GGG stat id: text}} from the published stats cache envelope; raises ValueError if it is not one."""
+def table_from_stats(envelope: Any, kinds: tuple[str, ...] = KINDS) -> dict[str, dict[str, str]]:
+    """{kind: {GGG stat id: text}} for `kinds` from the published stats cache envelope; raises ValueError if it is not one."""
     data = envelope.get("data") if isinstance(envelope, dict) else None
     if not isinstance(data, dict) or not isinstance(data.get("result"), list):
         raise ValueError("unexpected stats cache shape")
     table: dict[str, dict[str, str]] = {}
     for group in data["result"]:
-        if group.get("id") in KINDS:
+        if group.get("id") in kinds:
             table[group["id"]] = {e["id"]: e["text"] for e in group.get("entries", []) if e.get("id") and e.get("text")}
     if sum(len(v) for v in table.values()) < MIN_TABLE_ENTRIES:
         raise ValueError("suspiciously small GGG stats table")
@@ -93,11 +93,16 @@ def refresh_one(publisher: PricesPublisher, target: Target, fetch: Callable[[str
         translations = fetch(target.repoe_url)
         if not isinstance(translations, list) or len(translations) < MIN_TRANSLATIONS:
             raise ValueError(f"unexpected RePoE translations: {type(translations).__name__} / {len(translations) if hasattr(translations, '__len__') else '?'}")
-        table = table_from_stats(fetch(target.stats_url))
+        stats_envelope = fetch(target.stats_url)
+        table = table_from_stats(stats_envelope)
         payload = build_aliases(target.game, translations, table)
         previous = publisher.fetch_previous(target.blob_path)
         check_not_shrunk(payload, previous, min_aliases=target.min_aliases)
-        public = to_public(payload, build_stat_groups(table), target.repoe_url)
+        # the PUBLIC contract covers every item mod kind; the hub-private payload above stays on the 3 kinds the running
+        # hub reads (its AliasIndex and normalizer know nothing else)
+        public_table = table_from_stats(stats_envelope, PUBLIC_KINDS)
+        public_payload = build_aliases(target.game, translations, public_table, PUBLIC_KINDS)
+        public = to_public(public_payload, build_stat_groups(public_table, PUBLIC_KINDS), target.repoe_url)
     except Exception as e:
         log.error("%s: NOT publishing (keeping whatever is already there): %s", target.game, e)
         return False

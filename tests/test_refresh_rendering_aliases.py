@@ -78,3 +78,36 @@ def test_a_failing_upload_reports_failure_without_raising():
     publisher.fetch_previous.return_value = None
     publisher.publish.side_effect = RuntimeError("readback verify failed")
     assert tool.refresh_one(publisher, TARGET, fetch=_fetch(_translations(), _stats_envelope())) is False
+
+
+def _envelope_with_other_kinds():
+    env = _stats_envelope()
+    env["data"]["result"].append({"id": "rune", "entries": [{"id": "rune.stat_1", "text": "Has 1 Socket"}]})
+    env["data"]["result"].append({"id": "crafted", "entries": [{"id": "crafted.stat_1", "text": "Has 1 Socket"}]})
+    env["data"]["result"].append({"id": "pseudo", "entries": [{"id": "pseudo.stat_1", "text": "Has 1 Socket"}]})   # not an item mod kind
+    return env
+
+
+def test_the_public_file_covers_every_item_mod_kind_but_the_hub_private_file_stays_on_three():
+    publisher = MagicMock()
+    publisher.fetch_previous.return_value = None
+    assert tool.refresh_one(publisher, TARGET, fetch=_fetch(_translations(), _envelope_with_other_kinds())) is True
+    by_path = {c.args[1]: c.args[0] for c in publisher.publish.call_args_list}
+    private = by_path[TARGET.blob_path]["aliases"]
+    public = by_path[TARGET.public_staged_path]["aliases"]
+    assert private and all(set(a["k"]) == {"explicit"} for a in private)                       # the running hub reads 3 kinds only
+    assert public and all(a["kinds"] == ["explicit", "crafted", "rune"] for a in public)        # public: PUBLIC_KINDS order, no pseudo
+    assert by_path[TARGET.public_staged_path]["stat_groups"] == [] or all(g["kind"] != "pseudo" for g in by_path[TARGET.public_staged_path]["stat_groups"])
+
+
+def test_the_stats_table_is_downloaded_once_per_game():
+    publisher = MagicMock()
+    publisher.fetch_previous.return_value = None
+    urls = []
+
+    def fetch(url):
+        urls.append(url)
+        return _translations() if "raw.githubusercontent" in url else _stats_envelope()
+
+    assert tool.refresh_one(publisher, TARGET, fetch=fetch) is True
+    assert urls.count(TARGET.stats_url) == 1

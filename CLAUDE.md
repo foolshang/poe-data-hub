@@ -686,6 +686,15 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   check with Period 12 h / Grace 6 h) notices when the heartbeat itself stops running; without the secret the run prints a
   warning instead of pinging.
 
+- **The PUBLIC alias file now covers `crafted`, `enchant`, `scourge`, `rune`, `desecrated` too (2026-10-20); the hub-private
+  `internal/rendering_aliases_{game}.json` deliberately still covers only explicit/implicit/fractured.** The running hub reads
+  only those three (`ninja_chars`, `KNOWN_MOD_KINDS`, `AliasIndex`), and an alias entry with a kind its `AliasIndex` does not know
+  would silently shorten its kind list. `refresh_rendering_aliases.py` therefore builds twice (`build_aliases(..., KINDS)` for the
+  hub, `PUBLIC_KINDS` for the contract). Verified on the real data: the private payload is identical to the previous one, and the
+  public reader gives the same answer as before for all ~35k golden texts on the three original kinds (0 differences). Local
+  build: PoE1 1,967 -> 2,829 aliases, PoE2 130 -> 132 (+ existing aliases gaining kinds: PoE2 crafted 20, rune 19, desecrated 54,
+  enchant 13). Opening a kind in the HUB (collection) is a separate step, see the disk rule above.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
