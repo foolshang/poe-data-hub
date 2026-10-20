@@ -210,6 +210,34 @@ def _status_resp(now, poe2_age=timedelta(hours=2), poe1_age=timedelta(hours=2), 
     return resp
 
 
+def _json_resp(payload):
+    resp = MagicMock()
+    resp.json.return_value = payload
+    return resp
+
+
+def _stats_cache(now, age_days=1.0, entries=8000):
+    return {"fetched_at": (now - timedelta(days=age_days)).timestamp(),
+            "data": {"result": [{"id": "explicit", "entries": [{"id": f"explicit.stat_{i}", "text": "x"} for i in range(entries)]}]}}
+
+
+def _gems(now, age_days=1.0, n=900):
+    return {"schema_version": 1, "generated_at": (now - timedelta(days=age_days)).strftime("%Y-%m-%dT%H:%M:%SZ"), "gems": [{}] * n}
+
+
+def _aliases(now, game, age_days=1.0, n=1900, schema_version=1):
+    return {"schema_version": schema_version, "game": game, "generated_at": (now - timedelta(days=age_days)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "aliases": [{}] * n, "stat_groups": [], "stat_aliases": {}}
+
+
+def _weekly_fresh_responses(now, stats=None, gems=None, aliases=None):
+    """call order in run(): stats caches (poe2, poe1), gems (poe2, poe1), aliases (poe2, poe1)"""
+    stats = stats or [_stats_cache(now), _stats_cache(now)]
+    gems = gems or [_gems(now), _gems(now)]
+    aliases = aliases or [_aliases(now, "poe2", n=130), _aliases(now, "poe1")]
+    return [_json_resp(x) for x in (*stats, *gems, *aliases)]
+
+
 # call order inside run(): poe2 prices, poe1 prices, poe2 news, poe1 news,
 # poe2 index, poe1 index, status (PRICES_URLS, NEWS_URLS, INDEX_URLS dict
 # order, then status)
@@ -225,7 +253,7 @@ def test_run_returns_0_when_both_fresh():
     now = datetime.now(timezone.utc)
     status_resp = _status_resp(now)
 
-    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -331,7 +359,7 @@ def test_run_returns_0_when_categories_all_ok():
     healthy = _fresh_prices_resp(now, per_category_by_source={"ninja": {"Currency": {"ok": True, "count": 5}}})
     status_resp = _status_resp(now)
 
-    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
+    sequence = [healthy, _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), _index_resp(), _index_resp(), status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -350,7 +378,7 @@ def test_run_returns_0_when_hardcore_null():
     now = datetime.now(timezone.utc)
     status_resp = _status_resp(now)
 
-    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -360,7 +388,7 @@ def test_run_returns_0_when_hardcore_fresh():
     fresh_hardcore = _index_resp(hardcore={"league": "HC Runes of Aldur", "path": "poe2/prices/hardcore/latest.json", "generated_at": (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")})
     status_resp = _status_resp(now)
 
-    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), fresh_hardcore, _index_resp(), status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)]
+    sequence = [_fresh_prices_resp(now), _fresh_prices_resp(now), _fresh_news_resp(now), _fresh_news_resp(now), fresh_hardcore, _index_resp(), status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
     with patch("requests.get", side_effect=sequence):
         assert heartbeat_check.run() == 0
 
@@ -427,4 +455,89 @@ def test_run_returns_1_when_skills_index_fetch_fails():
 
     sequence = _fresh_sequence(now) + [status_resp, RuntimeError("network blip"), _fresh_skills_resp(now)]
     with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1
+
+
+# --- weekly-refresh artefacts: stats cache, gems, aliases, stats_cache_stale (2026-10-20) -----------------------------
+
+def _clean_sequence(now, **weekly):
+    return _fresh_sequence(now) + [_status_resp(now), _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now, **weekly)
+
+
+def test_check_stats_cache_ok_when_fresh_and_full():
+    now = datetime.now(timezone.utc)
+    assert heartbeat_check.check_stats_cache("poe1", _stats_cache(now), now) == []
+
+
+def test_check_stats_cache_flags_age_over_nine_days_but_not_a_normal_late_weekly_run():
+    now = datetime.now(timezone.utc)
+    assert heartbeat_check.check_stats_cache("poe1", _stats_cache(now, age_days=7.4), now) == []     # weekly + 7 h of GitHub lateness
+    assert heartbeat_check.check_stats_cache("poe1", _stats_cache(now, age_days=9.5), now)
+
+
+def test_check_stats_cache_flags_a_fresh_but_empty_or_misshapen_upload():
+    now = datetime.now(timezone.utc)
+    assert heartbeat_check.check_stats_cache("poe2", _stats_cache(now, entries=10), now)           # fresh, almost empty
+    assert heartbeat_check.check_stats_cache("poe2", {"fetched_at": now.timestamp(), "data": {"result": "nope"}}, now)
+    assert heartbeat_check.check_stats_cache("poe2", ["not", "a", "dict"], now)
+    assert heartbeat_check.check_stats_cache("poe2", {"data": {"result": []}}, now)                # no fetched_at (and no entries)
+
+
+def test_check_gems_flags_age_schema_and_emptiness():
+    now = datetime.now(timezone.utc)
+    assert heartbeat_check.check_gems("poe1", _gems(now), now) == []
+    assert heartbeat_check.check_gems("poe1", _gems(now, age_days=10), now)
+    assert heartbeat_check.check_gems("poe1", _gems(now, n=5), now)
+    assert heartbeat_check.check_gems("poe1", {**_gems(now), "schema_version": 2}, now)
+    assert heartbeat_check.check_gems("poe1", [], now)
+
+
+def test_check_aliases_poe1_needs_many_poe2_may_have_few():
+    now = datetime.now(timezone.utc)
+    assert heartbeat_check.check_aliases("poe1", _aliases(now, "poe1"), now) == []
+    assert heartbeat_check.check_aliases("poe2", _aliases(now, "poe2", n=0), now) == []            # RePoE links few PoE2 stats: not an error
+    assert heartbeat_check.check_aliases("poe1", _aliases(now, "poe1", n=0), now)                  # PoE1 with no aliases is a silent break
+
+
+def test_check_aliases_flags_schema_game_age_and_missing_members():
+    now = datetime.now(timezone.utc)
+    assert heartbeat_check.check_aliases("poe1", _aliases(now, "poe1", schema_version=2), now)
+    assert heartbeat_check.check_aliases("poe1", _aliases(now, "poe2"), now)                       # wrong game in the file
+    assert heartbeat_check.check_aliases("poe1", _aliases(now, "poe1", age_days=12), now)
+    broken = _aliases(now, "poe1"); del broken["stat_groups"]
+    assert heartbeat_check.check_aliases("poe1", broken, now)
+
+
+def test_run_returns_0_when_the_weekly_files_are_fresh():
+    now = datetime.now(timezone.utc)
+    with patch("requests.get", side_effect=_clean_sequence(now)):
+        assert heartbeat_check.run() == 0
+
+
+def test_run_returns_1_when_a_stats_cache_is_stale():
+    now = datetime.now(timezone.utc)
+    stale = [_stats_cache(now), _stats_cache(now, age_days=20)]
+    with patch("requests.get", side_effect=_clean_sequence(now, stats=stale)):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_poe1_aliases_are_empty():
+    now = datetime.now(timezone.utc)
+    with patch("requests.get", side_effect=_clean_sequence(now, aliases=[_aliases(now, "poe2", n=130), _aliases(now, "poe1", n=0)])):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_the_hub_reports_its_own_stats_cache_stale():
+    now = datetime.now(timezone.utc)
+    status = _status_resp(now)
+    status.json.return_value["stats_cache_stale"] = True
+    seq = _fresh_sequence(now) + [status, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
+    with patch("requests.get", side_effect=seq):
+        assert heartbeat_check.run() == 1
+
+
+def test_run_returns_1_when_a_weekly_file_cannot_be_fetched():
+    now = datetime.now(timezone.utc)
+    seq = _fresh_sequence(now) + [_status_resp(now), _fresh_skills_resp(now), _fresh_skills_resp(now), RuntimeError("404")] + _weekly_fresh_responses(now)[1:]
+    with patch("requests.get", side_effect=seq):
         assert heartbeat_check.run() == 1

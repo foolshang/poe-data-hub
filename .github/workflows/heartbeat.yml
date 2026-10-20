@@ -2,11 +2,18 @@ name: Heartbeat check
 
 # Layer 2 of two independent monitoring layers (see CLAUDE.md -- do not
 # collapse into one). Watches the actual published data from the outside,
-# via a different provider than Layer 1's healthchecks.io pings. No secrets
-# needed: everything it reads is already public.
+# via a different provider than Layer 1's healthchecks.io pings. The checks need
+# no secrets: everything they read is already public.
+#
+# The schedule says "hourly" but GitHub's cron is late and throttled on this
+# account: measured 2026-10-20 over 60 runs, the gap between runs was 2.1 h at
+# best, 4.6 h median, 9.2 h at worst. Detection latency is therefore HOURS, and
+# if the schedule stops firing altogether nothing inside GitHub notices -- hence
+# the dead-man ping to healthchecks.io at the end (secret HEARTBEAT_PING_URL;
+# create the check with Period 12 h / Grace 6 h).
 on:
   schedule:
-    - cron: "0 * * * *" # hourly
+    - cron: "0 * * * *" # "hourly" (really every 2-9 h, see above)
   workflow_dispatch:
 
 jobs:
@@ -22,5 +29,21 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Check prices + meta + skills freshness
+      - name: Check prices, meta, skills and the weekly stats/gems/alias files
+        id: check
         run: python -m tools.heartbeat_check
+
+      # Pings whether the checks passed or failed (red runs already alert through GitHub); skipped when the
+      # setup itself broke, so a ping always means "the checks really ran". Never fails the job.
+      - name: Dead-man ping (healthchecks.io watches this heartbeat)
+        if: steps.check.conclusion == 'success' || steps.check.conclusion == 'failure'
+        env:
+          HEARTBEAT_PING_URL: ${{ secrets.HEARTBEAT_PING_URL }}
+        run: |
+          if [ -z "$HEARTBEAT_PING_URL" ]; then
+            echo "::warning::HEARTBEAT_PING_URL is not set -- nothing notices if this workflow stops running"
+          elif curl -fsS -m 10 --retry 3 -o /dev/null "$HEARTBEAT_PING_URL"; then
+            echo "dead-man ping sent"
+          else
+            echo "::warning::dead-man ping failed (not fatal)"
+          fi

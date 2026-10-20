@@ -676,8 +676,15 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   `heartbeat.yml` is configured hourly but its 60 runs since 2026-10-08 had gaps of min 2.1 h / median 4.6 h / max 9.2 h; the
   weekly `refresh-stats.yml` ran 4.7-7 h late every week since 2026-09-07 (never skipped so far); a newly added hourly
   workflow did not fire at all in 4 h. The heartbeat still caught the 2026-10-15 outage (first red run 10:41 UTC, ~3 h after it
-  started). `heartbeat_check.py` does NOT check the age of `internal/stats_cache*.json`, `{game}/gems.json` or
-  `{game}/aliases/latest.json` (all refreshed by the weekly workflow), so a skipped or failing weekly run would go unnoticed.
+  started). **So Layer 2's detection latency is HOURS (median 4.6 h between runs), not the one hour the cron line says; do not
+  expect "within an hour" from it.** Since 2026-10-20 `heartbeat_check.py` also checks the three files the weekly workflow
+  produces -- `internal/stats_cache*.json` (`fetched_at`), `{game}/gems.json` and `{game}/aliases/latest.json`
+  (`generated_at`) -- for age <= 9 days (7 days + the measured worst-case lateness of 7 h + slack: derived from the real
+  run history above, not guessed; a skipped weekly run is flagged ~2 days after it was due) AND for real content (stats cache
+  >= 3,000 entries, gems >= 300, PoE1 aliases >= 500, schema_version still 1, game field right), and reads the hub's own
+  `status.json` `stats_cache_stale`. A dead-man ping at the end of `heartbeat.yml` (secret `HEARTBEAT_PING_URL`, healthchecks.io
+  check with Period 12 h / Grace 6 h) notices when the heartbeat itself stops running; without the secret the run prints a
+  warning instead of pinging.
 
 ## Layout
 

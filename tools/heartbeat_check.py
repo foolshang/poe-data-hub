@@ -95,6 +95,19 @@ SKILLS_INDEX_URLS = {
     "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/skills/index.json",
 }
 STATUS_URL = "https://storage.googleapis.com/poe-data-hub/status.json"
+# Everything the weekly refresh-stats.yml produces (the GGG stats table, the gems table, the rendering aliases)
+STATS_CACHE_URLS = {
+    "poe2": "https://storage.googleapis.com/poe-data-hub/internal/stats_cache.json",
+    "poe1": "https://storage.googleapis.com/poe-data-hub/internal/stats_cache_poe1.json",
+}
+GEMS_URLS = {
+    "poe2": "https://storage.googleapis.com/poe-data-hub/poe2/gems.json",
+    "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/gems.json",
+}
+ALIASES_URLS = {
+    "poe2": "https://storage.googleapis.com/poe-data-hub/poe2/aliases/latest.json",
+    "poe1": "https://storage.googleapis.com/poe-data-hub/poe1/aliases/latest.json",
+}
 
 # prices publish every 1440 minutes (config.yaml schedule.prices_interval_minutes) x 2 as a
 # retry buffer -- not read from config.yaml (this script is deliberately independent of the
@@ -112,6 +125,18 @@ SKILLS_INDEX_MAX_AGE_HOURS = 30
 # by-hand-bump caveat as above; kept at a ~3x buffer (vs. prices' 2x) since
 # news freshness matters more.
 NEWS_MAX_AGE_MINUTES = 15
+# refresh-stats.yml is a WEEKLY GitHub cron, and GitHub's cron is late on this account: measured 2026-10-20, every
+# weekly run since 2026-09-07 started 4.7-7 hours after its slot (never skipped so far). 7 days + 7 h is the normal
+# worst case, so 9 days never false-alarms on lateness and a skipped/failing weekly run is flagged about two days
+# after it was due (not "the same hour": this layer's own latency is hours, see CLAUDE.md).
+WEEKLY_ARTIFACT_MAX_AGE_DAYS = 9
+# "fresh is not the same as real": floors well under today's counts (stats cache PoE2 8,306 / PoE1 18,189 entries,
+# gems PoE2 1,120 / PoE1 915, PoE1 aliases 1,967) so a silent schema change or an empty/truncated upload is caught.
+MIN_STATS_ENTRIES = 3000
+MIN_GEMS = 300
+MIN_POE1_ALIASES = 500
+KNOWN_GEMS_SCHEMA_VERSION = 1
+KNOWN_ALIASES_SCHEMA_VERSION = 1
 
 
 def _parse_iso(ts: str) -> datetime:
@@ -187,6 +212,73 @@ def check_skills_index_population(population_total: Optional[int]) -> Optional[s
     return None
 
 
+def _age_days_from_iso(ts: str, now: Optional[datetime]) -> float:
+    now = now or datetime.now(timezone.utc)
+    return (now - _parse_iso(ts)).total_seconds() / 86400
+
+
+def check_stats_cache(game: str, envelope: object, now: Optional[datetime] = None) -> list[str]:
+    """`internal/stats_cache*.json` (written weekly by refresh-stats.yml): age AND real content. Shape
+    {"fetched_at": epoch_seconds, "data": {"result": [{"id", "entries": [...]}, ...]}}."""
+    now = now or datetime.now(timezone.utc)
+    problems: list[str] = []
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), dict) or not isinstance(envelope["data"].get("result"), list):
+        return [f"{game}: stats cache has an unexpected shape ({type(envelope).__name__})"]
+    fetched_at = envelope.get("fetched_at")
+    if not isinstance(fetched_at, (int, float)):
+        problems.append(f"{game}: stats cache has no numeric fetched_at ({fetched_at!r})")
+    else:
+        age_days = (now.timestamp() - fetched_at) / 86400
+        if age_days > WEEKLY_ARTIFACT_MAX_AGE_DAYS:
+            problems.append(f"{game}: stats cache fetched_at is {age_days:.1f} days old (> {WEEKLY_ARTIFACT_MAX_AGE_DAYS})")
+    total = sum(len(g.get("entries", [])) for g in envelope["data"]["result"] if isinstance(g, dict))
+    if total < MIN_STATS_ENTRIES:
+        problems.append(f"{game}: stats cache holds {total} entries (< {MIN_STATS_ENTRIES})")
+    return problems
+
+
+def check_gems(game: str, doc: object, now: Optional[datetime] = None) -> list[str]:
+    """`{game}/gems.json` (staged weekly, copied daily): schema, age of its own generated_at, real content."""
+    if not isinstance(doc, dict):
+        return [f"{game}: gems.json is not an object"]
+    problems: list[str] = []
+    if doc.get("schema_version") != KNOWN_GEMS_SCHEMA_VERSION:
+        problems.append(f"{game}: gems.json schema_version is {doc.get('schema_version')!r} (this check knows {KNOWN_GEMS_SCHEMA_VERSION})")
+    try:
+        age = _age_days_from_iso(doc["generated_at"], now)
+        if age > WEEKLY_ARTIFACT_MAX_AGE_DAYS:
+            problems.append(f"{game}: gems.json generated_at is {age:.1f} days old (> {WEEKLY_ARTIFACT_MAX_AGE_DAYS})")
+    except (KeyError, ValueError, TypeError):
+        problems.append(f"{game}: gems.json has no parseable generated_at")
+    n = len(doc["gems"]) if isinstance(doc.get("gems"), list) else 0
+    if n < MIN_GEMS:
+        problems.append(f"{game}: gems.json holds {n} gems (< {MIN_GEMS})")
+    return problems
+
+
+def check_aliases(game: str, doc: object, now: Optional[datetime] = None) -> list[str]:
+    """`{game}/aliases/latest.json` (public contract, SPEC.md 8.12): schema, game, age, real content. PoE2 may
+    legitimately have few aliases (RePoE links only 292 of 10,759 entries), PoE1 must have many."""
+    if not isinstance(doc, dict):
+        return [f"{game}: aliases/latest.json is not an object"]
+    problems: list[str] = []
+    if doc.get("schema_version") != KNOWN_ALIASES_SCHEMA_VERSION:
+        problems.append(f"{game}: aliases schema_version is {doc.get('schema_version')!r} (this check knows {KNOWN_ALIASES_SCHEMA_VERSION})")
+    if doc.get("game") != game:
+        problems.append(f"{game}: aliases file says game={doc.get('game')!r}")
+    try:
+        age = _age_days_from_iso(doc["generated_at"], now)
+        if age > WEEKLY_ARTIFACT_MAX_AGE_DAYS:
+            problems.append(f"{game}: aliases generated_at is {age:.1f} days old (> {WEEKLY_ARTIFACT_MAX_AGE_DAYS})")
+    except (KeyError, ValueError, TypeError):
+        problems.append(f"{game}: aliases has no parseable generated_at")
+    if not isinstance(doc.get("aliases"), list) or not isinstance(doc.get("stat_groups"), list) or not isinstance(doc.get("stat_aliases"), dict):
+        problems.append(f"{game}: aliases file is missing aliases / stat_groups / stat_aliases")
+    elif game == "poe1" and len(doc["aliases"]) < MIN_POE1_ALIASES:
+        problems.append(f"poe1: aliases holds {len(doc['aliases'])} entries (< {MIN_POE1_ALIASES})")
+    return problems
+
+
 def check_per_category_health(source: str, per_category: dict) -> Optional[str]:
     """Returns a problem description if more than half of `source`'s
     categories have "ok": False, None otherwise (including when
@@ -241,6 +333,8 @@ def run() -> int:
     try:
         status = requests.get(STATUS_URL, timeout=15).json()
         meta_by_game = status["meta"]
+        if status.get("stats_cache_stale"):
+            problems.append("status.json: stats_cache_stale is true (the hub itself says its GGG stats table is stale)")
         for game in ("poe2", "poe1"):
             problem = check_meta_freshness(meta_by_game[game]["last_meta"])
             if problem:
@@ -263,12 +357,20 @@ def run() -> int:
         except Exception as e:
             problems.append(f"could not fetch/parse {url}: {e}")
 
+    # the weekly-refresh artefacts: the stats table, the gems table and the public aliases
+    for urls, check in ((STATS_CACHE_URLS, check_stats_cache), (GEMS_URLS, check_gems), (ALIASES_URLS, check_aliases)):
+        for game, url in urls.items():
+            try:
+                problems.extend(check(game, requests.get(url, timeout=30).json()))
+            except Exception as e:
+                problems.append(f"could not fetch/parse {url}: {e}")
+
     if problems:
         for p in problems:
             print(f"::error::{p}")
         return 1
 
-    print("OK: prices, news, meta, and skills (all games) are fresh")
+    print("OK: prices, news, meta, skills and the weekly stats/gems/alias files (all games) are fresh and non-empty")
     return 0
 
 
