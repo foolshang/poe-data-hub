@@ -616,6 +616,17 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   nothing yet forces the PoE Checker's port of normalizer rules 1-5 (`stat_match.ts`) to follow a change to
   `normalizer.py` -- today that depends on a person remembering to tell Winai (SPEC.md 8.12).
 
+- **`unmapped_mod_pct` (9.75% -> 0.69% PoE1, 1.92% -> 0.77% PoE2) covers only the mod lists the hub READS --
+  never quote it as coverage of the mods on an item** (found 2026-10-20). `ninja_chars` reads only
+  `implicitMods` / `explicitMods` / `fracturedMods` of poe.ninja's itemData, and `KNOWN_MOD_KINDS` has the same
+  three kinds. The item data also carries `runeMods`, `desecratedMods`, `craftedMods`, `enchantMods`,
+  `utilityMods`, `bondedMods`, `mutatedMods`, `vestigialMods`, none of which is collected. Sample of 40
+  top-ring characters per game (live, 2026-10-20; biased toward strong characters): **PoE2 40.3% of 5,578 mod
+  lines are never read** (rune 16.9, desecrated 9.6, crafted 6.6, enchant 4.3, utility 2.0, bonded 0.6,
+  mutated 0.4), **PoE1 19.9% of 5,678** (enchant 11.9, crafted 3.7, utility 3.4, mutated 0.8). Some of those
+  lines are not statistical mods at all (`Allocates X`, flask utility lines). The same trap as replay vs
+  production and 7.5% vs 16.5%: a percentage is only meaningful together with its denominator.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source

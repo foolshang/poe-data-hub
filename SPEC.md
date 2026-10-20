@@ -1544,7 +1544,7 @@ renaming one is a version bump.
 
 **Permanent coverage limit of PoE2 (not a bug).** An alias exists only where RePoE links a wording to a GGG trade stat
 id (`trade_stats` in its translations). For PoE1 that is 7,170 of 11,257 entries; **for PoE2 only 292 of 10,759**
-(measured 2026-10-20 on `stat_descriptions.json`; the other PoE2 translation files add 31 more). PoE2 wordings of
+(measured 2026-10-20 on `stat_descriptions.json`; four of the other PoE2 translation files were checked and add 31 more). PoE2 wordings of
 the other entries (e.g. "Bow Attacks fire an additional Arrow": in RePoE, but with an empty `trade_stats`) therefore
 have NO alias, and 99% of the PoE2 mod texts the hub still cannot map are of this kind. The hub does not fill the
 gap by inference: two derivations were tested against RePoE's own ground truth and rejected (hashing the internal
