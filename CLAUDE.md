@@ -643,6 +643,21 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   A full `dbstat` sweep of this DB on the e2-micro did not finish in 520 s (aborted, harmless on WAL but do not repeat);
   use `COUNT(*)` per table and sampled `LENGTH()` instead.
 
+- **GGG answered 403 to ONE GitHub runner on 2026-10-19 10:47 UTC and it was not reproduced** (investigated
+  2026-10-20; conclusion: transient, cause unknown). `refresh-stats.yml` runs: 08:21 and 08:56 succeeded, 10:47 failed on
+  both `trade/data/stats` and `trade2/data/stats` (the stale Firebase cache stayed; the gems and alias steps still ran).
+  A temporary probe (one honest request per endpoint, same library and User-Agent as the real refresh, runner IP logged)
+  was run 3 times by hand on 2026-10-20 -- 04:09, 07:27, 08:37 UTC, from three different Microsoft IPs (San Jose,
+  Phoenix, Des Moines) -- and got 200/200 every time. Ruled out: the User-Agent change (the same new UA succeeded at 08:56
+  and failed at 10:47); our own request volume (4 requests in the 2.5 h before the failure). NOT ruled out: a short block
+  or rate limit of that runner's shared IP. Caveat: every success was a Cloudflare `cf-cache-status: HIT` in ~0.1 s, i.e.
+  possibly served from the edge cache without touching GGG's origin, so the probes show the edge answers, not that GGG
+  accepts us. No workaround exists or is to be built (no User-Agent tricks, proxies, IP switching): if it recurs, accept the
+  stale cache and report. Since commit `2140206` a failed fetch logs the status, `server`, `cf-ray`, `cf-mitigated`,
+  `retry-after`, content-type and the first 300 characters of the body, so the next occurrence is diagnosable from the log
+  alone. The earlier claim "GitHub Actions runners were confirmed reachable (3/3)" holds only as "usually reachable".
+  GitHub's `schedule:` trigger on a newly added workflow did not fire for 4+ hours: do not rely on it for anything urgent.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
