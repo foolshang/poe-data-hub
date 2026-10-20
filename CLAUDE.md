@@ -627,6 +627,22 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   lines are not statistical mods at all (`Allocates X`, flask utility lines). The same trap as replay vs
   production and 7.5% vs 16.5%: a percentage is only meaningful together with its denominator.
 
+- **Disk: the database does NOT grow linearly forever -- it saturates, and VACUUM needs as much free space as the
+  database is big** (measured 2026-10-20; the old "~107MB/day, ~100 days of disk left" mixed a transient with a
+  steady state). Disk 30.1GB, 15.6GB used, **14.4GB free**; the DB file is 5.43GB, the rest of the used space
+  (~10.2GB: OS, logs, `data/cache` 0.94GB, rotated logs) is roughly constant. Per table (rows from `COUNT(*)`,
+  bytes/row estimated from sampled column lengths + index entries, calibrated: the model sums to 5.25GB against the
+  real 5.43GB, so treat each figure as +-10%): `skill_stat_counts` 14.4M rows x ~190B = 2.7GB, retention 45 days,
+  556k rows/day (~106MB/day -- THIS is the growth), oldest snapshot 2026-09-21, so it keeps growing until ~2026-11-05
+  and then stops; `char_items` 207k rows x ~8.9KB = 1.85GB, retention 90 days, 2.5k rows/day, already at its plateau
+  (oldest snapshot 2026-07-22); `char_details` 0.44GB (30 days, at its plateau); the legacy `mod_counts` etc. ~0.2GB
+  growing ~1MB/day. **Plateau without any change: DB ~7.5GB around 2026-11-05, then ~1MB/day**: 12.4GB free.
+  Scenarios (estimates, same +-10%): enabling only PoE2 `rune` mods -> ~8.1GB, 11.7GB free, VACUUM margin ~3.6GB;
+  enabling all four kinds (rune, desecrated, crafted, enchant; PoE1 crafted, enchant) -> ~9.9GB, ~10.0GB free, VACUUM
+  (needs ~9.9GB) has NO margin -- would need a bigger disk (online persistent-disk resize) or shorter retention first.
+  A full `dbstat` sweep of this DB on the e2-micro did not finish in 520 s (aborted, harmless on WAL but do not repeat);
+  use `COUNT(*)` per table and sampled `LENGTH()` instead.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
