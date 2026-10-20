@@ -1536,6 +1536,22 @@ only when RePoE does. Compact JSON.
 changing the structure bumps it; adding an optional field does not (a reader must ignore unknown fields). A reader
 that sees a `schema_version` it does not know must treat the file as absent, not guess.
 
+**Open enums (reader rule).** The values of `aliases[].kinds`, `stat_groups[].kind` and the stat-id prefixes in
+`stat_aliases` are an OPEN set: the hub reads three kinds today, but the GGG table also has `crafted`, `enchant`,
+`scourge`, `rune`, `desecrated`, ... and kinds will be added WITHOUT a `schema_version` bump. **A reader must skip any
+value it does not know (never fail, never treat it as an error)**; adding a kind or an alias is additive, removing or
+renaming one is a version bump.
+
+**Permanent coverage limit of PoE2 (not a bug).** An alias exists only where RePoE links a wording to a GGG trade stat
+id (`trade_stats` in its translations). For PoE1 that is 7,170 of 11,257 entries; **for PoE2 only 292 of 10,759**
+(measured 2026-10-20 on `stat_descriptions.json`; the other PoE2 translation files add 31 more). PoE2 wordings of
+the other entries (e.g. "Bow Attacks fire an additional Arrow": in RePoE, but with an empty `trade_stats`) therefore
+have NO alias, and 99% of the PoE2 mod texts the hub still cannot map are of this kind. The hub does not fill the
+gap by inference: two derivations were tested against RePoE's own ground truth and rejected (hashing the internal
+stat id: 0 of 6,946 matches; reusing the PoE1 numeric id of the same internal stat: 22 of 138 conflicting). **A text
+that is not in this file is "not known", not a malfunction -- do not guess it** (no fuzzy matching, no borrowing a
+stat from another game). The gap closes only if RePoE adds the links.
+
 **Data freshness caveat.** RePoE lags the game by days after a patch (measured 2026-10: PoE2 2-7 days, PoE1 ~0.4
 day, from "Export" commits). Early in a league some wordings are therefore missing from this file. **A text the
 file does not cover is "not known yet", not a malfunction**: it stays unmapped and appears once RePoE catches up
@@ -1562,7 +1578,7 @@ and `refresh-stats.yml` has run. `generated_at` is the build time, not the RePoE
 |---|---|---|
 | `text` | string | the wording the game prints. `{0}`, `{1}` are value placeholders (RePoE style); markup such as `[Keyword\|shown]` is already reduced to the shown text. A text with no placeholder is matched by **string equality** |
 | `trade_id` | string | the numeric GGG trade stat id. The stat id of kind `k` is `f"{k}.stat_{trade_id}"` (e.g. `explicit.stat_4077843608`) |
-| `kinds` | string[] | the item mod kinds (`explicit` / `implicit` / `fractured`) in which this id exists in the GGG table. Only apply the alias to a mod of one of these kinds |
+| `kinds` | string[] | the item mod kinds in which this id exists in the GGG table (today `explicit` / `implicit` / `fractured`; **the set of kinds is OPEN**, see below). Only apply the alias to a mod whose kind is in this list |
 | `placeholder_stat_index` | int[] | one entry per placeholder in order of appearance in `text`: which stat's value it shows (index into `conditions`/`negate`/`divisor`/`sign`). Empty for a text without placeholder |
 | `negate` | bool[] | per stat: the DISPLAYED number is the negation of RePoE's internal value (`reduced` for `increased`, `slower` for `faster`) |
 | `divisor` | int[] | per stat: `internal = displayed x divisor` (before negation). 1 normally; 100 = a percent shown as a fraction; 1000 = RePoE keeps milliseconds, the item shows seconds |
