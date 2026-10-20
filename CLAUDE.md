@@ -662,6 +662,7 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   `retry-after`, content-type and the first 300 characters of the body, so the next occurrence is diagnosable from the log
   alone. The earlier claim "GitHub Actions runners were confirmed reachable (3/3)" holds only as "usually reachable".
   GitHub's `schedule:` trigger on a newly added workflow did not fire for 4+ hours: do not rely on it for anything urgent.
+  Data point after the conclusion: the manual `refresh-stats.yml` run at 2026-10-20 10:45 UTC fetched both GGG tables fine (8,306 / 18,189 entries).
 
 - **Normalizer drift guard (2026-10-20): `tests/golden/` + `tests/test_normalizer_golden.py`.** Frozen table, public aliases and
   ~35k real texts with the normalizer's result (PoE1 20,336 texts / PoE2 14,772; ~600KB gz). The test fails on ANY changed
@@ -694,6 +695,15 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   public reader gives the same answer as before for all ~35k golden texts on the three original kinds (0 differences). Local
   build: PoE1 1,967 -> 2,829 aliases, PoE2 130 -> 132 (+ existing aliases gaining kinds: PoE2 crafted 20, rune 19, desecrated 54,
   enchant 13). Opening a kind in the HUB (collection) is a separate step, see the disk rule above.
+
+- **An estimate built from what is already visible is usually too LOW, because the unseen part is by definition not in it
+  -- third time (2026-10-20); size the unknown before promising.** (1) The "50 most frequent unmapped mods" log looked like
+  the whole problem, yet ~71% of the newly mapped occurrences of a normalizer step came from the long tail the log could not
+  show (owner's note). (2) "Unmapped 0.69%" looked like coverage, yet 40.3% (PoE2) / 19.9% (PoE1) of an item's mod lines sit in
+  lists the hub never reads. (3) Opening more kinds in the alias file was estimated at "+339 / +68 existing aliases gain a
+  kind"; the real result was +862 new alias entries for PoE1 (stats in the new kinds that never had an alias) and +2 for PoE2.
+  When sizing something, first ask what the current view cannot see (a cap on a log, a list that is never read, a filter that is
+  applied before counting), and say in the estimate that it is a lower bound.
 
 ## Layout
 

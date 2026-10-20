@@ -1570,7 +1570,7 @@ and `refresh-stats.yml` has run. `generated_at` is the build time, not the RePoE
 }
 ```
 
-(Local build with the 2026-10-20 generator, which added `crafted`/`enchant`/`scourge`/`rune`/`desecrated`: PoE1 2,829 aliases / 319 stat groups / 307 `stat_aliases` / 763KB; PoE2 132 / 35 / 35 / 40KB -- to be re-measured on the live files after the next refresh. The three original kinds resolve identically to before for all ~35,000 golden texts. Measured on the live files 2026-10-19, before that: PoE1 1,967 aliases / 284 stat groups / 269 `stat_aliases` / 565KB; PoE2 130 / 28 / 28 / 38KB; both compact JSON, `Cache-Control: public, max-age=86400`.)
+(Measured on the LIVE files 2026-10-20, after the generator started covering `crafted`/`enchant`/`scourge`/`rune`/`desecrated`: PoE1 2,829 aliases / 319 stat groups (295 `identical_text`, 24 `case_only`) / 307 `stat_aliases` / 4 deprecated ids / 763KB; PoE2 132 aliases / 35 stat groups / 35 `stat_aliases` / 40KB; both compact JSON, `Cache-Control: public, max-age=86400`. Aliases per kind, PoE1: explicit 1,821, implicit 574, fractured 589, enchant 1,009, crafted 136, scourge 182; PoE2: explicit 121, implicit 22, fractured 46, desecrated 54, crafted 20, rune 19, enchant 13 (an alias is counted once per kind it applies to). The three original kinds resolve identically to before for all ~35,000 golden texts.)
 
 **`aliases[]` fields** (one object per wording that the GGG table text does NOT already cover):
 
