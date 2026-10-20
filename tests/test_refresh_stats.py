@@ -117,3 +117,16 @@ def test_run_returns_error_when_publish_raises(real_stats):
         code = refresh_stats.run()
 
     assert code == 1
+
+
+def test_fetch_stats_logs_what_ggg_sent_on_http_error_and_still_raises(caplog):
+    import requests as _requests
+
+    resp = MagicMock(ok=False, status_code=403, text="<html>Attention Required!\n Cloudflare</html>")
+    resp.headers = {"server": "cloudflare", "cf-ray": "abc123-FRA", "cf-mitigated": "challenge", "content-type": "text/html"}
+    resp.raise_for_status.side_effect = _requests.HTTPError("403 Client Error")
+    with patch("tools.refresh_stats.requests.get", return_value=resp), caplog.at_level("ERROR"):
+        with pytest.raises(_requests.HTTPError):
+            refresh_stats.fetch_stats("https://example/stats")
+    msg = " ".join(r.getMessage() for r in caplog.records)
+    assert "HTTP 403" in msg and "cf-ray=abc123-FRA" in msg and "cf-mitigated=challenge" in msg and "Attention Required! Cloudflare" in msg

@@ -71,6 +71,15 @@ TARGETS: list[StatsTarget] = [
 
 def fetch_stats(stats_url: str) -> dict[str, Any]:
     resp = requests.get(stats_url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}, timeout=15)
+    if not resp.ok:
+        # "403 Client Error: Forbidden" says nothing about WHY (2026-10-19: one runner got it between two good runs);
+        # record what GGG/Cloudflare actually sent so the next occurrence is diagnosable from the log alone.
+        log.error(
+            "GGG answered HTTP %s for %s: server=%s cf-ray=%s cf-mitigated=%s retry-after=%s content-type=%s body=%r",
+            resp.status_code, stats_url, resp.headers.get("server"), resp.headers.get("cf-ray"),
+            resp.headers.get("cf-mitigated"), resp.headers.get("retry-after"), resp.headers.get("content-type"),
+            " ".join(resp.text[:300].split()),
+        )
     resp.raise_for_status()
     return resp.json()
 
