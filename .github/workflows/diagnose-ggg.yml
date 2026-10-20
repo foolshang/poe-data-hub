@@ -1,0 +1,41 @@
+name: Diagnose GGG stats access (TEMPORARY)
+
+# Opened 2026-10-20 to find out why trade(2)/data/stats answered 403 to ONE GitHub runner (2026-10-19 10:47 UTC) after
+# two successful runs. One honest request per endpoint per run (tools/probe_ggg_stats.py), publishes nothing, no secrets.
+#
+# SELF-EXPIRING: the first step compares the clock with DEADLINE and the rest of the job is skipped after it, so this can
+# never keep calling GGG just because someone forgot it. Plan: collect 3 hourly runs; if the answer is clear, delete this
+# file at once; if not, DEADLINE may be moved but NEVER beyond 2026-10-21T04:00:00Z (24 h after opening). Then delete.
+# Do not add User-Agent variants, retries, proxies or anything else that could look like evading a block.
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEADLINE: "2026-10-20T09:00:00Z"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop after the deadline
+        id: gate
+        run: |
+          if [ "$(date -u +%s)" -gt "$(date -u -d "$DEADLINE" +%s)" ]; then
+            echo "past DEADLINE ($DEADLINE): this diagnostic is expired, doing nothing"
+            echo "expired=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.expired != 'true'
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.expired != 'true'
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+        if: steps.gate.outputs.expired != 'true'
+      - run: python -m tools.probe_ggg_stats
+        if: steps.gate.outputs.expired != 'true'
