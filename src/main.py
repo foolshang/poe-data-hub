@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -43,6 +43,7 @@ from src.processing.aggregator import (
 )
 from src.processing.archetyper import Archetyper
 from src.processing.archive_export import DEFAULT_ARCHIVE_DIR, export_league_archive
+from src.processing.archive_runner import export_league_archive_streaming
 from src.processing.char_cache import SnapshotProvider, StoreBackedCharacterCache
 from src.processing.skill_collect import CollectConfig, run_skill_collection
 from src.processing.skill_publish import (
@@ -57,7 +58,7 @@ from src.processing.skill_publish import (
 from src.processing.rendering_aliases import valid_public as valid_public_aliases
 from src.processing.skill_normalizer import SkillNormalizer
 from src.processing.normalizer import ModNormalizer
-from src.storage.local_db import COLLECTION_METHOD_LEGACY, LocalDb
+from src.storage.local_db import COLLECTION_METHOD_LEGACY, DEFAULT_DB_PATH, LocalDb
 from src.storage.publisher import (
     PricesPublisher,
     build_index_schema,
@@ -1393,18 +1394,29 @@ def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARC
     return results
 
 
-def run_export_league_archive(cfg: dict[str, Any], game: str, league: str, archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> Path:
+def run_export_league_archive(
+    cfg: dict[str, Any], game: str, league: str, archive_dir: Path = DEFAULT_ARCHIVE_DIR,
+    db_path: Path = DEFAULT_DB_PATH, extra_sources: Sequence[Path] = (), rebuild: bool = False, publish: bool = True,
+) -> Path:
     """`--export-league-archive game:league` CLI escape hatch: export one
     specific league now regardless of whether it's the currently-active
     one -- e.g. backfilling an already-ended league (spec item 21's
-    "Mirage that already ended" example) retroactively."""
-    firebase_cfg = cfg["firebase"]
-    publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
-    db = LocalDb()
-    try:
-        return export_league_archive(db, game, league, archive_dir=archive_dir, publisher=publisher)
-    finally:
-        db.close()
+    "Mirage that already ended" example) retroactively.
+
+    Streaming and read-only on the database (`archive_runner`): the live DB and
+    every `extra_sources` copy are opened `mode=ro`, nothing is held in RAM
+    beyond one output leaf. `rebuild` ignores the existing archive files and
+    keeps them as `*.legacy`. Returns the path of the base archive file."""
+    publisher = None
+    if publish:
+        firebase_cfg = cfg["firebase"]
+        publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
+    resume_hours = float(cfg.get("skill_meta", {}).get("collect", {}).get("resume_max_age_hours", 48))
+    result = export_league_archive_streaming(
+        Path(db_path), game, league, archive_dir=archive_dir, publisher=publisher, extra_sources=extra_sources,
+        rebuild=rebuild, resume_max_age_hours=resume_hours,
+    )
+    return result.base_path
 
 
 def run_cleanup_once(cfg: dict[str, Any]) -> None:
@@ -1833,6 +1845,18 @@ def main() -> None:
     parser.add_argument("--reprocess-char-items", action="store_true", help="Recompute skill_mod_counts from stored char_items, offline (skill-meta phase 2)")
     parser.add_argument("--export-league-archive", metavar="GAME:LEAGUE", help="Export one league's archive now, e.g. poe1:Mirage (skill-meta phase 5)")
     parser.add_argument(
+        "--extra-source", action="append", default=[], metavar="SQLITE",
+        help="With --export-league-archive: an insurance copy of the database to also merge snapshots from "
+             "(repeatable; opened read-only; must carry snapshot_id indexes -- tools/prepare_archive_copy.py)",
+    )
+    parser.add_argument(
+        "--rebuild-archive", action="store_true",
+        help="With --export-league-archive: ignore the existing archive files (kept as *.legacy) and build from the sources",
+    )
+    parser.add_argument("--archive-dir", default=str(DEFAULT_ARCHIVE_DIR), help="With --export-league-archive: output directory")
+    parser.add_argument("--archive-db", default=str(DEFAULT_DB_PATH), help="With --export-league-archive: database to read (opened read-only)")
+    parser.add_argument("--no-publish", action="store_true", help="With --export-league-archive: write the files only, skip Firebase")
+    parser.add_argument(
         "--publish-skill-meta", action="store_true",
         help="(Re)publish {game}/skills/* + passives/latest.json from the latest finished skill-centric run, "
              "without recollecting (needs --game at least once)",
@@ -1865,7 +1889,10 @@ def main() -> None:
         game, _, league = args.export_league_archive.partition(":")
         if not game or not league:
             parser.error("--export-league-archive expects GAME:LEAGUE, e.g. poe1:Mirage")
-        run_export_league_archive(cfg, game, league)
+        run_export_league_archive(
+            cfg, game, league, archive_dir=Path(args.archive_dir), db_path=Path(args.archive_db),
+            extra_sources=[Path(p) for p in args.extra_source], rebuild=args.rebuild_archive, publish=not args.no_publish,
+        )
     elif args.serve:
         run_scheduler(cfg)
     else:

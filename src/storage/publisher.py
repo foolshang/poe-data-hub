@@ -303,6 +303,50 @@ class PricesPublisher:
         self._verify_publish(bucket, blob_path, payload)
         self._save_local_copy(blob_path, payload)
 
+    def publish_file(self, local_path: Path, blob_path: str, cache_control: str, gzip_upload: bool = False) -> None:
+        """Uploads a file from disk without loading it into memory (`publish` needs the whole payload as a str --
+        a 125MB archive would not fit the VM's cap). `gzip_upload=True` sends a gzip of the file with
+        `Content-Encoding: gzip` (GCS serves it decompressed to clients that do not ask for gzip). Verified by
+        comparing the size and MD5 GCS reports for the stored object with those of the bytes sent, so nothing is
+        read back. No local timestamped copy is kept: the file is already on disk."""
+        import base64
+        import gzip
+        import hashlib
+        import shutil
+
+        src = Path(local_path)
+        upload = src
+        tmp: Optional[Path] = None
+        if gzip_upload:
+            tmp = src.with_name(src.name + ".upload.gz")
+            with open(src, "rb") as fin, gzip.open(tmp, "wb", compresslevel=6) as fout:
+                shutil.copyfileobj(fin, fout, 1 << 20)
+            upload = tmp
+        try:
+            md5 = hashlib.md5()
+            with open(upload, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    md5.update(chunk)
+            expected_md5 = base64.b64encode(md5.digest()).decode("ascii")
+            expected_size = upload.stat().st_size
+
+            bucket = self._client_lazy().bucket(self._bucket_name)
+            blob = bucket.blob(blob_path)
+            blob.cache_control = cache_control
+            if gzip_upload:
+                blob.content_encoding = "gzip"
+            blob.upload_from_filename(str(upload), content_type="application/json")
+            blob.reload()
+            if blob.md5_hash != expected_md5 or int(blob.size) != expected_size:
+                raise RuntimeError(
+                    f"publisher: post-publish verification MISMATCH for {blob_path} -- sent {expected_size} bytes "
+                    f"md5 {expected_md5}, stored {blob.size} bytes md5 {blob.md5_hash}"
+                )
+            log.info("publisher: uploaded %s (%d bytes%s)", blob_path, expected_size, ", gzip" if gzip_upload else "")
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+
     def _verify_publish(self, bucket: "storage.Bucket", blob_path: str, expected_payload: str) -> None:
         """Read the just-uploaded blob straight back from the GCS API (not
         the public HTTPS URL, which is CDN-cached) and confirm it matches

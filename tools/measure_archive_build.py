@@ -2,6 +2,10 @@
 
     python -m tools.measure_archive_build new <db> <game> <league> <out.json>
     python -m tools.measure_archive_build old <db> <game> <league> <out.json>   # reference, loads the league in RAM
+    python -m tools.measure_archive_build export <db> <game> <league> <archive_dir> [--rebuild] [--extra-source <copy>]...
+
+`export` is `archive_runner.export_league_archive_streaming` (base archive + accumulating skills state, no Firebase):
+run it once on an empty <archive_dir> for the full path, again on the same dir for the accumulation path.
 
 `new` is `archive_stream.build_league_archive_to_file` (read-only handle). `old` is the pre-rewrite
 `archive_export.build_league_archive`, kept as the baseline of the comparison; it opens the database through
@@ -37,7 +41,32 @@ def rss_mb() -> tuple[float, float]:
     return info.rss / 1048576, getattr(info, "peak_wset", info.rss) / 1048576
 
 
+def _export(argv: list[str]) -> int:
+    from src.processing.archive_runner import export_league_archive_streaming
+
+    rest = argv[6:]
+    rebuild = "--rebuild" in rest
+    extras = [Path(rest[i + 1]) for i, a in enumerate(rest) if a == "--extra-source"]
+    before, _ = rss_mb()
+    print(f"before export                rss={before:7.1f}MB", flush=True)
+    started = time.monotonic()
+    res = export_league_archive_streaming(
+        Path(argv[2]), argv[3], argv[4], archive_dir=Path(argv[5]), extra_sources=extras, rebuild=rebuild)
+    seconds = time.monotonic() - started
+    after, hwm = rss_mb()
+    m = res.merge
+    print(f"merged {len(m.merged)} new, {m.already_merged} already, unavailable {m.unavailable}, "
+          f"stale running {m.stale_running}, active running {m.active_running}, not finished {m.not_finished}")
+    print(f"after export                 rss={after:7.1f}MB  high-water={hwm:7.1f}MB")
+    print(f"ADDED over baseline          {max(hwm, after) - before:7.1f}MB   (high-water minus RSS before)")
+    print(f"base {res.base_bytes / 1e6:.1f}MB  skills {res.skills_bytes / 1e6:.1f}MB  "
+          f"state {res.state_path.stat().st_size / 1e6:.1f}MB  in {seconds:.0f}s")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) >= 6 and argv[1] == "export":
+        return _export(argv)
     if len(argv) != 6 or argv[1] not in ("new", "old"):
         print(__doc__)
         return 2

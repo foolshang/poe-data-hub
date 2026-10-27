@@ -224,9 +224,10 @@ def _iter_passives(conn: sqlite3.Connection, game: str, league: str) -> Iterator
 # ---- skill-centric dimension -----------------------------------------------------
 
 def _iter_skill_leaves(conn: sqlite3.Connection, game: str, league: str) -> Iterator[tuple[tuple[str, ...], dict]]:
-    """One (skill_type, skill, bracket, bucket) record at a time, three
-    ordered cursors merge-joined on that key: stat rows (grouped by slot),
-    keypassive rows, and the per-snapshot population rows."""
+    """The `skills` dimension straight from the live skill-centric tables
+    (every `skill_top100_v1` snapshot, finished or not). The accumulating
+    archive in `archive_skills.py` feeds `assemble_skill_leaves` from its own
+    state file instead."""
     bucket = _bucket("ssc.days_since_league_start")
     stat_sql = f"""
         SELECT ssc.skill_type, ssc.skill, ssc.level_bracket, {bucket} AS b, ssc.slot, ssc.stat_id, ssc.mod_kind,
@@ -254,11 +255,26 @@ def _iter_skill_leaves(conn: sqlite3.Connection, game: str, league: str) -> Iter
         GROUP BY sp.skill_type, sp.skill, sp.level_bracket, b
         ORDER BY sp.skill_type, sp.skill, sp.level_bracket, b"""
     params = (game, league, COLLECTION_METHOD_SKILL)
+    yield from assemble_skill_leaves(
+        _rows(conn, stat_sql, params), _rows(conn, passive_sql, params), _rows(conn, pop_sql, params),
+    )
+
+
+def assemble_skill_leaves(
+    stat_rows: Iterator[tuple], passive_rows: Iterator[tuple], pop_rows: Iterator[tuple],
+) -> Iterator[tuple[tuple[str, ...], dict]]:
+    """One (skill_type, skill, bracket, bucket) record at a time, three
+    ordered row streams merge-joined on that key. All three must be ordered
+    by (skill_type, skill, level_bracket, bucket) and:
+    - `stat_rows`: key(4), slot, stat_id, mod_kind, count, v_min, v_max -- within a
+      slot ordered count DESC, stat_id, mod_kind (grouped by slot);
+    - `passive_rows`: key(4), keypassive, count -- ordered count DESC, keypassive;
+    - `pop_rows`: key(4), population."""
 
     def stat_leaves() -> Iterator[tuple[tuple, dict[str, list]]]:
         current_key: Optional[tuple] = None
         mods: dict[str, list] = {}
-        for key, rows in _grouped(_rows(conn, stat_sql, params), 5):
+        for key, rows in _grouped(stat_rows, 5):
             leaf_key, slot = key[:4], key[4]
             if current_key is not None and leaf_key != current_key:
                 yield current_key, mods
@@ -269,10 +285,10 @@ def _iter_skill_leaves(conn: sqlite3.Connection, game: str, league: str) -> Iter
             yield current_key, mods
 
     def passive_leaves() -> Iterator[tuple[tuple, list]]:
-        for key, rows in _grouped(_rows(conn, passive_sql, params), 4):
+        for key, rows in _grouped(passive_rows, 4):
             yield key, [{"keypassive": r[4], "count": r[5]} for r in rows]
 
-    pops = _rows(conn, pop_sql, params)
+    pops = iter(pop_rows)
     pop_pending = next(pops, None)
     stats, passives = stat_leaves(), passive_leaves()
     s, p = next(stats, None), next(passives, None)
@@ -296,9 +312,14 @@ def _iter_skill_leaves(conn: sqlite3.Connection, game: str, league: str) -> Iter
 
 def build_league_archive_to_file(
     db_path: Path, game: str, league: str, out_path: Path, exported_at: Optional[str] = None,
+    include_skills: bool = True,
 ) -> dict[str, int]:
     """Writes the archive for (game, league) to `out_path` (atomically, via a
-    `.tmp` sibling) and returns `{"bytes": ..., "leaves": {dimension: n}}`."""
+    `.tmp` sibling) and returns `{"bytes": ..., "leaves": {dimension: n}}`.
+    `include_skills=False` writes only the three legacy dimensions -- the
+    shape of the archive files that already exist (and are read by other
+    apps); the `skills` dimension then lives in its own accumulating file
+    (`archive_skills.py`)."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_path.with_name(out_path.name + ".tmp")
@@ -316,7 +337,7 @@ def build_league_archive_to_file(
                 ("mod_counts", _iter_mod_counts(conn, game, league)),
                 ("skill_mod_counts", _iter_skill_mod_counts(conn, game, league)),
                 ("passives", _iter_passives(conn, game, league)),
-                ("skills", _iter_skill_leaves(conn, game, league)),
+                *((("skills", _iter_skill_leaves(conn, game, league)),) if include_skills else ()),
             )
             for name, it in dims:
                 fh.write("," + json.dumps(name) + ":")
