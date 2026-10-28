@@ -1668,6 +1668,79 @@ Shrine`, `Impale`, `Pierce`, ...). `may_change` marks an unmapped case the hub p
 a later snapshot are not deleted (5 PoE1 / 9 PoE2 on 2026-10-19) and hold stale numbers; only the files that
 `{game}/skills/index.json` lists are current.
 
+### 8.13 League archive: streaming and accumulating (rewrite, 2026-10-28; local commits, not deployed)
+
+Why: `build_league_archive` loaded a whole league into RAM (the 2026-10-15 outage) and the three skill tables are
+deleted by retention 45 days after a snapshot, so the `skills` dimension can no longer be recomputed -- it has to be
+**accumulated** one snapshot at a time. Code: `src/processing/archive_stream.py` (SQL aggregation, streaming JSON writer),
+`archive_skills.py` (state + merge + render + restore), `archive_runner.py` (one league), `tools/prepare_archive_copy.py`.
+The old `archive_export.py` is untouched and still what the (disabled) scheduled jobs call.
+
+**Three files per (game, league)** in `data/archive/`:
+- `{game}-{slug}.json` -- the file other apps already read: `mod_counts`, `skill_mod_counts`, `passives`, exactly the old
+  shape without `skills` (pinned by a test against the old builder's output). Recomputed in full on every run from the
+  legacy tables, which retention never touches. Published plain at `archive/{game}-{slug}.json`.
+- `{game}-{slug}.skills.json` -- the `skills` dimension, rendered from the state; header carries `render_version` and
+  `merged_snapshot_ids`, the end of the file `populations_without_rows` (additive). Published gzip-encoded at
+  `archive/{game}-{slug}.skills.json`. Not rendered again when nothing was merged and the file on disk is complete, of the
+  current `render_version` and lists exactly the merged ids.
+- `{game}-{slug}.skills.state.sqlite3` (+ `.bak`, refreshed before every merge that changes it) -- the accumulation, the only
+  copy of snapshots whose raw rows retention deleted. VM only, not published.
+
+**Merge rules:** only `skill_runs.status = 'finished'`; a `running` older than `skill_meta.collect.resume_max_age_hours`
+(48) is *treated as* abandoned in memory only (the DB is never written) and reported; sources = live DB then each
+`--extra-source` copy, all `mode=ro` and with `snapshot_id` indexes; a snapshot comes from the first source where it is
+finished and has rows; a snapshot in two sources must agree on `created_at`, `days` and row counts or the run raises
+(`SnapshotConflictError`); finished-but-no-rows-anywhere is `unavailable` (a loss, logged ERROR). One state transaction per
+snapshot adds its rows and records its id, so a crash never counts a snapshot twice or half. A state that exists but cannot be
+read raises `ArchiveStateError` and is never recreated; a skills file without a state raises `LegacyArchiveError`.
+`--rebuild-archive` renames the existing files (and `.bak`) to `*.legacy` (never deleted, never overwritten) and starts over.
+
+**Measured (2026-10-28, real DB read-only, `tools/run_capped.sh` cap 150MB, `nice -n 19`, hub running):**
+
+| | Allflame (PoE1) | Forbidden Rites (PoE2) |
+|---|---|---|
+| full build on the VM from nothing | 35 snapshots, 968 s, +11.2MB RSS | 33 snapshots, 1732 s, +10.2MB RSS |
+| one new snapshot onto a transferred state | 37 s, +14.2MB | 47 s, +13.6MB |
+| nothing new (file already current) | 18 s, +9.3MB | 34 s, +9.3MB |
+| outputs: base / skills / state | 4.5 / 71.0 / 56.7MB | 3.3 / 122.1 / 99.5MB |
+| gzip: skills / state | 6.8 / 8.3MB | 12.7 / 15.0MB |
+
+Peak anon memory of the cgroup was 32-41MB in every run (cap 150MB). Before the "skip render / probe instead of count"
+change the nothing-new pass took 217 s / 305 s (hub load differed, so only the order of magnitude is comparable).
+Where the full build's time goes (Allflame, VM, hub idle): merge 770 s of 873 s, of which 474 s the process's own CPU
+(Python upserts), the rest waiting for I/O; the `-wal` file of the live DB stayed 0 bytes during that run (it was not
+measured during the 968 s run, which overlapped a meta job).
+
+**State recovery (cheapest first):**
+1. `.bak` beside the state: one merge behind. Protects against a bad merge or a corrupt file, not against losing the disk.
+2. `restore_state_from_skills_file(skills.json, state.sqlite3)` (dev machine: it loads the JSON). Rebuilds every count, value
+   range and population (including `populations_without_rows`); the per-snapshot metadata (`created_at`, row counts, source)
+   is not in the file, so restored ids are trusted as merged and the cross-source conflict check cannot run for them.
+   Verified on the real data of both leagues: restore, then an export against a DB that still holds every merged snapshot,
+   merges nothing, reproduces the state tables row for row and the skills file byte for byte (apart from `exported_at`).
+   A file rendered before `populations_without_rows` existed restores without those populations.
+3. A full rebuild from the live DB and the insurance copies, for whatever snapshots are still available.
+
+**First rebuild (plan, not yet done): build on the dev machine, ship the state, let the VM only accumulate.** Never a
+full rebuild on the VM (968 s / 1732 s of CPU on a box that serves the Discord bot).
+1. Dev, per game: `python -m tools.prepare_archive_copy <backup>.sqlite3.gz <copy>.sqlite3`; record the sha256 of the `.gz`
+   and of the prepared copy.
+2. Dev: `python -m src.main --export-league-archive <game>:<league> --archive-db <copy>.sqlite3 --archive-dir <dir> --rebuild-archive --no-publish`
+   (the copy plays the live DB). Record, for the three outputs, the sha256, and for the state the
+   `merged_snapshot_ids`; check that list equals the finished `skill_runs` snapshots of the copy.
+3. Ship to a staging directory on the VM (`gcloud compute scp`), never straight into `data/archive/`. On the VM compare
+   the sha256 of each file with step 2, and read `merged_snapshot_ids` from the shipped state (`SELECT snapshot_id FROM
+   merged_snapshots`) and from the skills file's header: both must equal the recorded list.
+4. Keep what is in `data/archive/` (the old 17 September files and any `.legacy`): move the staged files in only if no file of
+   the same name exists, otherwise stop and look.
+5. On the VM, one league at a time, under `tools/run_capped.sh` with the service untouched: `--export-league-archive
+   <game>:<league>` (no `--rebuild-archive`). Expected: `merged` = only the snapshots taken after the copy, `already
+   merged` = the copy's count, `unavailable` = `[]`. Anything else: stop, the `.bak` is the state as shipped.
+6. Compare the new state's `merged_snapshot_ids` with the shipped list plus the newly merged ones; only then enable publishing.
+Rehearsed on 2026-10-28 in a temporary folder on the VM with states built from the insurance copies: the sha256 of both
+state files matched after transfer, and the live DB added exactly one snapshot per league (merged in 37 s / 47 s).
+
 ## Binding conditions (from project owner, still in force)
 
 1. ห้ามตัด price field ใดๆ ทิ้งโดยไม่เสนอก่อน — ทุก entry มี `value` +
