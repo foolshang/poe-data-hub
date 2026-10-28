@@ -1936,6 +1936,11 @@ def main() -> None:
     parser.add_argument("--run-gems-once", action="store_true")
     parser.add_argument("--run-aliases-once", action="store_true", help="Copy the staged public alias contract to {game}/aliases/latest.json")
     parser.add_argument("--reprocess-char-items", action="store_true", help="Recompute skill_mod_counts from stored char_items, offline (skill-meta phase 2)")
+    parser.add_argument(
+        "--run-archive-once", action="store_true",
+        help="Run the weekly archive job once, now (the same function the scheduler calls: honours archive.enabled, takes the "
+             "`archive` job lock, records the outcome in status.json); --archive-dir overrides the output directory",
+    )
     parser.add_argument("--export-league-archive", metavar="GAME:LEAGUE", help="Export one league's archive now, e.g. poe1:Mirage (skill-meta phase 5)")
     parser.add_argument(
         "--extra-source", action="append", default=[], metavar="SQLITE",
@@ -1946,7 +1951,7 @@ def main() -> None:
         "--rebuild-archive", action="store_true",
         help="With --export-league-archive: ignore the existing archive files (kept as *.legacy) and build from the sources",
     )
-    parser.add_argument("--archive-dir", default=str(DEFAULT_ARCHIVE_DIR), help="With --export-league-archive: output directory")
+    parser.add_argument("--archive-dir", default=str(DEFAULT_ARCHIVE_DIR), help="With --export-league-archive / --run-archive-once: output directory")
     parser.add_argument("--archive-db", default=str(DEFAULT_DB_PATH), help="With --export-league-archive: database to read (opened read-only)")
     parser.add_argument("--no-publish", action="store_true", help="With --export-league-archive: write the files only, skip Firebase")
     parser.add_argument(
@@ -1978,6 +1983,9 @@ def main() -> None:
         if not args.game:
             parser.error("--publish-skill-meta requires at least one --game")
         run_publish_skill_meta_once(cfg, args.game)
+    elif args.run_archive_once:
+        results = run_archive_export_once(cfg, archive_dir=Path(args.archive_dir))
+        log.info("archive job (manual): %s", results or "nothing exported (archive disabled, or no snapshots yet)")
     elif args.export_league_archive:
         game, _, league = args.export_league_archive.partition(":")
         if not game or not league:

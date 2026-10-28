@@ -432,7 +432,7 @@ def test_run_archive_export_once_disabled_skips_loudly_and_flags_status(tmp_path
            "archive": {"enabled": False, "disabled_reason": "test reason"}}
     publisher = _status_publisher(tmp_path)
     with patch("src.main.LocalDb", side_effect=AssertionError("must not touch the DB while disabled")),          patch("src.main.PricesPublisher", return_value=publisher),          caplog.at_level("WARNING", logger="poe_data_hub"):
-        results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive")
+        results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=tmp_path / "none.sqlite3")
 
     assert results == {}
     assert not (tmp_path / "archive").exists()
@@ -2034,3 +2034,49 @@ def test_insurance_copy_in_config_counts_as_protection_in_status(tmp_path):
     entry = next(e for e in cov["leagues"] if e["league"] == league)
     assert entry["at_risk_count"] == 0 and entry["backup_covers_through"]["copy"] == "copy.sqlite3"
     assert cov["copies"] == [{"name": "copy.sqlite3", "status": "ok"}]
+
+
+# -- 2026-10-29: --run-archive-once ------------------------------------------------------------------------------------
+
+def test_main_run_archive_once_calls_the_weekly_job_function(monkeypatch, tmp_path):
+    import src.main as main_module
+
+    with patch("src.main.load_config", return_value={}), patch("src.main._setup_logging"),          patch("src.main.run_archive_export_once", return_value={"poe1": "Allflame"}) as fake:
+        monkeypatch.setattr("sys.argv", ["main", "--run-archive-once", "--archive-dir", str(tmp_path / "a")])
+        main_module.main()
+        fake.assert_called_once_with({}, archive_dir=tmp_path / "a")
+
+
+def test_run_archive_once_respects_archive_enabled_false(monkeypatch, tmp_path):
+    """The CLI path must be the scheduler's function: disabled -> nothing exported, no writable DB opened, status says so."""
+    import src.main as main_module
+
+    monkeypatch.chdir(tmp_path)  # DEFAULT_DB_PATH is relative: no database here, so no coverage is computed from a real one
+
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": ["poe1"], "archive": {"enabled": False, "disabled_reason": "r"}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.load_config", return_value=cfg), patch("src.main._setup_logging"),          patch("src.main.LocalDb", side_effect=AssertionError("must not open the DB while disabled")),          patch("src.main.PricesPublisher", return_value=publisher),          patch("src.main.export_league_archive_streaming", side_effect=AssertionError("must not export while disabled")):
+        monkeypatch.setattr("sys.argv", ["main", "--run-archive-once", "--archive-dir", str(tmp_path / "a")])
+        main_module.main()
+    assert publisher.fetch_previous("status.json")["archive"]["enabled"] is False
+    assert not (tmp_path / "a").exists()
+
+
+def test_run_archive_once_takes_the_archive_lock(monkeypatch, tmp_path):
+    from src.utils import job_lock
+    import src.main as main_module
+
+    db_path, game, league = _seed_skill_db(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": [game], "archive": {"enabled": True}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.load_config", return_value=cfg), patch("src.main._setup_logging"),          patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)),          patch("src.main.PricesPublisher", return_value=publisher),          patch("src.main.DEFAULT_DB_PATH", db_path),          patch("src.main.job_lock.DEFAULT_LOCK_DIR", tmp_path / "locks"):
+        with job_lock.acquire("archive", tmp_path / "locks"):  # e.g. the hub's own weekly run is in progress
+            monkeypatch.setattr("sys.argv", ["main", "--run-archive-once", "--archive-dir", str(tmp_path / "a")])
+            main_module.main()
+        assert publisher.fetch_previous("status.json")["archive"]["last_export"][game]["status"] == "skipped_locked"
+        assert not (tmp_path / "a").exists()
+        monkeypatch.setattr("sys.argv", ["main", "--run-archive-once", "--archive-dir", str(tmp_path / "a")])
+        main_module.main()  # lock released: the same command now exports
+    assert publisher.fetch_previous("status.json")["archive"]["last_export"][game]["status"] == "ok"
+    assert (tmp_path / "a").exists()
