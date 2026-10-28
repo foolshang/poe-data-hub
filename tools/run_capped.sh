@@ -9,8 +9,10 @@
 #   other services; same user/dir/credentials as poe-data-hub.service
 # - every 5 s the job's ANONYMOUS memory (memory.stat `anon`, i.e. real RSS; page cache is reclaimable and would
 #   cause false alarms) is compared with <stop-%> of the cap; over it -> `systemctl stop` (clean SIGTERM) and exit 3
-# - a cap hit in memory.events (`max`) or an OOM kill also reports exit 4
-# Exit: the job's own status when it finishes by itself; 3 stopped by this script; 4 the cap was hit.
+# - an OOM kill in memory.events also reports exit 4. `max` in memory.events is NOT treated as a cap hit: it counts
+#   every reclaim at the limit, page cache included (a job reading a large file hits it at 36MB anon), so it is only
+#   a number in the log line; the anon check above is what stops a job that really grows.
+# Exit: the job's own status when it finishes by itself; 3 stopped by this script; 4 the kernel OOM-killed it.
 set -u
 UNIT="${1:?unit name}"; CAP_MB="${2:?cap in MB}"; STOP_PCT="${3:?stop percent}"
 [ "${4:-}" = "--" ] || { echo "usage: $0 <unit> <cap-MB> <stop-%> -- <command...>" >&2; exit 2; }
@@ -42,8 +44,8 @@ while systemctl is-active --quiet "$UNIT"; do
             systemctl stop "$UNIT"
             exit 3
         fi
-        if [ "${max_hits:-0}" -gt 0 ] || [ "${oom:-0}" -gt 0 ]; then
-            log "CAP HIT: memory.events max=$max_hits oom_kill=$oom (anon ${anon_mb}MB)"
+        if [ "${oom:-0}" -gt 0 ]; then
+            log "OOM KILL: memory.events oom_kill=$oom max=$max_hits (anon ${anon_mb}MB)"
             systemctl stop "$UNIT" 2>/dev/null
             exit 4
         fi
