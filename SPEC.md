@@ -1846,77 +1846,112 @@ archive build at 36MB of anonymous memory under a 150MB cap, with the rest page 
 counter as reclaim events, not as proof of being close to the cap; the closeness is shown by the RSS peaks themselves (439 of
 460MB is close). `run_capped.sh` now stops on anonymous memory and on `oom_kill` only.
 
-**Registering the copies (PROPOSED 2026-10-29, not implemented).** Simulated with the dev copies as the "live" DB, empty
-`extra_sources`, no archive state (what the VM would report right after the code is deployed): `coverage` shows
+**Why the copies are not "registered" (decided 2026-10-29).** Simulated with the dev copies as the "live" DB, empty
+`extra_sources`, no archive state (what the VM reports right after the code is deployed): `coverage` shows
 `backup_covers_through: null`, `at_risk_count` 34 (Allflame) / 33 (Forbidden Rites), `earliest_loss_at` 2026-11-05T21:00:00Z, and
 `check_archive` returns a problem as soon as that date is within 7 days, i.e. **from 2026-10-29 21:00 UTC** (green at 12:00 UTC
-that day, red at 21:30 UTC). That alarm would be false by the project's own rule (the snapshots ARE in a copy, which the code cannot
-see). Fix without extracting 1GB+ on the 13GB-disk VM: a manifest of the copies, e.g. `archive.copies` in config (or a
-`data/archive/copies_manifest.json`) written on the dev machine by a small tool from the prepared copy and the `.gz`:
-`{file, bytes, sha256, game, league, snapshots: [{id, created_at}, ...]}` (the finished snapshots with rows in the copy). Coverage
-then counts a live snapshot as covered iff its `(id, created_at)` is in a manifest entry AND the `.gz` exists with the recorded
-size (a `stat`); the sha256 is re-verified at most once a day (cached by size+mtime, ~0.4GB read) and a mismatch or a missing file
-makes the entry `status: "mismatch" | "missing"` and the snapshots at risk again. `backup_covers_through` comes from the manifest.
-It is only a claim about protection: recovering from a `.gz` still needs the extraction on a machine with the disk
-(`tools/prepare_archive_copy.py`), and once the shipped state contains those snapshots (runbook step 2) the manifest is redundant
-but harmless. Not built: it needs the owner's go-ahead and ships before runbook step 1.
+that day, red at 21:30 UTC). The code reads only extracted, indexed `.sqlite3` copies, so it cannot see the `.gz` files on the VM.
+A manifest of the `.gz` copies was proposed and declined: no new code. Instead the first rebuild is shipped in the same window as the
+deploy, so coverage sees those snapshots through the archive state (`archive_merged` 34 / 33) -- see the runbook.
 
-### Deploy runbook for the archive rewrite (2026-10-29; each step needs the owner's explicit go; nothing below has been run)
+### Deploy runbook for the archive rewrite (2026-10-29; each step needs the owner's explicit go; 2a-2c done, nothing else run)
 
 Deploy mechanics are the project's usual ones (`git push`, on the VM `cd /opt/poe-data-hub && git pull --ff-only`, announce, then
-`sudo systemctl restart poe-data-hub`; the unit runs as `User=Winai`). State on 2026-10-29: the VM is at `238b013`, origin/master at
-`72b1172` (docs only), local master is 11 commits ahead of origin (`80048d6` ... `71016cb`; all archive work, nothing else).
+`sudo systemctl restart poe-data-hub`; the unit runs as `User=Winai`). State on 2026-10-29: the VM is at `238b013` (the rollback
+point), origin/master at `72b1172` (docs only), local master is ahead of origin by the archive commits only (`80048d6` onward).
+Tools used: `--export-league-archive` (one league, manual, does NOT write `status.json`) and `--run-archive-once` (the weekly job's own
+function: honours `archive.enabled`, takes the `archive` lock, records the outcome and refreshes `coverage`; while disabled it skips
+the export but still refreshes `coverage`).
 
-**Step 0 -- decision before step 1: how coverage learns about the copies** (see "Registering the copies"). Without it, step 1's
-heartbeat criterion cannot pass after 2026-10-29 21:00 UTC. Also optional, small: a `--run-archive-once` CLI flag so step 3 can
-exercise the weekly code path (lock, status) immediately instead of waiting for Sunday 06:00 UTC (1 and 8 Nov).
+**Step A -- rebuild and staging, before anything is deployed (nothing on the VM changes except the staging directory).**
+- 2a dev: check the `.gz` sha256 against the table above; `python -m tools.prepare_archive_copy <gz> <copy>` for both (the
+  re-made copies differ in bytes from the earlier prepared ones -- the `.gz` is the identity); `python -m src.main
+  --export-league-archive <game>:<league> --archive-db <copy> --archive-dir <dir> --rebuild-archive --no-publish`. Record sha256 and
+  size of base/skills/state and `merged_snapshot_ids`. Pass: merged = 34 (Allflame, snapshots 375..509) / 33 (Forbidden Rites,
+  377..510; 472 is abandoned, not merged), `unavailable: []`, the state's ids = the header's ids = the finished snapshots with rows
+  in the copy, the base file has the same keys as the 17 September files.
+- 2b/2c: copy base, skills and state (not the `.bak`) to `/home/Winai/archive-staging/` (same filesystem as `data/archive/`, ~0.36GB of
+  13GB free) together with the record; on the VM verify sha256 and size of every file, `PRAGMA integrity_check` of the state, and
+  the ids of the state and of the skills header against the record. Pass: everything equal. Fail: delete the staging directory,
+  redo 2b.
+- **Done 2026-10-29 (dev clock 00:14-00:17 ICT):** Allflame 34 merged / Forbidden Rites 33 merged, `unavailable: []`, ids equal in
+  state, header and copy, base keys = the 17 September keys; staged and verified on the VM (all sha256 and sizes equal, both
+  `integrity_check: ok`, ids equal). Recorded values (the VM staging holds exactly these):
 
-**Step 1 -- push + deploy the code with `archive.enabled: false` (config unchanged), observe one cycle.**
-- Do: note the VM's current commit (rollback point); run the tests; `git push`; `git pull --ff-only` on the VM; restart.
-- Pass (all): service `active` and no traceback at start; journal shows `scheduler: archive export is DISABLED`; `status.json`
-  -> `archive.enabled: false` with `coverage.computed_at` within minutes of the restart and `coverage.copies[].status: ok` for both
-  copies; per league `backup_covers_through` = 509 (Allflame) / 510 (Forbidden Rites), `at_risk` lists only snapshots after those
-  and `earliest_loss_at` = 2026-12-12T21:00:00Z; a manual run of the heartbeat workflow is green; hub RSS: `journalctl -t hub-mem -p
-  warning` shows no new ALERT and the RSS after restart is within the usual range of the previous restarts; one daily cleanup (21:00
-  UTC) and one skill run (22:00 UTC) complete as before and `coverage.computed_at` is refreshed after the cleanup; the Sunday
-  job logs the DISABLED skip.
-- Fail (any): ALERT line, traceback, `archive.coverage` absent or stale after the cleanup, heartbeat red, a job slower or failing
-  that did not before.
-- Back out: `git checkout <recorded commit>` in `/opt/poe-data-hub`, restart. Nothing else on the VM was changed (no data files,
-  config untouched); the extra `archive` keys left in `status.json` are inert.
-- Observe 2-3 days before step 2.
+| file | bytes | sha256 |
+|---|---|---|
+| `poe1-allflame.json` | 4,546,692 | `30ff1fa9758af5557eb15942a182ddb83218a9b5fec29265fc2c6922a2099c24` |
+| `poe1-allflame.skills.json` | 70,851,241 | `6d30595e81fe5a30690f976c89866b6284393dc739c13f4bab3f3cf2276b7402` |
+| `poe1-allflame.skills.state.sqlite3` | 56,528,896 | `c2da254d4189128e3dbb05f6e1bdbae053c4d3f515d1c81427b4c1de1ccebbe0` |
+| `poe2-forbidden-rites.json` | 3,274,717 | `c73c864acbdfacb1664344563f9b0dcb8ff12cc887eed6cb02eba2b2020b3106` |
+| `poe2-forbidden-rites.skills.json` | 121,727,211 | `af49a703656300dc1c8cfb55a19fefde9e3cc0435333ccd7c77560b3ab75b26d` |
+| `poe2-forbidden-rites.skills.state.sqlite3` | 99,237,888 | `1eaceaf27113eb75779a986b5b845a09d6fd88c5128bd49ffafcf5f0d636c98d` |
 
-**Step 2 -- first rebuild on dev, ship, preserve, accumulate by hand, one league at a time.**
-- 2a dev: check the `.gz` sha256 against the table above; `tools/prepare_archive_copy.py` for both; `--export-league-archive
-  <game>:<league> --archive-db <copy> --archive-dir <dir> --rebuild-archive --no-publish`. Record sha256 of base/skills/state and
-  `merged_snapshot_ids`. Pass: merged = 34 (Allflame, snapshots 375..509) / 33 (Forbidden Rites; 472 is abandoned, not merged), no
-  `unavailable`; ids equal the finished snapshots of the copy.
-- 2b ship to a staging directory on the same filesystem (`/home/Winai/archive-staging/`, ~0.36GB, 13GB free). 2c on the VM:
-  sha256 of every file equals 2a; `SELECT snapshot_id FROM merged_snapshots` and the skills header's `merged_snapshot_ids` equal the
-  recorded list. Pass: all equal. Fail: delete the staging directory, redo 2b.
-- 2d preserve the old files: VM `mv data/archive/<name>.json <name>.json.legacy` (refuse if it exists); Firebase server-side copy
-  `archive/<name>.json` -> `archive/<name>.json.legacy`, md5 equal to the original and to `D:\Backups\poe-hub\archive-legacy\`.
-  Pass: `.legacy` bytes/md5 equal the references. 2e `mv` the staged files into `data/archive/`.
-- 2f one league at a time, Allflame first, under `sudo tools/run_capped.sh archive-<game> 150 90 -- .venv/bin/python -m src.main
-  --export-league-archive <game>:<league> --no-publish`; then Forbidden Rites with publishing ON to measure the upload on the VM
-  (`run_capped` reports peak anon). Pass: exit 0; `merged` = only the snapshots taken after the copies (513.. / 514..), `already
-  merged` = 34 / 33, `unavailable: []`; peak anon well under the 135MB stop (measured so far 32-41MB without upload; the upload
-  adds ~13-26MB estimated, to be replaced by the measured value); base file = old shape minus `skills`; published objects have the
-  headers of the upload test; heartbeat green.
-- Back out: VM remove the new files and `mv <name>.json.legacy <name>.json`; Firebase copy `<name>.json.legacy` back over
-  `<name>.json` and check md5 against the references; keep the state files (rename them) for inspection. The hub process is
-  untouched by this step.
+  (`exported_at` is inside the base and skills files, so a rebuild on another day gives other hashes for those two; the state's
+  hash does not depend on the day.) If the staging is older than the deploy by days, re-run 2c before 2d.
 
-**Step 3 -- enable the archive, before 2026-11-09 21:00 UTC (Allflame ends; the league-change export fires when the meta job sees
-the new league, ~13 Nov).**
-- Do: only if step 2 passed and `coverage` shows `archive_merged` = the merged counts; set `archive.enabled: true` (optionally
-  `extra_sources` once extracted copies are placed), pull + restart.
-- Pass: the first weekly run (or `--run-archive-once`) reports `last_export.{game}.status: ok` with `unavailable: []` and a fresh
-  `last_ok_at`; `coverage.at_risk_count` 0 for both leagues; hub-mem shows no ALERT during the run (expected +10-14MB RSS, plus the
-  upload); heartbeat green; the Firebase `archive/` objects are the new ones.
-- Fail: any `failed`/`skipped_locked` that repeats, `unavailable` non-empty, an ALERT, RSS near the cap.
-- Back out: `archive.enabled: false` and restart; the files and the state stay (the state only accumulates, nothing to undo).
-  If the archive had overwritten Firebase objects wrongly, restore them from the `.legacy` copies as in step 2.
+**Step B -- deploy and ship in one window, `archive.enabled` stays `false`.**
+1. Record the VM's commit (`238b013`). `git push`, `git pull --ff-only` on the VM, announce, restart.
+2. Immediately 2d: preserve the old files. VM: `mv data/archive/<name>.json data/archive/<name>.json.legacy` for both leagues (refuse
+   if a `.legacy` exists). Firebase: server-side copy `archive/<name>.json` -> `archive/<name>.json.legacy`, md5 equal to the original
+   and to `D:\Backups\poe-hub\archive-legacy\` (`e0JQ1IbMQgAaBfJnKgWzKA==` / `X7+h00N33wIknMrBlK8cHg==`).
+3. 2e: `mv` the staged files into `data/archive/` (same filesystem, atomic).
+4. 2f: one league at a time under `sudo tools/run_capped.sh archive-<game> 150 90 -- .venv/bin/python -m src.main
+   --export-league-archive <game>:<league> --no-publish` for Allflame first; then Forbidden Rites with publishing ON, to measure
+   the upload on the VM (`run_capped` reports peak anon). Then `--run-archive-once` (still disabled: it skips the export and
+   refreshes `coverage` from the shipped states).
+5. Check the combined pass criteria below.
+
+**Heartbeat during the window.** `status.json` carries the loss condition from the restart (the scheduler computes `coverage` at
+start, with `data/archive/` still empty of states) until the `--run-archive-once` of item 4 refreshes it. If the deploy happens
+**before 2026-10-29 21:00 UTC** the earliest loss is more than 7 days away and the heartbeat stays green throughout. If it happens
+later, expect red for as long as that window lasts: the restart-to-refresh time of items 1-4, which is the time of the manual steps
+plus the two exports (an hour at most if done back to back; the exports themselves measured 37 s / 47 s for one new snapshot plus
+the base build, publishing not yet measured on the VM). A red run happens only if a heartbeat run lands inside the window (runs are
+2.1-9.2 h apart, median 4.6 h), and it costs a failed GitHub run, nothing else. **This red is expected, not a failed criterion.**
+It can be avoided entirely by doing 2d and 2e before the restart (the running old hub does not read `data/archive/`); the owner's
+ordering above deploys first.
+
+**Combined pass criteria (steps 1 and 2 together).** All of: the service is `active`, no traceback at start, the journal shows
+`scheduler: archive export is DISABLED`; both manual exports exit 0 with `merged` = only the snapshots taken after the copies
+(513.. / 514..), `already merged` = 34 / 33, `unavailable: []`, peak anon well under the 135MB stop (32-41MB measured without the
+upload); the published Forbidden Rites objects have the headers of the upload test (Allflame is exported with `--no-publish`, so its Firebase objects stay the 17 September ones until step C); `status.json` -> `archive.coverage` shows
+`archive_merged` 34 + new / 33 + new, `at_risk_count` 0 at the moment of the refresh (afterwards only snapshots created after the
+2f run may appear, each with `earliest_loss_at` = its own `created_at` + 45 days -- expected, they are merged by step C) and
+`earliest_loss_at` null or later than 2026-12-12; a manual run of the heartbeat workflow is green; `journalctl -t hub-mem -p
+warning` shows no new ALERT and the post-restart RSS is within the usual range; the daily cleanup (21:00 UTC) and the skill run
+(22:00 UTC) complete as before and `coverage.computed_at` is refreshed after the cleanup; the Sunday job logs the DISABLED skip.
+Then observe 2-3 days.
+
+**Failure of the combined step: back out BOTH parts.** Any of: 2f fails or exits non-zero, `unavailable` is non-empty, a published
+object is wrong, an ALERT or a traceback appears, `coverage` is absent or stale after the cleanup. Then, in this order:
+(a) code: `git checkout 238b013` in `/opt/poe-data-hub`, restart; (b) files: VM remove the new files from `data/archive/` and `mv
+<name>.json.legacy <name>.json`; Firebase copy `<name>.json.legacy` back over `<name>.json` (if 2f already published) and check md5
+against the references, delete the `.skills.json` objects if they were published; keep the state files renamed for inspection. A
+problem in only one half is not a reason to keep the other half: do not leave the new code running on old files or the new files
+under old code without the owner's decision. Nothing else on the VM was changed (config untouched; the extra `archive` keys left in
+`status.json` are inert).
+
+**Step C -- enable the archive, before 2026-11-09 21:00 UTC (Allflame ends; the league-change export fires when the meta job sees the
+new league, ~13 Nov).**
+- Do: only if the combined step passed and was observed 2-3 days; set `archive.enabled: true`, pull + restart; run `--run-archive-once`
+  by hand once (or wait for Sunday 06:00 UTC, 1 and 8 Nov).
+- Pass: `last_export.{game}.status: ok` with `unavailable: []` and a fresh `last_ok_at`; `coverage.at_risk_count` 0 for both leagues;
+  hub-mem shows no ALERT during the run (expected +10-14MB RSS, plus the upload); heartbeat green; the Firebase `archive/` objects
+  are the new ones.
+- Fail: a `failed` / `skipped_locked` that repeats, `unavailable` non-empty, an ALERT, RSS near the cap.
+- Back out: `archive.enabled: false` and restart; files and state stay (the state only accumulates, nothing to undo). If Firebase
+  objects were overwritten wrongly, restore them from the `.legacy` copies as above.
+
+**What `tools/heartbeat_check.py` does when it finds a problem (read from the code, 2026-10-29).** `run()` prints `::error::` lines and
+`return 1` (`tools/heartbeat_check.py:419-420`), so the step fails and GitHub marks the workflow run red. It never contacts
+healthchecks.io itself (no ping code in the script). The workflow's last step (`.github/workflows/heartbeat.yml:36-48`) runs when the
+check step `success` OR `failure`, and `curl`s the plain `HEARTBEAT_PING_URL` (no `/fail` suffix): a red run still sends a
+SUCCESS ping, so healthchecks.io stays green. healthchecks.io only means "the heartbeat workflow ran". It emails when no ping arrives
+within Period 12 h + Grace 6 h = 18 h after the last one. The alert for a red condition
+is therefore GitHub's own failed-run notification (depends on the owner's GitHub notification settings, not verifiable from the
+repo), and its latency is the gap to the next scheduled run (2.1-9.2 h measured, median 4.6 h) plus the run time; the dead-man email
+covers only "the heartbeat itself stopped" with a worst case of 18 h after the last ping.
 
 ## Binding conditions (from project owner, still in force)
 
