@@ -1813,17 +1813,31 @@ rebuild is built from the copies on the dev machine and shipped (above), those a
 Prepared copies used for the rehearsals and the measurements (`python -m tools.prepare_archive_copy`, extraction + `snapshot_id`
 indexes; scratch folder of the 2026-10-28 session, not durable -- re-make from the `.gz` when needed): Allflame
 1,148,628,992 B, sha256 `68c741e2cf306b232e2692d7aed10083b1f450cf1688faa766357623c1cff804`; Forbidden Rites 1,580,523,520 B,
-sha256 `421a56e42df3fb2471cf269d0c1fd2c2f0b8d9398e8f8bdb8b29c2f8f388422d`. Neither copy is on the VM yet
-(`archive.extra_sources: []`).
+sha256 `421a56e42df3fb2471cf269d0c1fd2c2f0b8d9398e8f8bdb8b29c2f8f388422d`. The `.gz` files themselves are ALSO on the VM
+(checked 2026-10-29, `ls -l` + `sha256sum`, both equal to the table): `/home/Winai/allflame_backup.sqlite3.gz`
+(158,533,885 B, mtime 2026-10-26 22:33:17 UTC) and `/home/Winai/forbiddenrites_backup.sqlite3.gz` (225,650,179 B, mtime
+2026-10-27 14:31:49 UTC); no extracted or indexed copy is on the VM, and `archive.extra_sources` is `[]`. The coverage code
+reads only extracted, indexed `.sqlite3` files, so today it does not know that the `.gz` files exist (see "Registering the
+copies" below).
 
 **Real Firebase upload test (2026-10-28, once, test path only).** `PricesPublisher.publish_file(..., gzip_upload=True)` with the
-70,851,241-byte Allflame skills file to `_test/archive-upload-check/poe1-allflame.skills.json` (a prefix nothing reads), from the
-dev machine with the owner's gcloud credentials: stored object 6,816,981 B, `Content-Type: application/json`,
-`Content-Encoding: gzip`, `Cache-Control: public, max-age=3600`; the publisher's own size+MD5 check passed; a plain GET (identity)
-returned 70,851,241 B with sha256 `5a224bd8...502a1` = the local file's, a GET with `Accept-Encoding: gzip` returned the 6,816,981
-stored bytes whose gunzip has the same sha256. Process peak working set during the upload +25.7MB over the process baseline
-(dev machine, Windows; the Google client sends a file this size in one request, so the cost is about the size of the gzip plus
-copies of it, ~13MB gz for PoE2). The object was deleted afterwards (exists: false, public URL 404, no `_test/` prefix left).
+70,851,241-byte Allflame skills file (sha256 `5a224bd80738e9c7278afb0de3634dc3b68f06dfc7f1a67c39953f8727a502a1`) to
+`_test/archive-upload-check/poe1-allflame.skills.json` (a prefix nothing reads), from the dev machine with the owner's gcloud
+credentials. The publisher's own size + MD5 check passed. What was measured, bytes over the wire and bytes after decoding kept
+apart:
+
+| step | bytes over the wire | bytes after decoding | `Content-Encoding` header | sha256 of the decoded bytes |
+|---|---|---|---|---|
+| upload (client -> GCS, gzip by the publisher) | 6,816,981 | 70,851,241 | `gzip` set on the object | (checked by MD5/size of the gz) |
+| object at rest on GCS | 6,816,981 | -- | `gzip` | -- |
+| GET without `Accept-Encoding: gzip` (identity) | 70,851,241 (GCS decompresses) | 70,851,241 | none | equals the local file's |
+| GET with `Accept-Encoding: gzip` | 6,816,981 (stored bytes as is) | 70,851,241 (after gunzip; only the sha256 was recorded, it equals the local file's, so the length is the same) | `gzip` | equals the local file's |
+
+Common to both GETs: `Content-Type: application/json`, `Cache-Control: public, max-age=3600`. (An earlier note in the session
+report said the gzip GET "returned 6,816,981 decoded bytes"; the correct reading is the row above.) Process peak working set
+during the upload +25.7MB over the process baseline (dev machine, Windows; the Google client sends a file this size in one
+request, so the cost is about the size of the gzip plus copies of it, ~13MB gz for PoE2; not measured on the VM). The object was
+deleted afterwards (exists: false, public URL 404, no `_test/` prefix left).
 
 **`memory.events` `max` is not "nearly out of memory" (2026-10-28).** The `max` counter of a cgroup counts every time usage hit
 the limit and reclaim ran, page cache included: `tools/run_capped.sh` used to treat it as a cap hit and stopped a read-only
@@ -1831,6 +1845,78 @@ archive build at 36MB of anonymous memory under a 150MB cap, with the rest page 
 (2026-10-19) quotes "cgroup `max` events 3,941" next to hub RSS peaks of 332MB (PoE1) / 439MB (PoE2) of the 460MB cap: read that
 counter as reclaim events, not as proof of being close to the cap; the closeness is shown by the RSS peaks themselves (439 of
 460MB is close). `run_capped.sh` now stops on anonymous memory and on `oom_kill` only.
+
+**Registering the copies (PROPOSED 2026-10-29, not implemented).** Simulated with the dev copies as the "live" DB, empty
+`extra_sources`, no archive state (what the VM would report right after the code is deployed): `coverage` shows
+`backup_covers_through: null`, `at_risk_count` 34 (Allflame) / 33 (Forbidden Rites), `earliest_loss_at` 2026-11-05T21:00:00Z, and
+`check_archive` returns a problem as soon as that date is within 7 days, i.e. **from 2026-10-29 21:00 UTC** (green at 12:00 UTC
+that day, red at 21:30 UTC). That alarm would be false by the project's own rule (the snapshots ARE in a copy, which the code cannot
+see). Fix without extracting 1GB+ on the 13GB-disk VM: a manifest of the copies, e.g. `archive.copies` in config (or a
+`data/archive/copies_manifest.json`) written on the dev machine by a small tool from the prepared copy and the `.gz`:
+`{file, bytes, sha256, game, league, snapshots: [{id, created_at}, ...]}` (the finished snapshots with rows in the copy). Coverage
+then counts a live snapshot as covered iff its `(id, created_at)` is in a manifest entry AND the `.gz` exists with the recorded
+size (a `stat`); the sha256 is re-verified at most once a day (cached by size+mtime, ~0.4GB read) and a mismatch or a missing file
+makes the entry `status: "mismatch" | "missing"` and the snapshots at risk again. `backup_covers_through` comes from the manifest.
+It is only a claim about protection: recovering from a `.gz` still needs the extraction on a machine with the disk
+(`tools/prepare_archive_copy.py`), and once the shipped state contains those snapshots (runbook step 2) the manifest is redundant
+but harmless. Not built: it needs the owner's go-ahead and ships before runbook step 1.
+
+### Deploy runbook for the archive rewrite (2026-10-29; each step needs the owner's explicit go; nothing below has been run)
+
+Deploy mechanics are the project's usual ones (`git push`, on the VM `cd /opt/poe-data-hub && git pull --ff-only`, announce, then
+`sudo systemctl restart poe-data-hub`; the unit runs as `User=Winai`). State on 2026-10-29: the VM is at `238b013`, origin/master at
+`72b1172` (docs only), local master is 11 commits ahead of origin (`80048d6` ... `71016cb`; all archive work, nothing else).
+
+**Step 0 -- decision before step 1: how coverage learns about the copies** (see "Registering the copies"). Without it, step 1's
+heartbeat criterion cannot pass after 2026-10-29 21:00 UTC. Also optional, small: a `--run-archive-once` CLI flag so step 3 can
+exercise the weekly code path (lock, status) immediately instead of waiting for Sunday 06:00 UTC (1 and 8 Nov).
+
+**Step 1 -- push + deploy the code with `archive.enabled: false` (config unchanged), observe one cycle.**
+- Do: note the VM's current commit (rollback point); run the tests; `git push`; `git pull --ff-only` on the VM; restart.
+- Pass (all): service `active` and no traceback at start; journal shows `scheduler: archive export is DISABLED`; `status.json`
+  -> `archive.enabled: false` with `coverage.computed_at` within minutes of the restart and `coverage.copies[].status: ok` for both
+  copies; per league `backup_covers_through` = 509 (Allflame) / 510 (Forbidden Rites), `at_risk` lists only snapshots after those
+  and `earliest_loss_at` = 2026-12-12T21:00:00Z; a manual run of the heartbeat workflow is green; hub RSS: `journalctl -t hub-mem -p
+  warning` shows no new ALERT and the RSS after restart is within the usual range of the previous restarts; one daily cleanup (21:00
+  UTC) and one skill run (22:00 UTC) complete as before and `coverage.computed_at` is refreshed after the cleanup; the Sunday
+  job logs the DISABLED skip.
+- Fail (any): ALERT line, traceback, `archive.coverage` absent or stale after the cleanup, heartbeat red, a job slower or failing
+  that did not before.
+- Back out: `git checkout <recorded commit>` in `/opt/poe-data-hub`, restart. Nothing else on the VM was changed (no data files,
+  config untouched); the extra `archive` keys left in `status.json` are inert.
+- Observe 2-3 days before step 2.
+
+**Step 2 -- first rebuild on dev, ship, preserve, accumulate by hand, one league at a time.**
+- 2a dev: check the `.gz` sha256 against the table above; `tools/prepare_archive_copy.py` for both; `--export-league-archive
+  <game>:<league> --archive-db <copy> --archive-dir <dir> --rebuild-archive --no-publish`. Record sha256 of base/skills/state and
+  `merged_snapshot_ids`. Pass: merged = 34 (Allflame, snapshots 375..509) / 33 (Forbidden Rites; 472 is abandoned, not merged), no
+  `unavailable`; ids equal the finished snapshots of the copy.
+- 2b ship to a staging directory on the same filesystem (`/home/Winai/archive-staging/`, ~0.36GB, 13GB free). 2c on the VM:
+  sha256 of every file equals 2a; `SELECT snapshot_id FROM merged_snapshots` and the skills header's `merged_snapshot_ids` equal the
+  recorded list. Pass: all equal. Fail: delete the staging directory, redo 2b.
+- 2d preserve the old files: VM `mv data/archive/<name>.json <name>.json.legacy` (refuse if it exists); Firebase server-side copy
+  `archive/<name>.json` -> `archive/<name>.json.legacy`, md5 equal to the original and to `D:\Backups\poe-hub\archive-legacy\`.
+  Pass: `.legacy` bytes/md5 equal the references. 2e `mv` the staged files into `data/archive/`.
+- 2f one league at a time, Allflame first, under `sudo tools/run_capped.sh archive-<game> 150 90 -- .venv/bin/python -m src.main
+  --export-league-archive <game>:<league> --no-publish`; then Forbidden Rites with publishing ON to measure the upload on the VM
+  (`run_capped` reports peak anon). Pass: exit 0; `merged` = only the snapshots taken after the copies (513.. / 514..), `already
+  merged` = 34 / 33, `unavailable: []`; peak anon well under the 135MB stop (measured so far 32-41MB without upload; the upload
+  adds ~13-26MB estimated, to be replaced by the measured value); base file = old shape minus `skills`; published objects have the
+  headers of the upload test; heartbeat green.
+- Back out: VM remove the new files and `mv <name>.json.legacy <name>.json`; Firebase copy `<name>.json.legacy` back over
+  `<name>.json` and check md5 against the references; keep the state files (rename them) for inspection. The hub process is
+  untouched by this step.
+
+**Step 3 -- enable the archive, before 2026-11-09 21:00 UTC (Allflame ends; the league-change export fires when the meta job sees
+the new league, ~13 Nov).**
+- Do: only if step 2 passed and `coverage` shows `archive_merged` = the merged counts; set `archive.enabled: true` (optionally
+  `extra_sources` once extracted copies are placed), pull + restart.
+- Pass: the first weekly run (or `--run-archive-once`) reports `last_export.{game}.status: ok` with `unavailable: []` and a fresh
+  `last_ok_at`; `coverage.at_risk_count` 0 for both leagues; hub-mem shows no ALERT during the run (expected +10-14MB RSS, plus the
+  upload); heartbeat green; the Firebase `archive/` objects are the new ones.
+- Fail: any `failed`/`skipped_locked` that repeats, `unavailable` non-empty, an ALERT, RSS near the cap.
+- Back out: `archive.enabled: false` and restart; the files and the state stay (the state only accumulates, nothing to undo).
+  If the archive had overwritten Firebase objects wrongly, restore them from the `.legacy` copies as in step 2.
 
 ## Binding conditions (from project owner, still in force)
 
