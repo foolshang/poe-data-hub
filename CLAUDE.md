@@ -536,7 +536,7 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   `publish_skill_meta` did `fetchall()` on every `skill_stat_counts` row of the snapshot (PoE1
   216k rows, PoE2 340k) and then built a dict per row, both alive until the function returned:
   +128MB + 60MB for PoE1 (~190MB), hub RSS peak 332MB (PoE1) / 439MB (PoE2) of the 460MB cap,
-  cgroup `max` events 3,941, no OOM. It was NOT "432 files at once" (serializing a file costs
+  cgroup `max` events 3,941 (reclaim events at the limit, page cache included -- not a sign of being near the cap; the RSS peaks are, see SPEC 8.13), no OOM. It was NOT "432 files at once" (serializing a file costs
   ~nothing). Now the groups come from the small populations/passives rows and each skill's mods
   are streamed one skill at a time (`iter_skill_mods`, a lazy cursor ordered by `id`, which is
   contiguous per skill because `replace_skill_counts_for_snapshot` inserts a skill in one
