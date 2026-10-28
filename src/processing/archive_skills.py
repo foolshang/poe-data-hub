@@ -410,6 +410,15 @@ def render_skills_file(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_path.with_name(out_path.name + ".tmp")
     ids = merged_snapshot_ids(state)
+    # populations of (skill, bracket, bucket) keys that have no stat/passive row never become a leaf; they are listed
+    # at the end of the file so a state restored from it keeps them (a later snapshot may add rows to such a key)
+    empty_pops = [list(r) for r in state.execute(
+        """SELECT p.skill_type, p.skill, p.level_bracket, p.bucket, p.population FROM pop_acc p
+           WHERE NOT EXISTS (SELECT 1 FROM stat_acc s WHERE s.skill_type = p.skill_type AND s.skill = p.skill
+                             AND s.level_bracket = p.level_bracket AND s.bucket = p.bucket)
+             AND NOT EXISTS (SELECT 1 FROM passive_acc s WHERE s.skill_type = p.skill_type AND s.skill = p.skill
+                             AND s.level_bracket = p.level_bracket AND s.bucket = p.bucket)
+           ORDER BY 1, 2, 3, 4""")]
     stat_cur = state.execute(
         """SELECT skill_type, skill, level_bracket, bucket, slot, stat_id, mod_kind, count, value_min, value_max
            FROM stat_acc ORDER BY skill_type, skill, level_bracket, bucket, slot, count DESC, stat_id, mod_kind""")
@@ -442,6 +451,7 @@ def render_skills_file(
                 writer.emit(path, leaf)
                 leaves += 1
             writer.end()
+            fh.write(',"populations_without_rows":' + json.dumps(empty_pops, ensure_ascii=False, separators=(",", ":")))
             fh.write("}")
             fh.flush()
             os.fsync(fh.fileno())
@@ -462,9 +472,10 @@ def render_skills_file(
 
 def restore_state_from_skills_file(json_path: Path, state_path: Path) -> dict[str, int]:
     """Rebuild a state file from a rendered `{game}-{slug}.skills.json` (e.g. the copy on Firebase). Loads the
-    whole JSON, so it is a dev-machine tool, not for the 460MB VM. Lossless for everything the file renders; the
-    one thing a rendering cannot carry is the population of a (skill, bracket, bucket) that has no stat/passive
-    rows at all (it never appears as a leaf), and the per-snapshot metadata (only the ids survive)."""
+    whole JSON, so it is a dev-machine tool, not for the 460MB VM. Lossless for every count, value range and
+    population (those of keys without any stat/passive row travel in `populations_without_rows`; a file rendered
+    before that field existed restores without them). What a rendering cannot carry is the per-snapshot
+    metadata (only the ids survive)."""
     data = json.loads(Path(json_path).read_text(encoding="utf-8"))
     ids = data.get("merged_snapshot_ids")
     if not isinstance(ids, list):
@@ -490,6 +501,8 @@ def restore_state_from_skills_file(json_path: Path, state_path: Path) -> dict[st
                             state.execute("INSERT INTO passive_acc VALUES (?,?,?,?,?,?)",
                                           (skill_type, skill, bracket, bucket, r["keypassive"], r["count"]))
                             counts["passive_rows"] += 1
+        for skill_type, skill, bracket, bucket, population in data.get("populations_without_rows", []):
+            state.execute("INSERT INTO pop_acc VALUES (?,?,?,?,?)", (skill_type, skill, bracket, bucket, population))
         state.executemany(
             "INSERT INTO merged_snapshots (snapshot_id, source, merged_at) VALUES (?, 'restored', ?)",
             [(i, _now_iso()) for i in ids])

@@ -349,6 +349,35 @@ def test_state_can_be_rebuilt_from_the_rendered_json(tmp_path):
         assert again[key] == original[key]
 
 
+def _state_tables(path: Path) -> dict:
+    conn = open_state(path, GAME, LEAGUE, create=False)
+    try:
+        return {t: conn.execute(f"SELECT * FROM {t}").fetchall() for t in ("stat_acc", "passive_acc", "pop_acc")}
+    finally:
+        conn.close()
+
+
+def test_restored_state_plus_export_against_the_same_database_counts_nothing_twice(tmp_path):
+    live = _db(tmp_path)
+    first = _export(tmp_path, live)
+    ids = _skill_snapshot_ids(live)
+    assert _skills(first)["merged_snapshot_ids"] == ids, "the rendered file must carry every merged id"
+    # the disaster: the state file is gone, only the rendered skills file survived
+    new_dir = tmp_path / "archive2"
+    new_dir.mkdir()
+    restored_state = new_dir / first.state_path.name
+    restore_state_from_skills_file(first.skills_path, restored_state)
+    again = export_league_archive_streaming(live, GAME, LEAGUE, archive_dir=new_dir)
+    assert again.merge.merged == [] and again.merge.already_merged == len(ids)
+    ta, tb = _state_tables(restored_state), _state_tables(first.state_path)
+    for t in ta:
+        assert sorted(ta[t]) == sorted(tb[t]), (t, set(ta[t]) ^ set(tb[t]))
+    a, b = _skills(first), _skills(again)
+    a["exported_at"] = b["exported_at"] = ""
+    assert a == b
+    assert again.skills_bytes == first.skills_bytes
+
+
 def test_base_archive_keeps_the_shape_the_older_builder_wrote(tmp_path):
     live = _db(tmp_path)
     result = _export(tmp_path, live)
