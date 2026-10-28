@@ -456,7 +456,7 @@ def test_archive_previous_league_disabled_does_not_export_and_records_it(tmp_pat
     publisher = _status_publisher(tmp_path)
     cfg = {"archive": {"enabled": False}}
 
-    with patch("src.main.export_league_archive", side_effect=AssertionError("must not export while disabled")),          caplog.at_level("WARNING", logger="poe_data_hub"):
+    with patch("src.main.export_league_archive_streaming", side_effect=AssertionError("must not export while disabled")),          caplog.at_level("WARNING", logger="poe_data_hub"):
         _archive_previous_league_if_changed(
             db, publisher, "poe2", "Runes of Aldur", archive_dir=tmp_path / "archive", archive_enabled=False, cfg=cfg,
         )
@@ -1214,6 +1214,16 @@ class _FakeBlob:
     def upload_from_string(self, payload, content_type=None):
         self._blobs[self._path] = payload
 
+    def upload_from_filename(self, filename, content_type=None):
+        import base64, gzip, hashlib
+        data = Path(filename).read_bytes()
+        self.md5_hash = base64.b64encode(hashlib.md5(data).digest()).decode("ascii")
+        self.size = len(data)
+        self._blobs[self._path] = (gzip.decompress(data) if getattr(self, "content_encoding", None) == "gzip" else data).decode("utf-8")
+
+    def reload(self):
+        pass
+
 
 def test_run_gems_once_republishes_staged_copy_for_each_game(tmp_path):
     from src.main import run_gems_once
@@ -1937,3 +1947,90 @@ def test_run_scheduler_does_not_register_skill_meta_job_when_not_scheduled(tmp_p
 
     ids = {c.kwargs.get("id") for c in fake_scheduler.add_job.call_args_list}
     assert "skill_meta" not in ids
+
+
+# -- 2026-10-28: scheduled callers use the streaming exporter and report into status.json ------------------
+
+def _seed_skill_db(tmp_path):
+    """A DB with one skill-centric snapshot (finished, with rows) of poe1 Allflame."""
+    from tests.test_archive_skills import _db
+    from tests.test_archive_stream import GAME, LEAGUE
+    return _db(tmp_path, "skills.sqlite3"), GAME, LEAGUE
+
+
+def test_weekly_export_records_outcome_and_coverage_in_status(tmp_path):
+    db_path, game, league = _seed_skill_db(tmp_path)
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": [game], "archive": {"enabled": True}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)),          patch("src.main.PricesPublisher", return_value=publisher),          patch("src.main.job_lock.DEFAULT_LOCK_DIR", tmp_path / "locks"):
+        results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=db_path)
+    assert results == {game: league}
+    status = publisher.fetch_previous("status.json")["archive"]
+    last = status["last_export"][game]
+    assert last["status"] == "ok" and last["trigger"] == "weekly" and last["last_ok_at"] == last["at"]
+    assert last["snapshots_merged"] > 0 and last["unavailable"] == []
+    entry = next(e for e in status["coverage"]["leagues"] if e["league"] == league)
+    assert entry["at_risk_count"] == 0 and entry["archive_merged"] == last["snapshots_merged"]
+
+
+def test_failed_export_is_recorded_and_keeps_the_last_ok_time(tmp_path):
+    db_path, game, league = _seed_skill_db(tmp_path)
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": [game], "archive": {"enabled": True}}
+    publisher = _status_publisher(tmp_path)
+    common = [patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)),
+              patch("src.main.PricesPublisher", return_value=publisher),
+              patch("src.main.job_lock.DEFAULT_LOCK_DIR", tmp_path / "locks")]
+    for p in common:
+        p.start()
+    try:
+        run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=db_path)
+        ok_at = publisher.fetch_previous("status.json")["archive"]["last_export"][game]["last_ok_at"]
+        with patch("src.main.export_league_archive_streaming", side_effect=RuntimeError("boom")):
+            results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=db_path)
+    finally:
+        for p in common:
+            p.stop()
+    assert results == {game: None}
+    last = publisher.fetch_previous("status.json")["archive"]["last_export"][game]
+    assert last["status"] == "failed" and last["error_class"] == "RuntimeError" and last["last_ok_at"] == ok_at
+
+
+def test_export_skips_when_another_archive_run_holds_the_lock(tmp_path):
+    from src.utils import job_lock
+    db_path, game, league = _seed_skill_db(tmp_path)
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": [game], "archive": {"enabled": True}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.LocalDb", side_effect=lambda *a, **kw: LocalDb(db_path)),          patch("src.main.PricesPublisher", return_value=publisher),          patch("src.main.job_lock.DEFAULT_LOCK_DIR", tmp_path / "locks"),          job_lock.acquire("archive", tmp_path / "locks"):
+        results = run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=db_path)
+    assert results == {game: None}
+    assert publisher.fetch_previous("status.json")["archive"]["last_export"][game]["status"] == "skipped_locked"
+    assert not (tmp_path / "archive").exists()
+
+
+def test_disabled_archive_still_reports_what_is_unprotected_without_exporting(tmp_path):
+    db_path, game, league = _seed_skill_db(tmp_path)
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": [game], "archive": {"enabled": False}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.LocalDb", side_effect=AssertionError("must not open the DB writable while disabled")),          patch("src.main.PricesPublisher", return_value=publisher):
+        assert run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=db_path) == {}
+    status = publisher.fetch_previous("status.json")["archive"]
+    assert status["enabled"] is False and "last_export" not in status
+    entry = next(e for e in status["coverage"]["leagues"] if e["league"] == league)
+    assert entry["at_risk_count"] > 0 and entry["backup_covers_through"] is None and status["coverage"]["earliest_loss_at"]
+    assert not (tmp_path / "archive").exists()
+
+
+def test_insurance_copy_in_config_counts_as_protection_in_status(tmp_path):
+    import shutil
+    db_path, game, league = _seed_skill_db(tmp_path)
+    copy = tmp_path / "copy.sqlite3"
+    shutil.copyfile(db_path, copy)
+    cfg = {"firebase": {"bucket": "test-bucket"}, "game_versions": [game],
+           "archive": {"enabled": False, "extra_sources": [str(copy)]}}
+    publisher = _status_publisher(tmp_path)
+    with patch("src.main.PricesPublisher", return_value=publisher):
+        run_archive_export_once(cfg, archive_dir=tmp_path / "archive", db_path=db_path)
+    cov = publisher.fetch_previous("status.json")["archive"]["coverage"]
+    entry = next(e for e in cov["leagues"] if e["league"] == league)
+    assert entry["at_risk_count"] == 0 and entry["backup_covers_through"]["copy"] == "copy.sqlite3"
+    assert cov["copies"] == [{"name": "copy.sqlite3", "status": "ok"}]

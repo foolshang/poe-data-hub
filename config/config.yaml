@@ -211,6 +211,15 @@ archive:
   # retention.skill_stat_counts_days (45d) -- fix before then.
   enabled: false
   disabled_reason: "OOM risk: export loads whole league into RAM (2026-10-15 incident); awaiting SQL/streaming rewrite"
+  # The export has since been rewritten (src/processing/archive_runner.py: SQL aggregation, streaming writer, accumulating
+  # state; +10-14MB RSS measured on the VM, SPEC 8.13) and the scheduled callers use it, but it stays OFF until the first
+  # rebuild has been shipped to the VM (SPEC 8.13, "First rebuild"). Turning it on without that first state would build
+  # the skills file from scratch from whatever the live DB still holds.
+  #
+  # Insurance copies (prepared with tools/prepare_archive_copy.py, opened read-only, snapshot_id indexes required):
+  # snapshots in a copy are protected even if retention deletes them from the live DB, and the exporter merges from
+  # them when the live DB no longer holds the rows. Paths on the VM; empty until the copies are placed there.
+  extra_sources: []
 
 healthchecks:
   # Layer-1 dead-man-switch pings (healthchecks.io or compatible), sent only

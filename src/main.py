@@ -42,8 +42,9 @@ from src.processing.aggregator import (
     reprocess_chars_to_skill_mod_counts,
 )
 from src.processing.archetyper import Archetyper
-from src.processing.archive_export import DEFAULT_ARCHIVE_DIR, export_league_archive
+from src.processing.archive_export import DEFAULT_ARCHIVE_DIR
 from src.processing.archive_runner import export_league_archive_streaming
+from src.processing.archive_status import compute_archive_coverage
 from src.processing.char_cache import SnapshotProvider, StoreBackedCharacterCache
 from src.processing.skill_collect import CollectConfig, run_skill_collection
 from src.processing.skill_publish import (
@@ -1272,13 +1273,16 @@ def _archive_disabled_reason(cfg: dict[str, Any]) -> str:
 
 def _publish_archive_status(
     publisher: PricesPublisher, cfg: dict[str, Any], *, skipped_at: Optional[str] = None,
-    unarchived_league: Optional[dict[str, str]] = None,
+    unarchived_league: Optional[dict[str, str]] = None, export_outcome: Optional[tuple[str, dict[str, Any]]] = None,
+    coverage: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """`status["archive"]`: whether the archive export is switched off and
     why, so a disabled archive is visible in status.json instead of just
     silently absent (the 2026-10-15 OOM fix disabled it on purpose; this is
     what stops it staying off unnoticed). Best-effort -- never fails a job.
-    Returns the `archive` dict it wrote ({} if the status write failed)."""
+    `last_export.{game}` (the outcome of the latest streaming export, with `last_ok_at` kept across failures) and
+    `coverage` (what the archive and the insurance copies protect, see `archive_status.py`) survive every rewrite of this
+    block. Returns the `archive` dict it wrote ({} if the status write failed)."""
     archive_status: dict[str, Any] = {}
     try:
         status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
@@ -1299,6 +1303,18 @@ def _publish_archive_status(
                 archive_status["unarchived_league_changes"].append(
                     {**unarchived_league, "detected_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
                 )
+        last_export = dict(previous.get("last_export") or {})
+        if export_outcome is not None:
+            game, outcome = export_outcome
+            outcome = dict(outcome)
+            outcome["last_ok_at"] = outcome["at"] if outcome.get("status") == "ok" else (last_export.get(game) or {}).get("last_ok_at")
+            last_export[game] = outcome
+        if last_export:
+            archive_status["last_export"] = last_export
+        if coverage is not None:
+            archive_status["coverage"] = coverage
+        elif previous.get("coverage") is not None:
+            archive_status["coverage"] = previous["coverage"]
         status["archive"] = archive_status
         publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
     except Exception as e:
@@ -1318,6 +1334,71 @@ def _warn_unarchived_leagues(archive_status: dict[str, Any]) -> None:
             "export or run `--export-league-archive %s:%s` before then.",
             entry.get("game"), entry.get("league"), entry.get("detected_at", "unknown"), entry.get("game"), entry.get("league"),
         )
+
+
+def _archive_copies(cfg: dict[str, Any]) -> list[Path]:
+    """Insurance copies (`archive.extra_sources`): prepared `.sqlite3` files on the VM, opened read-only as extra sources."""
+    return [Path(p) for p in (cfg.get("archive", {}).get("extra_sources") or [])]
+
+
+def _archive_resume_hours(cfg: dict[str, Any]) -> float:
+    return float(cfg.get("skill_meta", {}).get("collect", {}).get("resume_max_age_hours", 48))
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _export_league_to_archive(
+    cfg: dict[str, Any], publisher: PricesPublisher, db: LocalDb, game: str, league: str, archive_dir: Path,
+    trigger: str,
+) -> dict[str, Any]:
+    """One league through the streaming, accumulating exporter (read-only on the database, a few tens of MB), under the
+    `archive` job lock so the weekly job, a league-change export and a manual CLI run never merge into the same state at
+    once. NEVER raises: the outcome (`status` ok | failed | skipped_locked, merge counts, error class) is returned and
+    recorded in `status.json`'s `archive.last_export.{game}` by the caller."""
+    outcome: dict[str, Any] = {"league": league, "trigger": trigger, "at": _utc_now_iso()}
+    try:
+        with job_lock.acquire("archive"):
+            result = export_league_archive_streaming(
+                db.db_path, game, league, archive_dir=archive_dir, publisher=publisher,
+                extra_sources=_archive_copies(cfg), resume_max_age_hours=_archive_resume_hours(cfg),
+            )
+        m = result.merge
+        outcome.update(
+            status="ok", snapshots_merged=len(m.merged), already_merged=m.already_merged, unavailable=m.unavailable,
+            stale_running=m.stale_running, not_finished=m.not_finished, publish_errors=result.publish_errors,
+        )
+        if m.unavailable:
+            log.error("archive(%s): snapshot(s) %s are finished but no source holds their rows -- permanently lost", game, m.unavailable)
+    except job_lock.JobAlreadyRunning as e:
+        outcome.update(status="skipped_locked", error=str(e))
+        log.warning("archive(%s): export of %r skipped -- %s", game, league, e)
+    except Exception as e:
+        outcome.update(status="failed", error_class=type(e).__name__, error=str(e)[:300])
+        log.error("archive(%s): export of %r failed: %s", game, league, e, exc_info=True)
+    return outcome
+
+
+def _refresh_archive_coverage(
+    publisher: PricesPublisher, cfg: dict[str, Any], db_path: Path, archive_dir: Path = DEFAULT_ARCHIVE_DIR,
+    export_outcome: Optional[tuple[str, dict[str, Any]]] = None,
+) -> None:
+    """Recompute what the archive and the insurance copies protect and write it (plus an export outcome) into
+    `status.json`'s `archive` block. Best-effort: a failure here only logs, it never fails the calling job."""
+    coverage = None
+    try:
+        retention_days = int(cfg.get("retention", {}).get("skill_stat_counts_days", 45))
+        cleanup_hour_utc = (int(cfg.get("schedule", {}).get("cleanup_hour_thailand", 4)) - 7) % 24
+        if Path(db_path).exists():
+            coverage = compute_archive_coverage(
+                Path(db_path), Path(archive_dir), copies=_archive_copies(cfg), retention_days=retention_days,
+                cleanup_hour_utc=cleanup_hour_utc, resume_max_age_hours=_archive_resume_hours(cfg),
+            )
+    except Exception as e:
+        log.warning("archive coverage could not be computed: %s", e)
+    if coverage is not None or export_outcome is not None:
+        _publish_archive_status(publisher, cfg, export_outcome=export_outcome, coverage=coverage)
 
 
 def _archive_previous_league_if_changed(
@@ -1347,13 +1428,19 @@ def _archive_previous_league_if_changed(
             _publish_archive_status(publisher, cfg, unarchived_league={"game": game, "league": previous_league})
         return
     log.info("meta job(%s): league changed %r -> %r, archiving the old league", game, previous_league, new_league)
+    cfg = cfg or {}
+    outcome = _export_league_to_archive(cfg, publisher, db, game, previous_league, archive_dir, "league_change")
+    if outcome["status"] != "ok":
+        log.error("meta job(%s): league-change archive export of %r did not complete: %s", game, previous_league, outcome)
     try:
-        export_league_archive(db, game, previous_league, archive_dir=archive_dir, publisher=publisher)
+        _refresh_archive_coverage(publisher, cfg, db.db_path, archive_dir, export_outcome=(game, outcome))
     except Exception as e:
-        log.error("meta job(%s): league-change archive export failed for %r: %s", game, previous_league, e, exc_info=True)
+        log.warning("meta job(%s): could not record the archive outcome in status.json: %s", game, e)
 
 
-def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARCHIVE_DIR) -> dict[str, Optional[str]]:
+def run_archive_export_once(
+    cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARCHIVE_DIR, db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, Optional[str]]:
     """Weekly safety-net export (skill-meta phase 5, item 21): re-exports
     whichever league is currently active for each configured game, so a VM
     that disappears mid-league never loses more than a week of archived
@@ -1361,7 +1448,11 @@ def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARC
     poe.ninja calls, just reading the already-local SQLite tables. Does NOT
     touch leagues that have already ended; those were already archived once
     at the moment `_run_meta_for_game` detected the league change, and
-    nothing about a closed league changes afterward. Returns
+    nothing about a closed league changes afterward. Streaming and
+    accumulating (`archive_runner`): each run merges the snapshots finished
+    since the last one into the league's state file, so this weekly cadence is
+    also what must stay well inside the 45-day retention. Records every
+    outcome and the archive/copy coverage in `status.json`. Returns
     {game: league_exported_or_None}."""
     firebase_cfg = cfg["firebase"]
     publisher = PricesPublisher(bucket_name=firebase_cfg["bucket"], project_id=firebase_cfg.get("project_id"))
@@ -1373,6 +1464,7 @@ def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARC
         _warn_unarchived_leagues(
             _publish_archive_status(publisher, cfg, skipped_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
         )
+        _refresh_archive_coverage(publisher, cfg, db_path, archive_dir)
         return {}
     results: dict[str, Optional[str]] = {}
     db = LocalDb()
@@ -1383,12 +1475,9 @@ def run_archive_export_once(cfg: dict[str, Any], archive_dir: Path = DEFAULT_ARC
                 log.info("archive job(%s): no snapshots recorded yet, nothing to export", game)
                 results[game] = None
                 continue
-            try:
-                export_league_archive(db, game, league, archive_dir=archive_dir, publisher=publisher)
-                results[game] = league
-            except Exception as e:
-                log.error("archive job(%s): export failed for league %r: %s", game, league, e, exc_info=True)
-                results[game] = None
+            outcome = _export_league_to_archive(cfg, publisher, db, game, league, archive_dir, "weekly")
+            results[game] = league if outcome["status"] == "ok" else None
+            _refresh_archive_coverage(publisher, cfg, db.db_path, archive_dir, export_outcome=(game, outcome))
     finally:
         db.close()
     return results
@@ -1480,6 +1569,9 @@ def run_cleanup_once(cfg: dict[str, Any]) -> None:
         keep = frozenset(f"{sanitize_league_filename(ev)}.json" for ev in active_events)
         deleted_events = publisher.delete_blobs_not_in(f"{game}/prices/events/", keep_names=keep)
         log.info("cleanup job(%s): deleted %d stale event price file(s), kept %d active", game, deleted_events, len(keep))
+
+    # the cleanup just deleted rows: refresh what the archive and the insurance copies still protect
+    _refresh_archive_coverage(publisher, cfg, DEFAULT_DB_PATH)
 
 
 def _cleanup_old_local_files(directory: Path, older_than_days: int) -> int:
@@ -1814,6 +1906,7 @@ def run_scheduler(cfg: dict[str, Any]) -> None:
     if not _archive_enabled(cfg):
         log.warning("scheduler: archive export is DISABLED (%s) -- no league archive will be written", _archive_disabled_reason(cfg))
     _warn_unarchived_leagues(_publish_archive_status(publisher, cfg))
+    _refresh_archive_coverage(publisher, cfg, DEFAULT_DB_PATH)
     _clear_stale_running_jobs(publisher)
 
     log.info(

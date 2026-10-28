@@ -284,6 +284,7 @@ def _now_iso() -> str:
 
 class LocalDb:
     def __init__(self, db_path: Path = DEFAULT_DB_PATH):
+        self.db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         # `timeout=30`: Python's own SQLITE_BUSY retry window -- learned the
         # hard way 2026-09-22, first live incremental skill run: a read-only
