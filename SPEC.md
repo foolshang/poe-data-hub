@@ -1732,14 +1732,105 @@ full rebuild on the VM (968 s / 1732 s of CPU on a box that serves the Discord b
 3. Ship to a staging directory on the VM (`gcloud compute scp`), never straight into `data/archive/`. On the VM compare
    the sha256 of each file with step 2, and read `merged_snapshot_ids` from the shipped state (`SELECT snapshot_id FROM
    merged_snapshots`) and from the skills file's header: both must equal the recorded list.
-4. Keep what is in `data/archive/` (the old 17 September files and any `.legacy`): move the staged files in only if no file of
-   the same name exists, otherwise stop and look.
+4. Preserve the old archive files (they have the SAME names as the new base files, see the table below), then move the staged
+   files in. VM: `mv data/archive/poe1-allflame.json data/archive/poe1-allflame.json.legacy` (same for
+   `poe2-forbidden-rites.json`); refuse if a `.legacy` already exists. Firebase: server-side copy
+   `archive/poe1-allflame.json` -> `archive/poe1-allflame.json.legacy` (same for PoE2), check that the copy's md5 equals the
+   original's, and only then let step 5/6 overwrite the original. Verify both against the backups below before touching anything.
 5. On the VM, one league at a time, under `tools/run_capped.sh` with the service untouched: `--export-league-archive
    <game>:<league>` (no `--rebuild-archive`). Expected: `merged` = only the snapshots taken after the copy, `already
    merged` = the copy's count, `unavailable` = `[]`. Anything else: stop, the `.bak` is the state as shipped.
 6. Compare the new state's `merged_snapshot_ids` with the shipped list plus the newly merged ones; only then enable publishing.
+**Names that exist today (checked 2026-10-28) against the names the new exporter writes:**
+
+| league | VM `data/archive/` today | Firebase `archive/` today | new base (SAME name) | new, no clash |
+|---|---|---|---|---|
+| Allflame (PoE1) | `poe1-allflame.json` 2,982,459 B (compact), 17 Sep | `poe1-allflame.json` 5,792,442 B (indented), 17 Sep | `poe1-allflame.json` | `poe1-allflame.skills.json`, `.skills.state.sqlite3` (VM only) |
+| Forbidden Rites (PoE2) | `poe2-forbidden-rites.json` 1,645,496 B, 17 Sep | `poe2-forbidden-rites.json` 3,253,406 B, 17 Sep | `poe2-forbidden-rites.json` | `poe2-forbidden-rites.skills.json`, `.skills.state.sqlite3` (VM only) |
+
+The new base file is the old shape (no `skills`), recomputed from the legacy tables, so it supersedes the 17 September files
+for every existing reader; the clash is only about not destroying the old bytes. The dev machine's own
+`data/archive/` holds an unrelated `poe2-runes-of-aldur.json` (21 Sep); it is neither on the VM nor on Firebase and is not touched.
+Reference copies of the four old files, taken before anything was changed (`D:\Backups\poe-hub\archive-legacy\`; the VM
+files and the Firebase objects were verified identical to them: sha256 equal for the VM files, md5 equal for Firebase):
+
+| file | sha256 | bytes |
+|---|---|---|
+| `vm_poe1-allflame.json` | `93fe593190e5146db947c9fec25fdb0a661912659d582c8ee23e6cf9ea99b19d` | 2,982,459 |
+| `vm_poe2-forbidden-rites.json` | `4c63a54e4ba125194af1883f2e21f02da7dc61710a9e11c36ef1763b42de5b06` | 1,645,496 |
+| `firebase_poe1-allflame.json` | `221e4e6c993190214451f99356ce99ee77a3425d15ac769ef20fb100ab527497` (md5 `e0JQ1IbMQgAaBfJnKgWzKA==`) | 5,792,442 |
+| `firebase_poe2-forbidden-rites.json` | `45b790b9e43b1d71f2fccafe2950a3b1fde7f2245a6985c239770587c8d6aea9` (md5 `X7+h00N33wIknMrBlK8cHg==`) | 3,253,406 |
+
 Rehearsed on 2026-10-28 in a temporary folder on the VM with states built from the insurance copies: the sha256 of both
 state files matched after transfer, and the live DB added exactly one snapshot per league (merged in 37 s / 47 s).
+
+**Scheduled callers and `status.json` (2026-10-28).** `run_archive_export_once` (weekly, Sunday 13:00 ICT) and
+`_archive_previous_league_if_changed` (league change, before the first snapshot of the new league) call the streaming exporter
+under the `archive` job lock (`data/locks/archive.lock`; a second run skips and reports `skipped_locked`). `archive.enabled` is
+still `false` in `config/config.yaml`; turn it on only after the first rebuild above has been shipped (otherwise the first run
+would build the skills file from whatever the live DB still holds). Insurance copies are listed in `archive.extra_sources`
+(paths on the VM, prepared with `tools/prepare_archive_copy.py`; empty until they are placed there). `status.json` -> `archive`:
+- `enabled`, `reason`, `last_skipped_at`, `unarchived_league_changes` (as before);
+- `last_export.{game}`: `league`, `trigger` (weekly | league_change), `at`, `status` (ok | failed | skipped_locked),
+  `snapshots_merged`, `already_merged`, `unavailable`, `stale_running`, `not_finished`, `publish_errors`, `error_class`/`error`,
+  `last_ok_at` (kept across failures);
+- `coverage` (`src/processing/archive_status.py`, read-only, index probes; refreshed at scheduler start, after the weekly job, after
+  a league-change export and after the daily cleanup, also while the archive is disabled): `computed_at`, `earliest_loss_at`,
+  `copies[]` (`name`, `status` ok | missing | not_indexed | error) and per league `live_snapshots_with_rows`, `archive_merged`,
+  `backup_covers_through` (`snapshot_id`, `created_at`, `copy`: how far the best insurance copy reaches), `at_risk_count`,
+  `at_risk[]` (first 20: `snapshot_id`, `created_at`, `retention_delete_at`), `earliest_loss_at`, `lost_count`/`lost_snapshot_ids`
+  (finished, rows already gone, in no source: already lost, reported only), `archive_state_error`.
+`at_risk` = finished snapshots whose rows are still in the live DB but are in neither the archive state nor any insurance copy;
+`retention_delete_at` = first daily cleanup (21:00 UTC) after `created_at + 45 days`.
+
+**Heartbeat (`tools/heartbeat_check.py`, `check_archive`).** Red when a league has `at_risk` snapshots whose
+`earliest_loss_at` is within 7 days (or already past) -- also while the archive is disabled, because it is the loss that is
+checked, not the switch. A disabled archive with no near loss is green. Only while `enabled`: red when a game's latest export is
+not `ok` and its `last_ok_at` is missing or older than 9 days (weekly cadence + the GitHub lateness margin, same as the other
+weekly artefacts), or a league's state file is unreadable. An absent `archive` block or one without `coverage` is not a problem.
+
+**Deploy deadline (computed 2026-10-28 from the real `created_at` in the live DB, read-only).** The insurance copies reach
+Allflame snapshot 509 (`2026-10-26T22:00:16Z`) and Forbidden Rites snapshot 510 (`2026-10-26T22:26:26Z`). The first snapshots
+that are in no copy:
+
+| league | first snapshot not in the copy | created_at (UTC) | + 45 days | first retention deletion |
+|---|---|---|---|---|
+| Allflame | 513 | 2026-10-27T22:00:17Z | 2026-12-11T22:00:17Z | **2026-12-12 21:00 UTC** (13 Dec 04:00 ICT) |
+| Forbidden Rites | 514 | 2026-10-27T22:24:10Z | 2026-12-11T22:24:10Z | **2026-12-12 21:00 UTC** (13 Dec 04:00 ICT) |
+
+So the archive must be enabled and have run successfully on the VM before **2026-12-12 21:00 UTC**; every later snapshot has its own
+deadline, 45 days after its `created_at` (`status.json` `coverage.at_risk` lists them). Snapshots 375..509 / 377..510 are safe in the copies (and, until their own 45
+days pass, in the live DB: the oldest, Allflame 375 from 2026-09-21T06:15:25Z, goes on 2026-11-05 21:00 UTC). If the first
+rebuild is built from the copies on the dev machine and shipped (above), those are already inside the state.
+
+**Insurance copies (identity = the `.gz`; the prepared, indexed files are derived from it and may differ in bytes if re-made).**
+
+| league | `.gz` (outside the repo) | bytes | sha256 of the `.gz` |
+|---|---|---|---|
+| Allflame | `D:\Backups\poe-hub\allflame_backup.sqlite3.gz` | 158,533,885 | `284cbe337e99e03eea2d9d426319507d704696bea9148d8679debe5e751c5e37` |
+| Forbidden Rites | `D:\Backups\poe-hub\forbiddenrites_backup.sqlite3.gz` | 225,650,179 | `576adb978ae3a9260515a40f242bb68632d184e9819722777b2718bf4077d114` |
+
+Prepared copies used for the rehearsals and the measurements (`python -m tools.prepare_archive_copy`, extraction + `snapshot_id`
+indexes; scratch folder of the 2026-10-28 session, not durable -- re-make from the `.gz` when needed): Allflame
+1,148,628,992 B, sha256 `68c741e2cf306b232e2692d7aed10083b1f450cf1688faa766357623c1cff804`; Forbidden Rites 1,580,523,520 B,
+sha256 `421a56e42df3fb2471cf269d0c1fd2c2f0b8d9398e8f8bdb8b29c2f8f388422d`. Neither copy is on the VM yet
+(`archive.extra_sources: []`).
+
+**Real Firebase upload test (2026-10-28, once, test path only).** `PricesPublisher.publish_file(..., gzip_upload=True)` with the
+70,851,241-byte Allflame skills file to `_test/archive-upload-check/poe1-allflame.skills.json` (a prefix nothing reads), from the
+dev machine with the owner's gcloud credentials: stored object 6,816,981 B, `Content-Type: application/json`,
+`Content-Encoding: gzip`, `Cache-Control: public, max-age=3600`; the publisher's own size+MD5 check passed; a plain GET (identity)
+returned 70,851,241 B with sha256 `5a224bd8...502a1` = the local file's, a GET with `Accept-Encoding: gzip` returned the 6,816,981
+stored bytes whose gunzip has the same sha256. Process peak working set during the upload +25.7MB over the process baseline
+(dev machine, Windows; the Google client sends a file this size in one request, so the cost is about the size of the gzip plus
+copies of it, ~13MB gz for PoE2). The object was deleted afterwards (exists: false, public URL 404, no `_test/` prefix left).
+
+**`memory.events` `max` is not "nearly out of memory" (2026-10-28).** The `max` counter of a cgroup counts every time usage hit
+the limit and reclaim ran, page cache included: `tools/run_capped.sh` used to treat it as a cap hit and stopped a read-only
+archive build at 36MB of anonymous memory under a 150MB cap, with the rest page cache. CLAUDE.md's skill-publish measurement
+(2026-10-19) quotes "cgroup `max` events 3,941" next to hub RSS peaks of 332MB (PoE1) / 439MB (PoE2) of the 460MB cap: read that
+counter as reclaim events, not as proof of being close to the cap; the closeness is shown by the RSS peaks themselves (439 of
+460MB is close). `run_capped.sh` now stops on anonymous memory and on `oom_kill` only.
 
 ## Binding conditions (from project owner, still in force)
 
