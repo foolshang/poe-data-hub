@@ -541,3 +541,71 @@ def test_run_returns_1_when_a_weekly_file_cannot_be_fetched():
     seq = _fresh_sequence(now) + [_status_resp(now), _fresh_skills_resp(now), _fresh_skills_resp(now), RuntimeError("404")] + _weekly_fresh_responses(now)[1:]
     with patch("requests.get", side_effect=seq):
         assert heartbeat_check.run() == 1
+
+
+# -- league archive (SPEC 8.13) ----------------------------------------------------------------------------------------
+
+_NOW = datetime(2026, 11, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _iso(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _archive(enabled, loss_in_days=None, last_export=None, state_error=None):
+    entry = {"game": "poe1", "league": "Allflame", "at_risk_count": 3, "archive_merged": 0,
+             "earliest_loss_at": None if loss_in_days is None else _iso(_NOW + timedelta(days=loss_in_days))}
+    if state_error:
+        entry["archive_state_error"] = state_error
+    block = {"enabled": enabled, "coverage": {"computed_at": _iso(_NOW), "leagues": [entry]}}
+    if last_export is not None:
+        block["last_export"] = last_export
+    return block
+
+
+def test_archive_absent_or_without_coverage_is_fine():
+    assert heartbeat_check.check_archive(None, _NOW) == []
+    assert heartbeat_check.check_archive({"enabled": False}, _NOW) == []
+    assert heartbeat_check.check_archive({"enabled": True}, _NOW) == []
+
+
+def test_disabled_archive_is_not_red_by_itself_nor_while_the_loss_is_far():
+    assert heartbeat_check.check_archive(_archive(False), _NOW) == []
+    assert heartbeat_check.check_archive(_archive(False, loss_in_days=30), _NOW) == []
+    assert heartbeat_check.check_archive(_archive(False, loss_in_days=7.01), _NOW) == []
+
+
+def test_unprotected_snapshots_deleted_within_a_week_are_red_even_while_disabled():
+    for enabled in (False, True):
+        problems = heartbeat_check.check_archive(_archive(enabled, loss_in_days=6.9), _NOW)
+        assert len(problems) == 1 and "Allflame" in problems[0] and "neither" in problems[0]
+    assert heartbeat_check.check_archive(_archive(False, loss_in_days=-1), _NOW), "already past the date: still red"
+
+
+def test_failed_export_is_red_only_while_enabled_and_only_when_the_last_good_one_is_old():
+    old = _iso(_NOW - timedelta(days=10))
+    recent = _iso(_NOW - timedelta(days=2))
+    failed = lambda ok: {"poe1": {"status": "failed", "error_class": "ArchiveStateError", "last_ok_at": ok}}
+    assert heartbeat_check.check_archive(_archive(True, last_export=failed(recent)), _NOW) == []
+    assert len(heartbeat_check.check_archive(_archive(True, last_export=failed(old)), _NOW)) == 1
+    assert "ever succeeded" in heartbeat_check.check_archive(_archive(True, last_export=failed(None)), _NOW)[0]
+    assert heartbeat_check.check_archive(_archive(False, last_export=failed(old)), _NOW) == []
+    assert heartbeat_check.check_archive(_archive(True, last_export={"poe1": {"status": "ok", "last_ok_at": old}}), _NOW) == []
+
+
+def test_unreadable_state_is_red_only_while_enabled():
+    assert len(heartbeat_check.check_archive(_archive(True, state_error="DatabaseError: x"), _NOW)) == 1
+    assert heartbeat_check.check_archive(_archive(False, state_error="DatabaseError: x"), _NOW) == []
+
+
+def test_run_returns_1_when_status_archive_shows_a_loss_within_a_week():
+    now = datetime.now(timezone.utc)
+    status_resp = _status_resp(now)
+    status_resp.json.return_value["archive"] = {
+        "enabled": False,
+        "coverage": {"leagues": [{"game": "poe1", "league": "Allflame", "at_risk_count": 2,
+                                  "earliest_loss_at": (now + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")}]},
+    }
+    sequence = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
+    with patch("requests.get", side_effect=sequence):
+        assert heartbeat_check.run() == 1

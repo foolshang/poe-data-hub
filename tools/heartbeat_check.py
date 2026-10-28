@@ -135,6 +135,13 @@ WEEKLY_ARTIFACT_MAX_AGE_DAYS = 9
 MIN_STATS_ENTRIES = 3000
 MIN_GEMS = 300
 MIN_POE1_ALIASES = 500
+# league archive (SPEC 8.13): red when a snapshot that is in neither the archive nor an insurance copy will be deleted by
+# retention within this many days. Not a freshness guess: the date is the hub's own computation (created_at + 45 days, next
+# 21:00 UTC cleanup) and this layer's latency is hours, so a week still leaves time to act.
+ARCHIVE_LOSS_WARNING_DAYS = 7
+# the weekly export (Sunday 13:00 ICT) plus the same GitHub lateness margin as WEEKLY_ARTIFACT_MAX_AGE_DAYS; only checked
+# while the archive is enabled
+ARCHIVE_EXPORT_MAX_AGE_DAYS = 9
 KNOWN_GEMS_SCHEMA_VERSION = 1
 KNOWN_ALIASES_SCHEMA_VERSION = 1
 
@@ -279,6 +286,47 @@ def check_aliases(game: str, doc: object, now: Optional[datetime] = None) -> lis
     return problems
 
 
+def check_archive(archive: object, now: Optional[datetime] = None) -> list[str]:
+    """`status.json` -> `archive` (written by the hub, see main._publish_archive_status).
+
+    Always: a league with snapshots in NEITHER the archive nor an insurance copy whose first retention deletion is within
+    ARCHIVE_LOSS_WARNING_DAYS. A switched-off archive is NOT a problem by itself (it is switched off on purpose, the hub
+    reports `enabled: false`); only the loss it allows is.
+    Only while `enabled`: the latest export of a game failed and the last good one is older than
+    ARCHIVE_EXPORT_MAX_AGE_DAYS (or never happened), or a league's state file cannot be read. An absent block or one
+    without `coverage` (a hub that does not write it yet) is not a problem."""
+    if not isinstance(archive, dict):
+        return []
+    now = now or datetime.now(timezone.utc)
+    problems: list[str] = []
+    coverage = archive.get("coverage") if isinstance(archive.get("coverage"), dict) else {}
+    for entry in coverage.get("leagues") or []:
+        loss_at = entry.get("earliest_loss_at")
+        if not loss_at:
+            continue
+        days_left = (_parse_iso(loss_at) - now).total_seconds() / 86400
+        if days_left <= ARCHIVE_LOSS_WARNING_DAYS:
+            problems.append(
+                f"archive: {entry.get('game')} {entry.get('league')!r}: {entry.get('at_risk_count')} snapshot(s) are in neither "
+                f"the archive nor an insurance copy and retention deletes the first at {loss_at} ({days_left:.1f} days)"
+            )
+    if archive.get("enabled"):
+        for entry in coverage.get("leagues") or []:
+            if entry.get("archive_state_error"):
+                problems.append(f"archive: {entry.get('game')} {entry.get('league')!r}: state file unreadable ({entry['archive_state_error']})")
+        for game, last in (archive.get("last_export") or {}).items():
+            if last.get("status") == "ok":
+                continue
+            last_ok = last.get("last_ok_at")
+            age_days = (now - _parse_iso(last_ok)).total_seconds() / 86400 if last_ok else None
+            if age_days is None or age_days > ARCHIVE_EXPORT_MAX_AGE_DAYS:
+                problems.append(
+                    f"archive: {game}: latest export {last.get('status')} ({last.get('error_class') or last.get('error')}) and "
+                    + ("no export has ever succeeded" if age_days is None else f"the last good one is {age_days:.1f} days old")
+                )
+    return problems
+
+
 def check_per_category_health(source: str, per_category: dict) -> Optional[str]:
     """Returns a problem description if more than half of `source`'s
     categories have "ok": False, None otherwise (including when
@@ -335,6 +383,7 @@ def run() -> int:
         meta_by_game = status["meta"]
         if status.get("stats_cache_stale"):
             problems.append("status.json: stats_cache_stale is true (the hub itself says its GGG stats table is stale)")
+        problems.extend(check_archive(status.get("archive")))
         for game in ("poe2", "poe1"):
             problem = check_meta_freshness(meta_by_game[game]["last_meta"])
             if problem:
