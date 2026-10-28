@@ -49,6 +49,7 @@ from src.storage.publisher import sanitize_league_filename
 log = logging.getLogger(__name__)
 
 STATE_SCHEMA_VERSION = 1
+RENDER_VERSION = 2  # bump when the rendered file's layout changes: an up-to-date file of an older layout is rendered again
 _BATCH = 5000
 
 _STATE_DDL = """
@@ -259,6 +260,13 @@ def _scan_source(
     return out
 
 
+def _has_rows(conn: sqlite3.Connection, snapshot_id: int) -> bool:
+    """Whether the source still holds rows of the snapshot: an index probe, not a count."""
+    return any(
+        conn.execute(f"SELECT 1 FROM {t} WHERE snapshot_id = ? LIMIT 1", (snapshot_id,)).fetchone() is not None
+        for t in ("skill_stat_counts", "skill_passive_counts"))
+
+
 def _fill_counts(conn: sqlite3.Connection, st: _SnapState) -> None:
     q = "SELECT COUNT(*) FROM {} WHERE snapshot_id = ?"
     st.stat_rows = conn.execute(q.format("skill_stat_counts"), (st.snapshot_id,)).fetchone()[0]
@@ -386,8 +394,7 @@ def merge_snapshots(
             seen = set(report.source_snapshots.get(name, []))
             for sid, st in scan.items():
                 if sid in already and st.status == "finished" and sid not in seen:
-                    _fill_counts(conns[name], st)
-                    if st.has_rows:
+                    if _has_rows(conns[name], sid):
                         report.source_snapshots.setdefault(name, []).append(sid)
     finally:
         for c in conns.values():
@@ -441,7 +448,8 @@ def render_skills_file(
             header = {
                 "schema_version": SCHEMA_VERSION, "kind": "skills", "game": game, "league": league,
                 "league_slug": sanitize_league_filename(league), "exported_at": exported_at or _now_iso(),
-                "age_buckets": ["1-21", "22-60", "61+", "unknown"], "merged_snapshot_ids": ids,
+                "age_buckets": ["1-21", "22-60", "61+", "unknown"], "render_version": RENDER_VERSION,
+                "merged_snapshot_ids": ids,
             }
             fh.write(json.dumps(header, ensure_ascii=False, separators=(",", ":"))[:-1])
             fh.write(',"skills":')
@@ -466,6 +474,29 @@ def render_skills_file(
         for cur in (stat_cur, pass_cur, pop_cur):
             cur.close()
     return {"bytes": out_path.stat().st_size, "leaves": leaves, "snapshots": len(ids)}
+
+
+def skills_file_is_current(path: Path, state: sqlite3.Connection) -> bool:
+    """True when `path` is a complete rendering, in the current layout, of exactly the snapshots the state has merged --
+    i.e. rendering again would write the same content (apart from `exported_at`). Reads only the head and the tail."""
+    path = Path(path)
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as fh:
+            head = fh.read(1 << 16).decode("utf-8", errors="replace")
+            fh.seek(max(0, size - 64))
+            tail = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    if not tail.rstrip().endswith("]}"):
+        return False
+    decoder = json.JSONDecoder()
+    try:
+        version = decoder.raw_decode(head, head.index('"render_version":') + len('"render_version":'))[0]
+        ids = decoder.raw_decode(head, head.index('"merged_snapshot_ids":') + len('"merged_snapshot_ids":'))[0]
+    except ValueError:
+        return False
+    return version == RENDER_VERSION and ids == merged_snapshot_ids(state)
 
 
 # ---- disaster recovery --------------------------------------------------------------------

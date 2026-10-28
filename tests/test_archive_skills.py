@@ -378,6 +378,38 @@ def test_restored_state_plus_export_against_the_same_database_counts_nothing_twi
     assert again.skills_bytes == first.skills_bytes
 
 
+def test_nothing_new_leaves_the_rendered_file_alone_and_anything_else_renders_again(tmp_path, monkeypatch):
+    import src.processing.archive_runner as runner
+    live = _db(tmp_path)
+    first = _export(tmp_path, live)
+    before = first.skills_path.read_bytes()
+    real_render = runner.render_skills_file
+    monkeypatch.setattr(runner, "render_skills_file", lambda *a, **k: pytest.fail("rendered although nothing changed"))
+    again = _export(tmp_path, live)
+    assert again.merge.merged == [] and again.skills_bytes == len(before)
+    assert first.skills_path.read_bytes() == before
+    monkeypatch.setattr(runner, "render_skills_file", real_render)
+    # a truncated file, a file of another layout, or one listing other snapshots must be rendered again
+    for damaged in (before[:-10], before.replace(b'"render_version":2', b'"render_version":1', 1),
+                    before.replace(b'"merged_snapshot_ids":[', b'"merged_snapshot_ids":[999999,', 1)):
+        first.skills_path.write_bytes(damaged)
+        fixed = _export(tmp_path, live)
+        assert fixed.merge.merged == []
+        assert json.loads(fixed.skills_path.read_text(encoding="utf-8"))["merged_snapshot_ids"] == _skill_snapshot_ids(live)
+        assert fixed.skills_path.read_bytes() != damaged
+
+
+def test_covered_report_for_merged_snapshots_follows_what_a_source_still_holds(tmp_path):
+    live = _db(tmp_path)
+    _export(tmp_path, live)
+    ids = _skill_snapshot_ids(live)
+    assert _export(tmp_path, live).merge.source_snapshots["live"] == ids
+    _age_out(live, ids[:2])
+    after = _export(tmp_path, live)
+    assert after.merge.already_merged == len(ids) and after.merge.unavailable == []
+    assert after.merge.source_snapshots["live"] == ids[2:]
+
+
 def test_base_archive_keeps_the_shape_the_older_builder_wrote(tmp_path):
     live = _db(tmp_path)
     result = _export(tmp_path, live)

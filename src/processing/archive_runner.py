@@ -24,6 +24,7 @@ from typing import Any, Optional, Sequence
 
 from src.processing.archive_skills import (
     ArchiveStateError, LegacyArchiveError, MergeReport, Source, merge_snapshots, open_state, render_skills_file,
+    skills_file_is_current,
 )
 from src.processing.archive_stream import build_league_archive_to_file
 from src.storage.publisher import sanitize_league_filename
@@ -106,10 +107,13 @@ def export_league_archive_streaming(
     state = open_state(state_path, game, league, create=not state_path.exists())
     try:
         result.merge = merge_snapshots(state, sources, game, league, resume_max_age_hours, now)
-        rendered = render_skills_file(state, game, league, skills_path)
+        if not result.merge.merged and skills_file_is_current(skills_path, state):
+            result.skills_bytes = skills_path.stat().st_size  # nothing new: the file on disk already is this rendering
+            log.info("archive: %s/%s skills file already current, not rendered again", game, league)
+        else:
+            result.skills_bytes = render_skills_file(state, game, league, skills_path)["bytes"]
     finally:
         state.close()
-    result.skills_bytes = rendered["bytes"]
     m = result.merge
     log.info(
         "archive: %s/%s merged %d new snapshot(s), %d already merged, %d unavailable, %d stale running, base %.1fMB, skills %.1fMB",
