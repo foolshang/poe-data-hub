@@ -33,17 +33,29 @@ jobs:
         id: check
         run: python -m tools.heartbeat_check
 
-      # Pings whether the checks passed or failed (red runs already alert through GitHub); skipped when the
-      # setup itself broke, so a ping always means "the checks really ran". Never fails the job.
+      # Pings whether the checks passed or failed, skipped when the setup itself broke so a ping always means
+      # "the checks really ran". A failed check pings <url>/fail (healthchecks.io marks the check down at once and
+      # alerts), a passed one pings the plain URL. Never fails the job. The URL is a secret: it is only expanded
+      # inside the shell, never echoed, and curl runs without -v.
       - name: Dead-man ping (healthchecks.io watches this heartbeat)
         if: steps.check.conclusion == 'success' || steps.check.conclusion == 'failure'
         env:
           HEARTBEAT_PING_URL: ${{ secrets.HEARTBEAT_PING_URL }}
+          CHECK_OUTCOME: ${{ steps.check.conclusion }}
         run: |
           if [ -z "$HEARTBEAT_PING_URL" ]; then
             echo "::warning::HEARTBEAT_PING_URL is not set -- nothing notices if this workflow stops running"
-          elif curl -fsS -m 10 --retry 3 -o /dev/null "$HEARTBEAT_PING_URL"; then
-            echo "dead-man ping sent"
+            exit 0
+          fi
+          target="${HEARTBEAT_PING_URL%/}"
+          if [ "$CHECK_OUTCOME" = "failure" ]; then
+            target="$target/fail"
+            kind="fail ping"
           else
-            echo "::warning::dead-man ping failed (not fatal)"
+            kind="success ping"
+          fi
+          if curl -fsS -m 10 --retry 3 -o /dev/null "$target"; then
+            echo "dead-man $kind sent"
+          else
+            echo "::warning::dead-man $kind failed (not fatal)"
           fi
