@@ -1905,6 +1905,17 @@ the export but still refreshes `coverage`).
    refreshes `coverage` from the shipped states).
 6. Check the combined pass criteria below.
 
+**Step B executed 2026-10-29 (16:10-16:22 UTC), all criteria met.** Staging re-verified (6 sha256 equal, `integrity_check` ok, ids equal
+header, 34 / 33); `.legacy` made on Firebase (md5 equal to the references) and on the VM (sha256 equal), staged files moved in; pushed
+`d11c350`, VM `git pull --ff-only` from `238b013`, restart 16:13:24; 2f Allflame (`--no-publish`): merged 2 (513, 517), 34 already,
+unavailable 0, peak anon 46MB; 2f Forbidden Rites (published): merged 2 (514, 518), 33 already, unavailable 0, peak anon 62MB, objects
+`archive/poe2-forbidden-rites.json` (3,275,686 B) and `.skills.json` (12,737,232 B stored, gzip, 122,371,601 B decoded) with the
+headers of the upload test, sha256 of the decoded bytes equal to the VM files; `coverage`: `archive_merged` 36 / 35, `at_risk_count` 0.
+**Operational note:** `--run-archive-once` run from a plain ssh shell has no `GOOGLE_APPLICATION_CREDENTIALS` (the unit and
+`run_capped.sh` set it), so its `status.json` write fails with 403 (WARNING `could not update status.json's archive flag`); run it with
+`GOOGLE_APPLICATION_CREDENTIALS=/opt/poe-data-hub/data/service-account.json`. The `HEARTBEAT_PING_URL` repo secret is NOT set (`gh
+secret list` shows only `GCP_STATS_REFRESH_SA_KEY`): the dead-man step prints its "not set" warning and sends nothing.
+
 **Why 2d/2e before the deploy is safe (read from commit `238b013`, 2026-10-29).** With `archive.enabled: false` the old code never
 touches `data/archive/`: (a) weekly job: `run_archive_export_once` (`src/main.py:1355`) returns `{}` at the `if not _archive_enabled(cfg)`
 check (`:1367`) before it opens the database or calls `export_league_archive`; its only I/O is `status.json` (`_publish_archive_status`,
