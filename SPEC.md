@@ -1890,53 +1890,79 @@ the export but still refreshes `coverage`).
   (`exported_at` is inside the base and skills files, so a rebuild on another day gives other hashes for those two; the state's
   hash does not depend on the day.) If the staging is older than the deploy by days, re-run 2c before 2d.
 
-**Step B -- deploy and ship in one window, `archive.enabled` stays `false`.**
-1. Record the VM's commit (`238b013`). `git push`, `git pull --ff-only` on the VM, announce, restart.
-2. Immediately 2d: preserve the old files. VM: `mv data/archive/<name>.json data/archive/<name>.json.legacy` for both leagues (refuse
-   if a `.legacy` exists). Firebase: server-side copy `archive/<name>.json` -> `archive/<name>.json.legacy`, md5 equal to the original
-   and to `D:\Backups\poe-hub\archive-legacy\` (`e0JQ1IbMQgAaBfJnKgWzKA==` / `X7+h00N33wIknMrBlK8cHg==`).
-3. 2e: `mv` the staged files into `data/archive/` (same filesystem, atomic).
-4. 2f: one league at a time under `sudo tools/run_capped.sh archive-<game> 150 90 -- .venv/bin/python -m src.main
+**Step B -- ship the files, deploy, export; `archive.enabled` stays `false` (order fixed 2026-10-29).**
+1. Record the VM's commit (`238b013`, the rollback point) and the time.
+2. 2d: preserve the old files, BEFORE any push. VM: `mv data/archive/<name>.json data/archive/<name>.json.legacy` for both leagues
+   (refuse if a `.legacy` exists). Firebase: server-side copy `archive/<name>.json` -> `archive/<name>.json.legacy`, md5 equal to the
+   original and to `D:\Backups\poe-hub\archive-legacy\` (`e0JQ1IbMQgAaBfJnKgWzKA==` / `X7+h00N33wIknMrBlK8cHg==`).
+3. 2e: `mv` the staged files into `data/archive/` (same filesystem, atomic). If the staging is days older than this step, re-run 2c first.
+4. `git push`, `git pull --ff-only` on the VM, announce, restart. Because the files are already in place, the first `coverage`
+   the new scheduler computes at start already sees the shipped states (`archive_merged` 34 / 33): the heartbeat does not go red
+   in this order, whatever the clock says.
+5. 2f: one league at a time under `sudo tools/run_capped.sh archive-<game> 150 90 -- .venv/bin/python -m src.main
    --export-league-archive <game>:<league> --no-publish` for Allflame first; then Forbidden Rites with publishing ON, to measure
    the upload on the VM (`run_capped` reports peak anon). Then `--run-archive-once` (still disabled: it skips the export and
    refreshes `coverage` from the shipped states).
-5. Check the combined pass criteria below.
+6. Check the combined pass criteria below.
 
-**Heartbeat during the window.** `status.json` carries the loss condition from the restart (the scheduler computes `coverage` at
-start, with `data/archive/` still empty of states) until the `--run-archive-once` of item 4 refreshes it. If the deploy happens
-**before 2026-10-29 21:00 UTC** the earliest loss is more than 7 days away and the heartbeat stays green throughout. If it happens
-later, expect red for as long as that window lasts: the restart-to-refresh time of items 1-4, which is the time of the manual steps
-plus the two exports (an hour at most if done back to back; the exports themselves measured 37 s / 47 s for one new snapshot plus
-the base build, publishing not yet measured on the VM). A red run happens only if a heartbeat run lands inside the window (runs are
-2.1-9.2 h apart, median 4.6 h), and it costs a failed GitHub run, nothing else. **This red is expected, not a failed criterion.**
-It can be avoided entirely by doing 2d and 2e before the restart (the running old hub does not read `data/archive/`); the owner's
-ordering above deploys first.
+**Why 2d/2e before the deploy is safe (read from commit `238b013`, 2026-10-29).** With `archive.enabled: false` the old code never
+touches `data/archive/`: (a) weekly job: `run_archive_export_once` (`src/main.py:1355`) returns `{}` at the `if not _archive_enabled(cfg)`
+check (`:1367`) before it opens the database or calls `export_league_archive`; its only I/O is `status.json` (`_publish_archive_status`,
+`:1272`); the cron is registered at `:1798-1800`. (b) `_archive_previous_league_if_changed` (`:1322`) returns at `if not
+archive_enabled` (`:1336`) after a log line and the same `status.json` write; it is called from the meta and skill jobs
+(`:703`, `:806`) with `archive_enabled=_archive_enabled(cfg)`. (c) service start: `run_scheduler` (`:1802-1804`) only logs the
+DISABLED warning and calls `_publish_archive_status` (status.json). (d) the only module that opens `data/archive/` is
+`archive_export.py` (`DEFAULT_ARCHIVE_DIR`, `:101`), imported by `src/main.py:45` and reached only from `:1350`, `:1386`, `:1405`; the
+last is the unguarded `--export-league-archive` CLI, which nobody runs; `git grep` over `src`, `tools`, `deploy`, `.github` at
+`238b013` finds no other reader, writer or directory listing (cleanup `:1413` mentions the archive only in a docstring). So the
+binding rule is narrowed: **new archive files may sit under the old code only while `archive.enabled` is `false`** (the old code's
+`--export-league-archive` would overwrite them and is not to be run); with `enabled: true` the old code must never run on them.
+
+**Heartbeat during the window.** In the order above the loss condition never reaches `status.json`: the old hub does not compute
+`coverage` (an absent `archive.coverage` is ignored by `check_archive`) and the new one computes it after the files are in place.
+If the owner chooses to deploy before shipping the files after all, the earlier analysis holds: red from the restart until the
+refresh, expected and not a failed criterion, and only if the clock is past 2026-10-29 21:00 UTC.
+
+**Which commands have a trustworthy exit code, and where the criteria are read (checked in code 2026-10-29).**
+- `--export-league-archive`: a non-zero exit (uncaught exception, e.g. `ArchiveStateError`, `LegacyArchiveError`, a missing source)
+  is reliable for "the build failed". Exit 0 is NOT enough: publish failures never raise (`archive_runner.py:134-137`, WARNING `could not
+  publish`, listed only in the result object) and `unavailable` snapshots only log an ERROR (`archive_runner.py:124`); the CLI throws
+  the result away and does not write `status.json`. Read the command's output for `merged`, `already merged`, `unavailable`, and fail
+  the step if it contains `could not publish` or `no source holds their rows`.
+- `--run-archive-once`: the exit code says nothing (it is 0 even if the export failed: `_export_league_to_archive` never raises, and a
+  held lock gives `skipped_locked`). Pass/fail is read from `status.json` -> `archive` after the command, with the command's start
+  time noted: `last_export.{game}.status` = `ok` (not `failed`/`skipped_locked`), `last_export.{game}.at` after that start,
+  `publish_errors` and `unavailable` empty, a fresh `last_ok_at`; and `coverage.computed_at` after that start (the only thing that
+  changes while the archive is disabled, where `last_export` is left as it was and `reason` explains the skip).
+- `git`, `systemctl`, `mv`, `sha256sum`: ordinary exit codes.
 
 **Combined pass criteria (steps 1 and 2 together).** All of: the service is `active`, no traceback at start, the journal shows
-`scheduler: archive export is DISABLED`; both manual exports exit 0 with `merged` = only the snapshots taken after the copies
-(513.. / 514..), `already merged` = 34 / 33, `unavailable: []`, peak anon well under the 135MB stop (32-41MB measured without the
-upload); the published Forbidden Rites objects have the headers of the upload test (Allflame is exported with `--no-publish`, so its Firebase objects stay the 17 September ones until step C); `status.json` -> `archive.coverage` shows
-`archive_merged` 34 + new / 33 + new, `at_risk_count` 0 at the moment of the refresh (afterwards only snapshots created after the
-2f run may appear, each with `earliest_loss_at` = its own `created_at` + 45 days -- expected, they are merged by step C) and
-`earliest_loss_at` null or later than 2026-12-12; a manual run of the heartbeat workflow is green; `journalctl -t hub-mem -p
-warning` shows no new ALERT and the post-restart RSS is within the usual range; the daily cleanup (21:00 UTC) and the skill run
-(22:00 UTC) complete as before and `coverage.computed_at` is refreshed after the cleanup; the Sunday job logs the DISABLED skip.
-Then observe 2-3 days.
+`scheduler: archive export is DISABLED`; both manual exports are clean by the rules above and report `merged` = only the snapshots
+taken after the copies (513.. / 514..), `already merged` = 34 / 33, `unavailable: []`, peak anon well under the 135MB stop (32-41MB
+measured without the upload); the published Forbidden Rites objects have the headers of the upload test (Allflame is exported with
+`--no-publish`, so its Firebase objects stay the 17 September ones until step C); `status.json` -> `archive.coverage` (read as above,
+`computed_at` after the `--run-archive-once` start) shows `archive_merged` 34 + new / 33 + new, `at_risk_count` 0 at the moment of the
+refresh (afterwards only snapshots created after the 2f run may appear, each with `earliest_loss_at` = its own `created_at` + 45
+days -- expected, they are merged by step C) and `earliest_loss_at` null or later than 2026-12-12; a manual run of the heartbeat
+workflow is green; `journalctl -t hub-mem -p warning` shows no new ALERT and the post-restart RSS is within the usual range; the
+daily cleanup (21:00 UTC) and the skill run (22:00 UTC) complete as before and `coverage.computed_at` is refreshed after the
+cleanup; the Sunday job logs the DISABLED skip. Then observe 2-3 days.
 
-**Failure of the combined step: back out BOTH parts.** Any of: 2f fails or exits non-zero, `unavailable` is non-empty, a published
-object is wrong, an ALERT or a traceback appears, `coverage` is absent or stale after the cleanup. Then, in this order:
-(a) code: `git checkout 238b013` in `/opt/poe-data-hub`, restart; (b) files: VM remove the new files from `data/archive/` and `mv
-<name>.json.legacy <name>.json`; Firebase copy `<name>.json.legacy` back over `<name>.json` (if 2f already published) and check md5
-against the references, delete the `.skills.json` objects if they were published; keep the state files renamed for inspection. A
-problem in only one half is not a reason to keep the other half: do not leave the new code running on old files or the new files
-under old code without the owner's decision. Nothing else on the VM was changed (config untouched; the extra `archive` keys left in
-`status.json` are inert).
+**Failure of the combined step: back out BOTH parts.** Any of: 2f fails (non-zero exit or a failing log rule above), `unavailable`
+is non-empty, a published object is wrong, an ALERT or a traceback appears, `coverage` is absent or stale after the cleanup. Then, in
+this order: (a) code: `git checkout 238b013` in `/opt/poe-data-hub`, restart; (b) files: VM remove the new files from
+`data/archive/` and `mv <name>.json.legacy <name>.json`; Firebase copy `<name>.json.legacy` back over `<name>.json` (if 2f already
+published) and check md5 against the references, delete the `.skills.json` objects if they were published; keep the state files
+renamed for inspection. Old code on the new files with `enabled: false` is harmless (see above), so a failure after 2e but before
+the push needs only (b). A problem in only one half is not a reason to leave the other half running unattended: do not leave the new
+code on old files or enable anything without the owner's decision. Nothing else on the VM was changed (config untouched; the extra
+`archive` keys left in `status.json` are inert).
 
 **Step C -- enable the archive, before 2026-11-09 21:00 UTC (Allflame ends; the league-change export fires when the meta job sees the
 new league, ~13 Nov).**
 - Do: only if the combined step passed and was observed 2-3 days; set `archive.enabled: true`, pull + restart; run `--run-archive-once`
   by hand once (or wait for Sunday 06:00 UTC, 1 and 8 Nov).
-- Pass: `last_export.{game}.status: ok` with `unavailable: []` and a fresh `last_ok_at`; `coverage.at_risk_count` 0 for both leagues;
+- Pass (read from `status.json`, not from the exit code of `--run-archive-once`): `last_export.{game}.status: ok` with `unavailable: []`, `publish_errors` empty and a fresh `last_ok_at`; `coverage.at_risk_count` 0 for both leagues;
   hub-mem shows no ALERT during the run (expected +10-14MB RSS, plus the upload); heartbeat green; the Firebase `archive/` objects
   are the new ones.
 - Fail: a `failed` / `skipped_locked` that repeats, `unavailable` non-empty, an ALERT, RSS near the cap.
@@ -1944,14 +1970,16 @@ new league, ~13 Nov).**
   objects were overwritten wrongly, restore them from the `.legacy` copies as above.
 
 **What `tools/heartbeat_check.py` does when it finds a problem (read from the code, 2026-10-29).** `run()` prints `::error::` lines and
-`return 1` (`tools/heartbeat_check.py:419-420`), so the step fails and GitHub marks the workflow run red. It never contacts
-healthchecks.io itself (no ping code in the script). The workflow's last step (`.github/workflows/heartbeat.yml:36-48`) runs when the
-check step `success` OR `failure`, and `curl`s the plain `HEARTBEAT_PING_URL` (no `/fail` suffix): a red run still sends a
-SUCCESS ping, so healthchecks.io stays green. healthchecks.io only means "the heartbeat workflow ran". It emails when no ping arrives
-within Period 12 h + Grace 6 h = 18 h after the last one. The alert for a red condition
-is therefore GitHub's own failed-run notification (depends on the owner's GitHub notification settings, not verifiable from the
-repo), and its latency is the gap to the next scheduled run (2.1-9.2 h measured, median 4.6 h) plus the run time; the dead-man email
-covers only "the heartbeat itself stopped" with a worst case of 18 h after the last ping.
+`return 1` (`tools/heartbeat_check.py:419-420`), so the step fails and GitHub marks the workflow run red. The script never contacts
+healthchecks.io (no ping code in it). Until commit `348822b` the workflow's last step (`.github/workflows/heartbeat.yml`) pinged the
+plain URL whether the check passed or failed, so a red run still looked green to healthchecks.io. Since `348822b` a failed check
+pings `<url>/fail` (the check goes down at once and healthchecks.io alerts), a passed one pings the plain URL; the dead-man role is
+unchanged: no ping within Period 12 h + Grace 6 h = 18 h also alerts. The URL is expanded only inside the shell (a secret, never
+echoed; `curl -fsS`, no `-v`). The latency of a red condition is still the gap to the next scheduled run (2.1-9.2 h measured, median
+4.6 h) plus the run time. After the push, the success path is confirmed by a manual `workflow_dispatch` run: the log says
+`dead-man success ping sent` and the check's log on healthchecks.io shows a success ping at that time. The fail path is confirmed
+without making production red by running the step's shell logic once by hand with `CHECK_OUTCOME=failure` against a throw-away
+healthchecks.io check (never the real one), and reading the "fail" entry in that check's log.
 
 ## Binding conditions (from project owner, still in force)
 
