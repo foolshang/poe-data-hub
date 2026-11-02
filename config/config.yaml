@@ -198,23 +198,17 @@ retention:
   skill_stat_counts_days: 45
 
 archive:
-  # DISABLED 2026-10-18 (temporary). run_archive_export_once and the
-  # league-change export (_archive_previous_league_if_changed) both load a
-  # league's whole stat tables into Python lists, which pushed poe-data-hub to
-  # ~2.6GB (711MB RSS + 1.9GB swap) on a 955MB VM and caused the 2026-10-15
-  # outage. While false: every skipped weekly cycle logs a WARNING, status.json
-  # carries archive.enabled=false (+ any league change that went unarchived),
-  # and `--export-league-archive` (manual) still works but WILL OOM the VM.
-  # Re-enable only after the export is rewritten to aggregate in SQL and stream
-  # in chunks, and measured against the real DB. A league that changes while
-  # this is false is NOT archived and its rows age out after
-  # retention.skill_stat_counts_days (45d) -- fix before then.
+  # History: disabled 2026-10-18 after the 2026-10-15 outage (the old export loaded a whole league into Python lists:
+  # 711MB RSS + 1.9GB swap on the 955MB VM). Re-enabled 2026-11-02 after the rewrite described in SPEC 8.13: SQL
+  # aggregation, a streaming writer and accumulating per-league state (+10-14MB RSS measured on the VM; first live run
+  # 2026-11-02, peak anon 69MB under tools/run_capped.sh). The first rebuild was shipped to the VM beforehand (SPEC 8.13,
+  # "First rebuild", step B), so the exporter continues from that state instead of rebuilding from whatever the live DB
+  # still holds. Set to false to switch the weekly job and the league-change export off again: each skipped cycle then
+  # logs a WARNING and status.json carries archive.enabled=false plus any unarchived league change (rows age out after
+  # retention.skill_stat_counts_days, 45d).
   enabled: true
+  # Reason text shown in the log and status.json only while `enabled` is false; kept as the last disable reason.
   disabled_reason: "OOM risk: export loads whole league into RAM (2026-10-15 incident); awaiting SQL/streaming rewrite"
-  # The export has since been rewritten (src/processing/archive_runner.py: SQL aggregation, streaming writer, accumulating
-  # state; +10-14MB RSS measured on the VM, SPEC 8.13) and the scheduled callers use it, but it stays OFF until the first
-  # rebuild has been shipped to the VM (SPEC 8.13, "First rebuild"). Turning it on without that first state would build
-  # the skills file from scratch from whatever the live DB still holds.
   #
   # Insurance copies (prepared with tools/prepare_archive_copy.py, opened read-only, snapshot_id indexes required):
   # snapshots in a copy are protected even if retention deletes them from the live DB, and the exporter merges from
