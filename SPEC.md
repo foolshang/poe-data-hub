@@ -1316,19 +1316,24 @@ disk. Two retention rules, `config.yaml`'s `retention.*`:
 - **`skill_stat_counts`/`skill_passive_counts`/`skill_populations`** (the
   actual results) are pruned after `retention.skill_stat_counts_days` (45)
   by the daily cleanup job (`LocalDb.cleanup_old_skill_stat_counts`).
-  (Historical, 2026-09: the guard below is the OLD builder's; since 8.13 the live path accumulates snapshots in a state file
-  instead and `ArchiveRegressionError` is no longer raised by anything that runs -- whether the streaming path has an equivalent
-  partial-loss check was not verified.)
-  This is only safe because `archive_export.py`'s `build_league_archive` now
-  merges every fresh recomputation against the *previously written* archive
-  file leaf-by-leaf instead of blindly overwriting: a leaf whose raw rows
-  aged out is frozen at its last-known value, and any *partial* loss (an
-  actual bug, not a clean age-out) raises `ArchiveRegressionError` and
-  refuses to write rather than silently shrinking a permanent historical
-  record -- see that module's own docstring for the full mechanism. This
-  retention must never ship without that guard already in place, since a
-  league's per-league archive is otherwise fully recomputed from live rows
-  on every export.
+  Why that is safe (rewritten 2026-11-02, checked in code): the old reason -- `archive_export.py`'s `build_league_archive`
+  merging each recomputation against the previous file and raising `ArchiveRegressionError` on a partial loss -- is history; nothing
+  that runs calls it any more (see 8.13). The live path never recomputes the `skills` dimension from the tables. It *accumulates*:
+  `archive_skills.merge_snapshots` adds one finished snapshot at a time into the state file `{game}-{slug}.skills.state.sqlite3`, in
+  one transaction that also records the id in `merged_snapshots` (`archive_skills.py:292-329`). Inside that transaction the number of
+  rows read must equal the count taken when the source was scanned, else nothing is merged (`:317-321`), and an id already recorded
+  raises (`:305-306`). Retention deletes rows from the live DB only; the state file is a separate file, so retention cannot make an
+  archive total smaller, and there is no total to compare against, hence no regression check. What protects the data instead is
+  *timing*: a snapshot must be merged (or sit in an `archive.extra_sources` copy) before its 45 days pass. `archive_status.
+  compute_archive_coverage` lists the finished snapshots that are in neither as `at_risk` with `retention_delete_at`
+  (`archive_status.py:127-131`), and `tools/heartbeat_check.check_archive` turns the workflow red when the earliest of those is within
+  `ARCHIVE_LOSS_WARNING_DAYS` = 7 days (`heartbeat_check.py:141`, `:303-312`). A snapshot whose rows are already gone and that is in no
+  source is `lost`: the exporter returns it in `unavailable` and logs an ERROR on every run (`archive_skills.py:376-377`,
+  `archive_runner.py:123-125`, `main.py:1372-1373`), `status.json` carries it as `coverage.leagues[].lost_count` /
+  `lost_snapshot_ids` and in `last_export.{game}.unavailable`, and the export's `status` stays `ok`. Nothing else reacts: `lost` does not
+  enter `at_risk` or `earliest_loss_at`, and `check_archive` does not read `lost_count` or `unavailable`, so the heartbeat stays green on a
+  loss that has already happened. (Gap, not fixed: an alert on `lost_count > 0` would have to be added to `check_archive`.) This
+  retention must never ship without the coverage warning in place, since the rows are the only source of that dimension.
 
 **First live incremental run (2026-09-22, measured after the two full first
 runs).** PoE1: 185 lists (fixed cost, no way to skip an unchanged list) + only
@@ -1993,7 +1998,9 @@ new league, ~13 Nov).**
 by hand, restart 16:51:16 (no DISABLED line, no traceback), `--run-archive-once` under `sudo tools/run_capped.sh archive-once 150 90`
 16:52:28-16:59:54Z, exit 0, peak anon 69MB. From `status.json`: `last_export` PoE2 / PoE1 `status: ok`, `at` 16:52:29Z / 16:54:53Z,
 `unavailable: []`, `publish_errors: []`, `last_ok_at` fresh, `snapshots_merged` 4 / 4 (`already_merged` 35 / 36), `coverage.computed_at`
-16:59:44Z, `at_risk_count` 0 / 0, `lost_count` 0, `earliest_loss_at` null; `not_finished: [472]` for PoE2 (not examined). Firebase: all
+16:59:44Z, `at_risk_count` 0 / 0, `lost_count` 0, `earliest_loss_at` null; `not_finished: [472]` for PoE2 is snapshot 472 (`2026-10-15T04:47:07Z`) of `skill_runs` id 50, `abandoned` on 2026-10-18 15:57:31Z after the
+15 Oct outage; read-only check of the live DB on 2026-11-02: no row of it in `skill_stat_counts`, `skill_passive_counts` or `skill_populations`
+(`EXISTS` probes on `snapshot_id`), so it never counts as at risk or lost (only finished snapshots do) and is expected to stay in `not_finished`. Firebase: all
 `archive/*` objects present; `poe1-allflame.json` md5 `1lySp9y1IFGhXSSVnfZvOQ==` differs from its `.legacy` (`e0JQ1IbMQgAaBfJnKgWzKA==`),
 both `.legacy` objects still equal the reference md5s, `poe1-allflame.skills.json` exists with the same headers as PoE2's (gzip,
 `application/json`, `max-age=3600`), and the sha256 of both `.skills.json` decoded bytes equals the VM file (Allflame `55232842...1f92`,
