@@ -209,7 +209,7 @@ archive:
   # in chunks, and measured against the real DB. A league that changes while
   # this is false is NOT archived and its rows age out after
   # retention.skill_stat_counts_days (45d) -- fix before then.
-  enabled: false
+  enabled: true
   disabled_reason: "OOM risk: export loads whole league into RAM (2026-10-15 incident); awaiting SQL/streaming rewrite"
   # The export has since been rewritten (src/processing/archive_runner.py: SQL aggregation, streaming writer, accumulating
   # state; +10-14MB RSS measured on the VM, SPEC 8.13) and the scheduled callers use it, but it stays OFF until the first
