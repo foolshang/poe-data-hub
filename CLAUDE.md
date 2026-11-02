@@ -403,19 +403,25 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
     an interval's first fire is "process start + the interval", so every
     restart silently moved it and the crash landed at a time nobody chose. Use
     a fixed `CronTrigger` (now Sunday 13:00 ICT; 04:00 collides with cleanup).
-  - **`build_league_archive` / `export_league_archive` load an entire league
-    into RAM** (`iter_*_for_league` return `list[tuple]`, then nested dicts)
-    and its "cheap, reads local SQLite only" docstring stopped being true once
-    the DB reached ~5GB. It stays **disabled** (`archive.enabled: false`, both
-    the weekly job and the league-change export in the meta jobs) until it is
-    rewritten to aggregate in SQL and stream in chunks, and its RSS is measured
-    against the real DB read-only before it is turned back on. While off:
-    every skipped cycle logs a WARNING, `status.json` carries
-    `archive.enabled` / `last_skipped_at` / `unarchived_league_changes`, and an
-    `ARCHIVE GAP` warning repeats every cycle for each league that changed
-    while it was off. **Deadline:** such a league's raw `skill_stat_counts`
-    rows are deleted by retention after 45 days -- permanent loss.
-    `--export-league-archive` is NOT guarded and will OOM the VM.
+  - **The old `build_league_archive` / `export_league_archive` (`archive_export.py`) loaded an
+    entire league into RAM** (`iter_*_for_league` returned `list[tuple]`, then nested dicts) and
+    its "cheap, reads local SQLite only" docstring stopped being true once the DB reached ~5GB.
+    History: the archive was switched off (`archive.enabled: false`, 2026-10-18, both the weekly
+    job and the league-change export in the meta jobs) and **re-enabled 2026-11-02** after the
+    rewrite in SPEC 8.13 (SQL aggregation, streaming writer, accumulating state;
+    `archive_stream.py` / `archive_skills.py` / `archive_runner.py`). Checked 2026-11-02: the
+    scheduled jobs and the `--export-league-archive` CLI both call
+    `export_league_archive_streaming` (`src/main.py:1363`, `:1504`), which opens the DB `mode=ro`;
+    the old builder is no longer called from `src` (only its constants are imported, plus its
+    own tests). Measured on the VM: first live `--run-archive-once` peak anon 69MB under
+    `tools/run_capped.sh` (cap 150MB), the step-B manual exports 46-62MB (recorded in SPEC 8.13). `--export-league-archive` is not
+    gated by `archive.enabled` (by design: manual escape hatch); it was NOT safe before the
+    rewrite, which is what the earlier "will OOM the VM" warning here was about. While the
+    flag is false: every skipped cycle logs a WARNING, `status.json` carries
+    `archive.enabled` / `last_skipped_at` / `unarchived_league_changes`, and an `ARCHIVE GAP`
+    warning repeats every cycle for each league that changed while it was off. **Deadline:**
+    such a league's raw `skill_stat_counts` rows are deleted by retention after 45 days --
+    permanent loss.
   - **Do not read a one-shot spike as a slow leak**: the first analysis here
     claimed ~350MB/day linear growth. `sar -r -f /var/log/sysstat/saDD` (10-min
     history, sysstat is installed) showed RAM flat at 375-530MB for the five
@@ -548,8 +554,8 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   **Don't "fix" this with one query per skill**: the table has 13.7M rows over 51 snapshots and
   the only usable index is `(snapshot_id)`, so 432 per-skill queries would each rescan the
   snapshot's 340k rows (~30 min instead of 4.5 s); a new index on a 13.7M-row table is not free
-  either. The same fetchall-the-whole-snapshot shape still exists in `archive_export.py` (disabled)
-  and must use this streaming approach when rewritten. `{game}/skills/` also keeps stale files of
+  either. The same fetchall-the-whole-snapshot shape existed in `archive_export.py`; the archive path
+  was rewritten to stream (SPEC 8.13, live 2026-11-02) and no longer calls that builder. `{game}/skills/` also keeps stale files of
   skills that dropped out of a later snapshot (5 PoE1 / 9 PoE2 on 2026-10-19; nothing deletes
   them and they are not in `index.json`). Open follow-ups, not done: RSS stays high after a big
   allocation because glibc does not return freed arenas (not a leak; try `malloc_trim` only if the

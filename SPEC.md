@@ -1316,6 +1316,9 @@ disk. Two retention rules, `config.yaml`'s `retention.*`:
 - **`skill_stat_counts`/`skill_passive_counts`/`skill_populations`** (the
   actual results) are pruned after `retention.skill_stat_counts_days` (45)
   by the daily cleanup job (`LocalDb.cleanup_old_skill_stat_counts`).
+  (Historical, 2026-09: the guard below is the OLD builder's; since 8.13 the live path accumulates snapshots in a state file
+  instead and `ArchiveRegressionError` is no longer raised by anything that runs -- whether the streaming path has an equivalent
+  partial-loss check was not verified.)
   This is only safe because `archive_export.py`'s `build_league_archive` now
   merges every fresh recomputation against the *previously written* archive
   file leaf-by-leaf instead of blindly overwriting: a leaf whose raw rows
@@ -1668,13 +1671,16 @@ Shrine`, `Impale`, `Pierce`, ...). `may_change` marks an unmapped case the hub p
 a later snapshot are not deleted (5 PoE1 / 9 PoE2 on 2026-10-19) and hold stale numbers; only the files that
 `{game}/skills/index.json` lists are current.
 
-### 8.13 League archive: streaming and accumulating (rewrite, 2026-10-28; local commits, not deployed)
+### 8.13 League archive: streaming and accumulating (rewrite 2026-10-28; deployed 2026-10-29, enabled 2026-11-02)
 
 Why: `build_league_archive` loaded a whole league into RAM (the 2026-10-15 outage) and the three skill tables are
 deleted by retention 45 days after a snapshot, so the `skills` dimension can no longer be recomputed -- it has to be
 **accumulated** one snapshot at a time. Code: `src/processing/archive_stream.py` (SQL aggregation, streaming JSON writer),
 `archive_skills.py` (state + merge + render + restore), `archive_runner.py` (one league), `tools/prepare_archive_copy.py`.
-The old `archive_export.py` is untouched and still what the (disabled) scheduled jobs call.
+The old `archive_export.py` was untouched when this was written; checked 2026-11-02, the scheduled jobs and the CLI no longer
+call its builder (`src/main.py:1363`, `:1504` call `export_league_archive_streaming`), and `src` only imports its constants
+(`SCHEMA_VERSION`, `_age_bucket`, `_now_iso`, `DEFAULT_ARCHIVE_DIR`); `build_league_archive` / `export_league_archive` /
+`ArchiveRegressionError` are now referenced only by `tests/test_archive_export.py`.
 
 **Three files per (game, league)** in `data/archive/`:
 - `{game}-{slug}.json` -- the file other apps already read: `mod_counts`, `skill_mod_counts`, `passives`, exactly the old
@@ -1766,9 +1772,9 @@ state files matched after transfer, and the live DB added exactly one snapshot p
 
 **Scheduled callers and `status.json` (2026-10-28).** `run_archive_export_once` (weekly, Sunday 13:00 ICT) and
 `_archive_previous_league_if_changed` (league change, before the first snapshot of the new league) call the streaming exporter
-under the `archive` job lock (`data/locks/archive.lock`; a second run skips and reports `skipped_locked`). `archive.enabled` is
-still `false` in `config/config.yaml`; turn it on only after the first rebuild above has been shipped (otherwise the first run
-would build the skills file from whatever the live DB still holds). Insurance copies are listed in `archive.extra_sources`
+under the `archive` job lock (`data/locks/archive.lock`; a second run skips and reports `skipped_locked`). `archive.enabled` was
+`false` in `config/config.yaml` when this was written (2026-10-28) and is `true` since 2026-11-02 (Step C below); it had to wait for the
+first rebuild to be shipped (otherwise the first run would build the skills file from whatever the live DB still holds). Insurance copies are listed in `archive.extra_sources`
 (paths on the VM, prepared with `tools/prepare_archive_copy.py`; empty until they are placed there). `status.json` -> `archive`:
 - `enabled`, `reason`, `last_skipped_at`, `unarchived_league_changes` (as before);
 - `last_export.{game}`: `league`, `trigger` (weekly | league_change), `at`, `status` (ok | failed | skipped_locked),
@@ -1854,7 +1860,7 @@ that day, red at 21:30 UTC). The code reads only extracted, indexed `.sqlite3` c
 A manifest of the `.gz` copies was proposed and declined: no new code. Instead the first rebuild is shipped in the same window as the
 deploy, so coverage sees those snapshots through the archive state (`archive_merged` 34 / 33) -- see the runbook.
 
-### Deploy runbook for the archive rewrite (2026-10-29; each step needs the owner's explicit go; 2a-2c done, nothing else run)
+### Deploy runbook for the archive rewrite (2026-10-29; each step needs the owner's explicit go; status 2026-11-02: steps A, B and C all executed, see their records below)
 
 Deploy mechanics are the project's usual ones (`git push`, on the VM `cd /opt/poe-data-hub && git pull --ff-only`, announce, then
 `sudo systemctl restart poe-data-hub`; the unit runs as `User=Winai`). State on 2026-10-29: the VM is at `238b013` (the rollback
@@ -1981,6 +1987,19 @@ new league, ~13 Nov).**
 - Fail: a `failed` / `skipped_locked` that repeats, `unavailable` non-empty, an ALERT, RSS near the cap.
 - Back out: `archive.enabled: false` and restart; files and state stay (the state only accumulates, nothing to undo). If Firebase
   objects were overwritten wrongly, restore them from the `.legacy` copies as above.
+
+**Step C executed 2026-11-02 (16:51-17:00 UTC), all criteria met.** Gates: no `skill_runs` row `running` (only run 50 `abandoned`),
+`running_jobs` empty, finished well before 20:30 UTC. VM at `d11c350` before; `archive.enabled` set to `true` in `config/config.yaml`
+by hand, restart 16:51:16 (no DISABLED line, no traceback), `--run-archive-once` under `sudo tools/run_capped.sh archive-once 150 90`
+16:52:28-16:59:54Z, exit 0, peak anon 69MB. From `status.json`: `last_export` PoE2 / PoE1 `status: ok`, `at` 16:52:29Z / 16:54:53Z,
+`unavailable: []`, `publish_errors: []`, `last_ok_at` fresh, `snapshots_merged` 4 / 4 (`already_merged` 35 / 36), `coverage.computed_at`
+16:59:44Z, `at_risk_count` 0 / 0, `lost_count` 0, `earliest_loss_at` null; `not_finished: [472]` for PoE2 (not examined). Firebase: all
+`archive/*` objects present; `poe1-allflame.json` md5 `1lySp9y1IFGhXSSVnfZvOQ==` differs from its `.legacy` (`e0JQ1IbMQgAaBfJnKgWzKA==`),
+both `.legacy` objects still equal the reference md5s, `poe1-allflame.skills.json` exists with the same headers as PoE2's (gzip,
+`application/json`, `max-age=3600`), and the sha256 of both `.skills.json` decoded bytes equals the VM file (Allflame `55232842...1f92`,
+Forbidden Rites `6473a00e...7d48`). hub-mem: no ALERT, `NRestarts` 0; manual heartbeat run 41486931760 green. The config line was then
+committed (`feb98e7`) and the comment rewritten (`55a4916`); the VM took both with `git checkout config/config.yaml` + `git pull
+--ff-only` (no restart, `git status` clean). The first scheduled weekly run after this is Sunday 2026-11-08 06:00 UTC.
 
 **What `tools/heartbeat_check.py` does when it finds a problem (read from the code, 2026-10-29).** `run()` prints `::error::` lines and
 `return 1` (`tools/heartbeat_check.py:419-420`), so the step fails and GitHub marks the workflow run red. The script never contacts
@@ -2614,7 +2633,7 @@ healthchecks.io check (never the real one), and reading the "fail" entry in that
       on top of it; a failure here is logged loudly but never blocks the
       meta run's own insert. (2) automatic weekly --
       `run_archive_export_once`, a new `IntervalTrigger(weeks=1)` scheduler
-      job, re-exports whichever league is currently active per game (bounds
+      job (superseded 2026-10-18: now a fixed `CronTrigger`, Sunday 13:00 ICT, `src/main.py:1899-1905`), re-exports whichever league is currently active per game (bounds
       data loss from a VM dying mid-league to at most a week; idempotent
       and cheap, no poe.ninja calls, so no healthcheck ping needed). (3)
       manual -- `--export-league-archive game:league` (e.g. `poe1:Mirage`)
