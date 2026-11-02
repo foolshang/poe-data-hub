@@ -1913,8 +1913,10 @@ unavailable 0, peak anon 46MB; 2f Forbidden Rites (published): merged 2 (514, 51
 headers of the upload test, sha256 of the decoded bytes equal to the VM files; `coverage`: `archive_merged` 36 / 35, `at_risk_count` 0.
 **Operational note:** `--run-archive-once` run from a plain ssh shell has no `GOOGLE_APPLICATION_CREDENTIALS` (the unit and
 `run_capped.sh` set it), so its `status.json` write fails with 403 (WARNING `could not update status.json's archive flag`); run it with
-`GOOGLE_APPLICATION_CREDENTIALS=/opt/poe-data-hub/data/service-account.json`. The `HEARTBEAT_PING_URL` repo secret is NOT set (`gh
-secret list` shows only `GCP_STATS_REFRESH_SA_KEY`): the dead-man step prints its "not set" warning and sends nothing.
+`GOOGLE_APPLICATION_CREDENTIALS=/opt/poe-data-hub/data/service-account.json`. The `HEARTBEAT_PING_URL` repo secret was NOT set when
+step B ran (2026-10-29 16:22 UTC); it was added 2026-10-29 16:35:32 UTC (`gh secret list`). Checked 2026-11-02: the manual
+heartbeat run 41486931760 shows `HEARTBEAT_PING_URL: ***` in the step env and logs `dead-man success ping sent`, and the owner
+saw the matching ping on healthchecks.io (check poe-hub-heartbeat), so the dead-man step works.
 
 **Why 2d/2e before the deploy is safe (read from commit `238b013`, 2026-10-29).** With `archive.enabled: false` the old code never
 touches `data/archive/`: (a) weekly job: `run_archive_export_once` (`src/main.py:1355`) returns `{}` at the `if not _archive_enabled(cfg)`
