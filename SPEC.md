@@ -1327,12 +1327,12 @@ disk. Two retention rules, `config.yaml`'s `retention.*`:
   *timing*: a snapshot must be merged (or sit in an `archive.extra_sources` copy) before its 45 days pass. `archive_status.
   compute_archive_coverage` lists the finished snapshots that are in neither as `at_risk` with `retention_delete_at`
   (`archive_status.py:127-131`), and `tools/heartbeat_check.check_archive` turns the workflow red when the earliest of those is within
-  `ARCHIVE_LOSS_WARNING_DAYS` = 7 days (`heartbeat_check.py:141`, `:303-312`). A snapshot whose rows are already gone and that is in no
+  `ARCHIVE_LOSS_WARNING_DAYS` = 7 days (`heartbeat_check.py:142`, `:365-372`, line numbers of 2026-11-03). A snapshot whose rows are already gone and that is in no
   source is `lost`: the exporter returns it in `unavailable` and logs an ERROR on every run (`archive_skills.py:376-377`,
   `archive_runner.py:123-125`, `main.py:1372-1373`), `status.json` carries it as `coverage.leagues[].lost_count` /
-  `lost_snapshot_ids` and in `last_export.{game}.unavailable`, and the export's `status` stays `ok`. Nothing in the hub reacts, and until 2026-11-02
-  the heartbeat did not either (`check_archive` ignored `lost_count` / `unavailable`). **Fixed 2026-11-02**
-  (`tools/heartbeat_check.py`, `check_archive_losses`): the heartbeat goes red for any snapshot id in a league's `lost_snapshot_ids`
+  `lost_snapshot_ids` and in `last_export.{game}.unavailable`, and the export's `status` stays `ok`. Nothing in the hub reacts, and until 2026-11-03
+  the heartbeat did not either (`check_archive` ignored `lost_count` / `unavailable`). **Fixed 2026-11-03**
+  (commit `3eb4251`, `tools/heartbeat_check.py`, `check_archive_losses`): the heartbeat goes red for any snapshot id in a league's `lost_snapshot_ids`
   or in `last_export.{game}.unavailable` that is not listed in `archive.acknowledged_lost_ids["<game>/<league>"]` in
   `config/config.yaml` (default `{}`); the message names the league, the new ids and how to acknowledge. The list is read by the
   heartbeat from the repo checkout (the workflow now also installs `pyyaml`), not from the VM: acknowledging is a commit + push, no VM
@@ -1804,7 +1804,9 @@ first rebuild to be shipped (otherwise the first run would build the skills file
 
 **Heartbeat (`tools/heartbeat_check.py`, `check_archive`).** Red when a league has `at_risk` snapshots whose
 `earliest_loss_at` is within 7 days (or already past) -- also while the archive is disabled, because it is the loss that is
-checked, not the switch. A disabled archive with no near loss is green. Only while `enabled`: red when a game's latest export is
+checked, not the switch. Also red, whatever `enabled` says, for any snapshot in `lost_snapshot_ids` or in `last_export.{game}.unavailable` that is not in
+`archive.acknowledged_lost_ids` (added 2026-11-03, commit `3eb4251`; see the retention note in 8.x). A disabled archive with no near loss and no
+unacknowledged loss is green. Only while `enabled`: red when a game's latest export is
 not `ok` and its `last_ok_at` is missing or older than 9 days (weekly cadence + the GitHub lateness margin, same as the other
 weekly artefacts), or a league's state file is unreadable. An absent `archive` block or one without `coverage` is not a problem.
 
@@ -2027,6 +2029,13 @@ echoed; `curl -fsS`, no `-v`). The latency of a red condition is still the gap t
 `dead-man success ping sent` and the check's log on healthchecks.io shows a success ping at that time. The fail path is confirmed
 without making production red by running the step's shell logic once by hand with `CHECK_OUTCOME=failure` against a throw-away
 healthchecks.io check (never the real one), and reading the "fail" entry in that check's log.
+
+### Backlog (archive; do with the next VM deploy)
+
+- **`lost_snapshot_ids` in `status.json` lists only the first 20 ids** (`archive_status.MAX_LISTED`, `archive_status.py:25`; used at `:145`), so
+  when `lost_count` exceeds 20 the surplus cannot be named or acknowledged and `check_archive_losses` stays red for it ("N more").
+  Fix in the exporter side (list all ids, or at least a compact range form) together with the next VM deploy: it changes what the
+  hub writes, so it needs a restart; the heartbeat needs no change.
 
 ## Binding conditions (from project owner, still in force)
 

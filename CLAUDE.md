@@ -711,6 +711,16 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
   When sizing something, first ask what the current view cannot see (a cap on a log, a list that is never read, a filter that is
   applied before counting), and say in the estimate that it is a lower bound.
 
+## Working agreements
+
+- **A change of system state is not finished until the docs say so.** When the state of the system changes (a setting, a deploy,
+  switching something on or off, closing a gap), update SPEC.md and the memory entries that mention it in the same round, without
+  waiting to be asked; date the entry with the date of the commit or the check, not of the day it was written.
+- **Report state from a live check only.** A status, a count or a "this is set / not set" in a report comes from looking at the real
+  thing in that session (the VM, `status.json`, the Firebase object, the workflow log, the database read-only), never from SPEC.md,
+  a memory file or the source code alone. Say what was checked; if it could not be checked, say so instead of inferring it. A workflow
+  step's *script text* is not its output: read the output lines.
+
 ## Layout
 
 - `src/fetchers/` — one module per external data source
