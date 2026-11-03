@@ -214,6 +214,11 @@ archive:
   # snapshots in a copy are protected even if retention deletes them from the live DB, and the exporter merges from
   # them when the live DB no longer holds the rows. Paths on the VM; empty until the copies are placed there.
   extra_sources: []
+  # Losses the owner has seen and accepted, {"<game>/<league>": [snapshot ids]}, e.g. {"poe1/Allflame": [512]}. Read ONLY by
+  # tools/heartbeat_check.py from the repo checkout (GitHub Actions): the hub ignores it, so changing it needs a push but no VM
+  # deploy and no restart. Without an entry, a snapshot in status.json's coverage `lost_snapshot_ids` or in
+  # last_export.{game}.unavailable turns the heartbeat red (SPEC 8.13, retention).
+  acknowledged_lost_ids: {}
 
 healthchecks:
   # Layer-1 dead-man-switch pings (healthchecks.io or compatible), sent only

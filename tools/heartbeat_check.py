@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -142,6 +143,10 @@ ARCHIVE_LOSS_WARNING_DAYS = 7
 # the weekly export (Sunday 13:00 ICT) plus the same GitHub lateness margin as WEEKLY_ARTIFACT_MAX_AGE_DAYS; only checked
 # while the archive is enabled
 ARCHIVE_EXPORT_MAX_AGE_DAYS = 9
+# `archive.acknowledged_lost_ids` in config/config.yaml: {"<game>/<league>": [snapshot ids]}. Read from the repo checkout the
+# workflow already has, not from the VM: acknowledging a loss is a commit + push, no VM deploy and no restart (the hub ignores
+# the key; the exporter keeps reporting the id as `unavailable` on every run, which is why this layer needs the list).
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.yaml"
 KNOWN_GEMS_SCHEMA_VERSION = 1
 KNOWN_ALIASES_SCHEMA_VERSION = 1
 
@@ -286,7 +291,63 @@ def check_aliases(game: str, doc: object, now: Optional[datetime] = None) -> lis
     return problems
 
 
-def check_archive(archive: object, now: Optional[datetime] = None) -> list[str]:
+def load_acknowledged_lost(path: Path = CONFIG_PATH) -> dict[str, set[int]]:
+    """`archive.acknowledged_lost_ids` of config.yaml as {"game/league": {ids}}. Anything missing or unreadable means NOTHING is
+    acknowledged: a loss then stays red, which is the safe direction for a monitor."""
+    try:
+        import yaml
+        raw = (yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}).get("archive", {}).get("acknowledged_lost_ids") or {}
+        return {str(k): {int(i) for i in (v or [])} for k, v in raw.items()}
+    except Exception as e:
+        print(f"::warning::could not read archive.acknowledged_lost_ids from {path} ({type(e).__name__}: {e}); treating none as acknowledged")
+        return {}
+
+
+def check_archive_losses(
+    archive: dict, acknowledged: Optional[dict[str, set[int]]] = None,
+) -> list[str]:
+    """Snapshots that are already gone for good: finished, no rows left, in neither the archive nor an insurance copy. They are
+    seen twice -- `coverage.leagues[].lost_snapshot_ids` (first 20 only) and `last_export.{game}.unavailable` -- and reported once
+    per league. Ids in `acknowledged["<game>/<league>"]` are known and accepted and stay quiet; the exporter keeps listing them on
+    every run, so without that list a single accepted loss would be red forever. Ids beyond the 20 that `lost_snapshot_ids` lists
+    cannot be named or acknowledged: they keep the check red until `lost_count` fits (documented limit, SPEC 8.13)."""
+    acknowledged = acknowledged or {}
+    coverage = archive.get("coverage") if isinstance(archive.get("coverage"), dict) else {}
+    found: dict[tuple[str, str], dict] = {}
+
+    def slot(game: str, league: str) -> dict:
+        return found.setdefault((game, league), {"ids": set(), "unlisted": 0})
+
+    for entry in coverage.get("leagues") or []:
+        ids = {int(i) for i in entry.get("lost_snapshot_ids") or []}
+        unlisted = max(0, int(entry.get("lost_count") or 0) - len(ids))
+        if ids or unlisted:
+            hit = slot(str(entry.get("game")), str(entry.get("league")))
+            hit["ids"] |= ids
+            hit["unlisted"] = unlisted
+    for game, last in (archive.get("last_export") or {}).items():
+        ids = {int(i) for i in (last or {}).get("unavailable") or []}
+        if ids:
+            slot(str(game), str((last or {}).get("league")))["ids"] |= ids
+    problems: list[str] = []
+    for (game, league), hit in sorted(found.items()):
+        key = f"{game}/{league}"
+        new_ids = sorted(hit["ids"] - acknowledged.get(key, set()))
+        if not new_ids and not hit["unlisted"]:
+            continue
+        what = f"snapshot(s) {new_ids}" if new_ids else "snapshot(s)"
+        extra = f" plus {hit['unlisted']} more than the 20 ids status.json lists" if hit["unlisted"] else ""
+        problems.append(
+            f"archive: {game} {league!r}: {what}{extra} are LOST for good (finished, rows already deleted by retention, in no "
+            f"archive state and no insurance copy). If the loss is known and accepted, add the id(s) to "
+            f"archive.acknowledged_lost_ids[\"{key}\"] in config/config.yaml and push (no VM deploy needed)"
+        )
+    return problems
+
+
+def check_archive(
+    archive: object, now: Optional[datetime] = None, acknowledged: Optional[dict[str, set[int]]] = None,
+) -> list[str]:
     """`status.json` -> `archive` (written by the hub, see main._publish_archive_status).
 
     Always: a league with snapshots in NEITHER the archive nor an insurance copy whose first retention deletion is within
@@ -300,6 +361,7 @@ def check_archive(archive: object, now: Optional[datetime] = None) -> list[str]:
     now = now or datetime.now(timezone.utc)
     problems: list[str] = []
     coverage = archive.get("coverage") if isinstance(archive.get("coverage"), dict) else {}
+    problems.extend(check_archive_losses(archive, acknowledged))
     for entry in coverage.get("leagues") or []:
         loss_at = entry.get("earliest_loss_at")
         if not loss_at:
@@ -315,7 +377,7 @@ def check_archive(archive: object, now: Optional[datetime] = None) -> list[str]:
             if entry.get("archive_state_error"):
                 problems.append(f"archive: {entry.get('game')} {entry.get('league')!r}: state file unreadable ({entry['archive_state_error']})")
         for game, last in (archive.get("last_export") or {}).items():
-            if last.get("status") == "ok":
+            if not isinstance(last, dict) or last.get("status") == "ok":
                 continue
             last_ok = last.get("last_ok_at")
             age_days = (now - _parse_iso(last_ok)).total_seconds() / 86400 if last_ok else None
@@ -383,7 +445,7 @@ def run() -> int:
         meta_by_game = status["meta"]
         if status.get("stats_cache_stale"):
             problems.append("status.json: stats_cache_stale is true (the hub itself says its GGG stats table is stale)")
-        problems.extend(check_archive(status.get("archive")))
+        problems.extend(check_archive(status.get("archive"), acknowledged=load_acknowledged_lost()))
         for game in ("poe2", "poe1"):
             problem = check_meta_freshness(meta_by_game[game]["last_meta"])
             if problem:

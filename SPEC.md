@@ -1330,10 +1330,18 @@ disk. Two retention rules, `config.yaml`'s `retention.*`:
   `ARCHIVE_LOSS_WARNING_DAYS` = 7 days (`heartbeat_check.py:141`, `:303-312`). A snapshot whose rows are already gone and that is in no
   source is `lost`: the exporter returns it in `unavailable` and logs an ERROR on every run (`archive_skills.py:376-377`,
   `archive_runner.py:123-125`, `main.py:1372-1373`), `status.json` carries it as `coverage.leagues[].lost_count` /
-  `lost_snapshot_ids` and in `last_export.{game}.unavailable`, and the export's `status` stays `ok`. Nothing else reacts: `lost` does not
-  enter `at_risk` or `earliest_loss_at`, and `check_archive` does not read `lost_count` or `unavailable`, so the heartbeat stays green on a
-  loss that has already happened. (Gap, not fixed: an alert on `lost_count > 0` would have to be added to `check_archive`.) This
-  retention must never ship without the coverage warning in place, since the rows are the only source of that dimension.
+  `lost_snapshot_ids` and in `last_export.{game}.unavailable`, and the export's `status` stays `ok`. Nothing in the hub reacts, and until 2026-11-02
+  the heartbeat did not either (`check_archive` ignored `lost_count` / `unavailable`). **Fixed 2026-11-02**
+  (`tools/heartbeat_check.py`, `check_archive_losses`): the heartbeat goes red for any snapshot id in a league's `lost_snapshot_ids`
+  or in `last_export.{game}.unavailable` that is not listed in `archive.acknowledged_lost_ids["<game>/<league>"]` in
+  `config/config.yaml` (default `{}`); the message names the league, the new ids and how to acknowledge. The list is read by the
+  heartbeat from the repo checkout (the workflow now also installs `pyyaml`), not from the VM: acknowledging is a commit + push, no VM
+  deploy and no restart, because the hub ignores the key (the exporter keeps listing an accepted loss as `unavailable` on every run,
+  which is why the list is needed to avoid a permanent red). An unreadable config means nothing is acknowledged (red stays red). Limit:
+  `lost_snapshot_ids` holds only the first 20 ids; if `lost_count` is larger the check stays red for the unlisted rest ("N more").
+  `lost` still does not enter `at_risk` / `earliest_loss_at` and the export `status` stays `ok`; only the heartbeat reacts.
+  This
+  retention must never ship without the coverage warning and the loss check in place, since the rows are the only source of that dimension.
 
 **First live incremental run (2026-09-22, measured after the two full first
 runs).** PoE1: 185 lists (fixed cost, no way to skip an unchanged list) + only

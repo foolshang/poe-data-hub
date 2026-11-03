@@ -598,6 +598,95 @@ def test_unreadable_state_is_red_only_while_enabled():
     assert heartbeat_check.check_archive(_archive(False, state_error="DatabaseError: x"), _NOW) == []
 
 
+def _lost(ids, lost_count=None, unavailable=None, league="Allflame", game="poe1"):
+    block = {"enabled": True, "coverage": {"computed_at": _iso(_NOW), "leagues": [
+        {"game": game, "league": league, "at_risk_count": 0, "earliest_loss_at": None,
+         "lost_count": len(ids) if lost_count is None else lost_count, "lost_snapshot_ids": ids}]}}
+    if unavailable is not None:
+        block["last_export"] = {game: {"league": league, "status": "ok", "unavailable": unavailable, "last_ok_at": _iso(_NOW)}}
+    return block
+
+
+def test_new_lost_snapshot_is_red_and_the_message_tells_what_to_do():
+    problems = heartbeat_check.check_archive(_lost([512, 513]), _NOW)
+    assert len(problems) == 1
+    msg = problems[0]
+    assert "Allflame" in msg and "[512, 513]" in msg and 'acknowledged_lost_ids["poe1/Allflame"]' in msg and "config/config.yaml" in msg
+
+
+def test_acknowledged_lost_snapshots_stay_green_even_though_the_exporter_keeps_listing_them():
+    ack = {"poe1/Allflame": {512, 513}}
+    assert heartbeat_check.check_archive(_lost([512, 513], unavailable=[512, 513]), _NOW, acknowledged=ack) == []
+
+
+def test_partly_acknowledged_is_red_only_for_the_unacknowledged_ids():
+    problems = heartbeat_check.check_archive(_lost([512, 513, 514], unavailable=[512, 513, 514]), _NOW, acknowledged={"poe1/Allflame": {512}})
+    assert len(problems) == 1 and "[513, 514]" in problems[0] and "512" not in problems[0].split("LOST")[0]
+
+
+def test_acknowledgement_is_per_league():
+    problems = heartbeat_check.check_archive(_lost([512]), _NOW, acknowledged={"poe2/Allflame": {512}, "poe1/Other": {512}})
+    assert len(problems) == 1
+
+
+def test_non_empty_unavailable_alone_is_red_and_an_empty_one_is_green():
+    archive = {"enabled": True, "last_export": {"poe2": {"league": "Forbidden Rites", "status": "ok", "unavailable": [530],
+                                                          "last_ok_at": _iso(_NOW)}}}
+    problems = heartbeat_check.check_archive(archive, _NOW)
+    assert len(problems) == 1 and "Forbidden Rites" in problems[0] and "[530]" in problems[0]
+    archive["last_export"]["poe2"]["unavailable"] = []
+    assert heartbeat_check.check_archive(archive, _NOW) == []
+
+
+def test_lost_ids_seen_in_coverage_and_in_unavailable_are_reported_once():
+    assert len(heartbeat_check.check_archive(_lost([512], unavailable=[512]), _NOW)) == 1
+
+
+def test_more_lost_than_status_json_lists_stays_red_after_the_listed_ones_are_acknowledged():
+    problems = heartbeat_check.check_archive(_lost([1, 2], lost_count=5), _NOW, acknowledged={"poe1/Allflame": {1, 2}})
+    assert len(problems) == 1 and "3 more" in problems[0]
+
+
+def test_old_status_json_without_the_fields_does_not_crash_and_is_green():
+    for archive in ({"enabled": True}, {"enabled": True, "coverage": {"leagues": [{"game": "poe1", "league": "A"}]}},
+                    {"enabled": True, "last_export": {"poe1": {"status": "ok", "last_ok_at": _iso(_NOW)}}},
+                    {"enabled": True, "last_export": {"poe1": None}}, {"coverage": None}):
+        assert heartbeat_check.check_archive(archive, _NOW) == []
+        assert heartbeat_check.check_archive(archive, _NOW, acknowledged={}) == []
+
+
+def test_load_acknowledged_lost_reads_the_config_and_fails_safe(tmp_path, capsys):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text('archive:\n  enabled: true\n  acknowledged_lost_ids:\n    "poe1/Allflame": [512, 513]\n', encoding="utf-8")
+    assert heartbeat_check.load_acknowledged_lost(cfg) == {"poe1/Allflame": {512, 513}}
+    cfg.write_text("archive:\n  enabled: true\n  acknowledged_lost_ids: {}\n", encoding="utf-8")
+    assert heartbeat_check.load_acknowledged_lost(cfg) == {}
+    cfg.write_text("archive:\n  enabled: true\n", encoding="utf-8")
+    assert heartbeat_check.load_acknowledged_lost(cfg) == {}
+    assert heartbeat_check.load_acknowledged_lost(tmp_path / "missing.yaml") == {}
+    assert "could not read" in capsys.readouterr().out
+    cfg.write_text("archive: [unclosed", encoding="utf-8")
+    assert heartbeat_check.load_acknowledged_lost(cfg) == {}
+
+
+def test_the_shipped_config_acknowledges_nothing_by_default():
+    assert heartbeat_check.load_acknowledged_lost() == {}
+
+
+def test_run_returns_1_for_a_new_lost_snapshot_and_0_when_it_is_acknowledged():
+    now = datetime.now(timezone.utc)
+
+    def run_with(ack):
+        status_resp = _status_resp(now)
+        status_resp.json.return_value["archive"] = _lost([512], unavailable=[512])
+        seq = _fresh_sequence(now) + [status_resp, _fresh_skills_resp(now), _fresh_skills_resp(now)] + _weekly_fresh_responses(now)
+        with patch("requests.get", side_effect=seq), patch.object(heartbeat_check, "load_acknowledged_lost", return_value=ack):
+            return heartbeat_check.run()
+
+    assert run_with({}) == 1
+    assert run_with({"poe1/Allflame": {512}}) == 0
+
+
 def test_run_returns_1_when_status_archive_shows_a_loss_within_a_week():
     now = datetime.now(timezone.utc)
     status_resp = _status_resp(now)
