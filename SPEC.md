@@ -2040,6 +2040,49 @@ real (red) data:** check step `failure` (poe1 prices 5221 min old, poe1 hardcore
 `success`, log line `dead-man fail ping sent`. What that proves: the step now runs on a failed check and curl got a 2xx from
 `<secret>/fail`. What it does not prove: that healthchecks.io marked the check down and alerted; the owner reads that on their side.
 
+**League gap: the stretch between two challenge leagues (built 2026-11-14, local commits only, NOT deployed, NOT pushed).**
+Incident: PoE1's Allflame ended 2026-11-09 and Covens opened 2026-11-13; in between poe.ninja's league list was
+`['Standard', 'Hardcore']`, so `LeagueDetector` raised "no eligible non-permanent league" for every PoE1 job on 11-11, 11-12 and
+(prices only) 11-13. The message was correct (checked live 2026-11-14: poe.ninja lists Covens, no Allflame). What broke was everything
+that read "a game failed" as "the job is down". Read from the VM journal (`healthcheck ping sent` / `skipping healthcheck ping`) and
+`data/fetch.log` (hc-ping.com requests, URLs are secrets so only a hash of each is compared), 2026-11-08 to 11-14:
+
+| Layer-1 check | last ping before | missed | back | hit by the gap? |
+|---|---|---|---|---|
+| prices (daily 16:5x UTC) | every day | none | n/a | no: it pings after the loop whatever happened (`run_prices_once`) |
+| news (every 5 min, 288/day) | always | none | n/a | no: independent of the league |
+| meta (slot job, 19:0x UTC) | 11-10 19:05 | 11-11, 11-12 (PoE1 failed), 11-13 (PoE1 `sample_total` 0, Covens' first snapshot 19:03:58Z) | not yet (needs PoE1 characters) | **yes** |
+| skill_meta (22:00 UTC) | 11-11 00:35 (the 11-10 run) | 11-11, 11-12 (PoE1 failed) | 11-13 23:39 UTC (06:39 ICT 11-14) | **yes**, 1 d 19 h as mailed |
+
+Layer 2 (heartbeat) went red from run 43132981719 (2026-11-12 01:13Z) for PoE1 prices, hardcore prices and meta `sample_total`.
+
+Design (agreed with the owner 2026-11-14):
+- `NoActiveLeagueError` (subclass of `ValueError`, `league_detector.py`) is raised only for "no eligible non-permanent league"; a broken
+  or empty league list stays a plain error, so only a real gap is excused.
+- `status.json["league_gap"][game] = {since, last_league, last_checked_at}` (additive). `since` = when the HUB first saw the gap (it
+  cannot be earlier than the first job that ran after the league ended) and is kept across cycles. Written by the prices, slot and skill
+  jobs; cleared by the skill job when it has a league again (the slot job clears it when the skill part is not in the run).
+  Source of the numbers: `league_gap` in `config/config.yaml` (`max_days: 7`, `launch_grace_hours: 48`), helpers in
+  `src/processing/league_gap.py`.
+- Layer 1 (`_all_games_got_real_characters` / `_all_games_got_real_skill_characters`): a game that hit a gap no older than 7 days does not
+  stop the meta / skill_meta ping, and neither does a game with 0 characters within 48 h of its league's first snapshot
+  (`meta_job_summary.league_first_snapshot_at`, `LocalDb.first_snapshot_created_at`). Always required: at least one game with real
+  characters, every other game real or excused. Past 7 days the ping stops again, as before; a crash is never a gap. The prices ping is
+  unchanged (it never depended on the league). A gap is no longer an `errors` entry in `status.json`, and logs a WARNING, not a traceback.
+- Layer 2 (`tools/heartbeat_check.py`, separate commit): findings of area prices / meta / skills for a game in `league_gap` (<= 7 days)
+  are printed as `::notice::skipped (league gap)` instead of failing; news, the weekly stats/gems/alias files, the archive and the
+  other game keep full strictness. Past 7 days: `::error::<game>: no active league for N days (> 7)` and the game's other findings
+  come back. `sample_total` 0 is a notice for 48 h after `league_first_snapshot_at`, an error after that or when the field is absent.
+  No `league_gap` key at all = the old strict behaviour.
+- Open edge (accepted): the gap entry is only cleared by the skill job (about 3 h after the slot job), so for that window a stale
+  prices/meta of that game stays excused; a hub that keeps failing after the league is back is caught after 7 days at the latest.
+- **Deploy order (owner's rule): hub first, heartbeat second.** Hub: push, `git pull --ff-only` on the VM, restart (announce first);
+  verify `status.json` gets `league_gap` at the next gap (or run `run_prices_once` against a faked list in a dev shell). Only then push
+  the heartbeat commit. `tests/test_league_gap.py` (hub) and `tests/test_league_gap_heartbeat.py` (heartbeat, also pins config.yaml to
+  the heartbeat's own copy of 7 / 48) cover both halves; mutation-checked 2026-11-14 (8 mutations, each fails a named test).
+- Not covered: the Layer-1 prices ping still fires during a gap with nothing published (by design: "the job ran"); Layer 2's prices
+  freshness for a gap game is skipped, so a prices job that is dead AND in a gap is only noticed after 7 days.
+
 ### Backlog (archive; do with the next VM deploy)
 
 - **`lost_snapshot_ids` in `status.json` lists only the first 20 ids** (`archive_status.MAX_LISTED`, `archive_status.py:25`; used at `:145`), so
@@ -2055,6 +2098,18 @@ real (red) data:** check step `failure` (poe1 prices 5221 min old, poe1 hardcore
   log what would be deleted before deleting. Needs a restart of the hub (new job code), so do it with the next VM deploy. Consumers
   already must read `index.json` and never list the folder, so this is housekeeping, not a contract change. The league's data is kept
   in `archive/{game}-{league}.skills.json`, not in these files.
+- **GitHub Actions versions and runner (backlog, owner request 2026-11-14; NOT done, do it with the next change to a workflow).**
+  Facts read from heartbeat run 43573341941 (2026-11-14): annotation "Node.js 20 is deprecated. The following actions target Node.js 20 but
+  are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5" (it still works: they are already forced onto
+  Node 24); notice "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026" and the run's own log says
+  `Image: ubuntu-26.04`, i.e. `ubuntu-latest` has already moved and the heartbeat ran fine on it (Python 3.12 comes from
+  `setup-python`, not from the image). Node of each major, read from its `action.yml` on 2026-11-14: checkout v4.4.0 `node20`, v6.1.0 and
+  v7.0.1 `node24`; setup-python v5.6.0 `node20`, v6.3.0 and v7.1.0 `node24` (latest releases: checkout v7.0.1, setup-python v7.1.0).
+  Both `.github/workflows/heartbeat.yml` and `refresh-stats.yml` use `@v4` / `@v5` / `ubuntu-latest` / Python 3.12. To decide then: move
+  both workflows to a node24 major (at least checkout v6, setup-python v6; read the release notes of v7 for breaking changes first), pin
+  the runner to a named image (`ubuntu-26.04` or `ubuntu-24.04`) instead of the moving `ubuntu-latest`, keep `python-version: "3.12"`
+  (already pinned, matches the VM), and check `pip install requests pyyaml` / the refresh scripts on the new image with a manual
+  `workflow_dispatch` of each workflow before relying on the schedule.
 
 ## Binding conditions (from project owner, still in force)
 

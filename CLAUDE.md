@@ -221,6 +221,14 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
     as a backup if healthchecks.io itself has an outage.
   - Ping/check failures in either layer must never fail the underlying job
     (Layer 1) or need secrets (Layer 2 reads public URLs only).
+  - **A game between two challenge leagues is a "league gap", not an outage** (2026-11-14; built locally, see
+    SPEC.md "League gap" for deploy state): `LeagueDetector` raises `NoActiveLeagueError` when poe.ninja lists no
+    non-permanent league (PoE1 2026-11-10..13: Allflame over, Covens not open). The hub writes `status.json["league_gap"]
+    [game]`; Layer 1's meta / skill_meta pings and Layer 2's prices / meta / skills findings excuse that game for at most 7
+    days (and an empty sample for 48 h after a league's first snapshot), never the other game, never news or the weekly files,
+    and a ping always needs at least one game with real characters. Only `NoActiveLeagueError` counts; a crash is still a
+    crash. **Deploy hub first, heartbeat second.** The heartbeat's `/fail` dead-man ping was skipped on failure until
+    2026-11-14 (`if:` without `always()`), see SPEC.md.
   - **"Freshness" and "success" are not the same as "the data is real"**
     (learned 2026-09-17, from the ninja_builds schema-break postmortem):
     both layers stayed green the entire ~43-day breakage, because both only
