@@ -24,6 +24,17 @@ league:
   poe1_override: ""
   cache_ttl_seconds: 43200 # 12h
 
+# The "league gap": the stretch between one challenge league ending and the next opening, when poe.ninja lists no
+# non-permanent league for a game (PoE1, 2026-11-10..13). See src/processing/league_gap.py and SPEC.md.
+# `tools/heartbeat_check.py` is deliberately independent of this file and carries its own copy of both numbers
+# (tests/test_league_gap.py fails if the two ever differ).
+league_gap:
+  # A game with no league for longer than this is no longer excused: Layer-1 pings stop and Layer 2 goes red.
+  max_days: 7
+  # An empty sample (0 characters) is expected for this long after a league's first snapshot; it is not the
+  # "silently empty" failure the 0-character rule exists for, as long as it ends.
+  launch_grace_hours: 48
+
 ggg:
   # trade2/data/stats is the one GGG endpoint this project touches (spec 3.5).
   # Fetched once, cached to disk, refreshed weekly.

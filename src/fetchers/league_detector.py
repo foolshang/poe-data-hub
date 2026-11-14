@@ -78,6 +78,14 @@ def find_hardcore_variant(main_league: str, all_league_names: list[str]) -> Opti
     return None
 
 
+class NoActiveLeagueError(ValueError):
+    """poe.ninja lists no non-permanent league for this game right now: the previous challenge league has ended
+    and the next one has not opened yet (PoE1: Allflame ended 2026-11-09, Covens opened 2026-11-13). That is a
+    legitimate state, not a fetch failure -- callers treat it as a "league gap" (see
+    `src/processing/league_gap.py`) instead of an error. Subclasses `ValueError` so every existing
+    `except ValueError` / `except Exception` still catches it exactly as before."""
+
+
 class LeagueDetector:
     def __init__(
         self,
@@ -137,7 +145,7 @@ class LeagueDetector:
     def _filter_candidates(self, raw_names: list[str]) -> list[str]:
         candidates = [name for name in raw_names if not (set(name.lower().split()) & EXCLUDE_LEAGUE_TOKENS)]
         if not candidates:
-            raise ValueError(f"no eligible non-permanent league found in {raw_names!r}")
+            raise NoActiveLeagueError(f"no eligible non-permanent league found in {raw_names!r}")
         return candidates
 
     def _validate(self, data: Any, url: str) -> None:

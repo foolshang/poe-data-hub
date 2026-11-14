@@ -30,7 +30,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from src.fetchers import deals, news, ninja_prices, scout_prices
 from src.fetchers.league_dates import LeagueDatesFetcher
-from src.fetchers.league_detector import LeagueDetector
+from src.fetchers.league_detector import LeagueDetector, NoActiveLeagueError
 from src.fetchers.ninja_builds import NinjaBuildsFetcher
 from src.fetchers.ninja_chars import NinjaCharsFetcher, item_detail_from_dict
 from src.fetchers.ninja_prices import NinjaPricesFetcher
@@ -45,6 +45,7 @@ from src.processing.archetyper import Archetyper
 from src.processing.archive_export import DEFAULT_ARCHIVE_DIR
 from src.processing.archive_runner import export_league_archive_streaming
 from src.processing.archive_status import compute_archive_coverage
+from src.processing import league_gap
 from src.processing.char_cache import SnapshotProvider, StoreBackedCharacterCache
 from src.processing.skill_collect import CollectConfig, run_skill_collection
 from src.processing.skill_publish import (
@@ -376,6 +377,11 @@ def run_prices_once(cfg: dict[str, Any]) -> dict[str, Any]:
         try:
             per_game[game] = _run_prices_for_game(http, publisher, cfg, game)
             overall_ok = overall_ok and per_game[game]["ok"]
+        except NoActiveLeagueError as e:
+            # between two challenge leagues: expected, bounded, not an outage (league_gap.py). The game keeps its
+            # last-known status entry and its last published prices, and does not count against overall_ok.
+            log.warning("prices job(%s): no active league (%s) -- league gap, nothing to publish", game, e)
+            _record_league_gap(publisher, game)
         except Exception as e:
             overall_ok = False
             log.error("prices job(%s): failed entirely: %s", game, e, exc_info=True)
@@ -728,6 +734,7 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             )
         db.insert_mod_counts(snapshot_id, [dataclasses.asdict(m) for m in all_mod_counts])
         db.commit()
+        league_first_snapshot_at = db.first_snapshot_created_at(game, league)
     finally:
         db.close()
 
@@ -772,6 +779,9 @@ def _run_meta_for_game(http: HttpClient, publisher: PricesPublisher, cfg: dict[s
             "peak_rss_mb": peak_rss_mb,
             "stats_source": normalizer.stats_source,
             "stats_cache_fetched_at": normalizer.stats_fetched_at,
+            # additive: when this league's first snapshot was taken -- start of the launch grace in which an empty
+            # sample is expected (league_gap.in_launch_grace; heartbeat_check reads it from status.json)
+            "league_first_snapshot_at": league_first_snapshot_at,
         },
     }
 
@@ -817,6 +827,7 @@ def _run_skill_meta_for_game(
         )
         publish_result = publish_skill_meta(db, publisher, game, cfg, normalizer, http)
         stats["publish"] = publish_result
+        stats["league_first_snapshot_at"] = db.first_snapshot_created_at(game, league)
     finally:
         db.close()
     normalizer.log_unmapped_summary()
@@ -1030,27 +1041,42 @@ def _run_meta_once_locked(
     try:
         results: dict[str, dict[str, Any]] = {}
         skill_results: dict[str, dict[str, Any]] = {}
+        gap_games: set[str] = set()  # games with no active league this cycle (see league_gap.py)
         for game in selected:
             if "slot" in parts:
                 try:
                     results[game] = _run_meta_for_game(http, publisher, cfg, game)
+                    if "skill" not in parts:
+                        _clear_league_gap(publisher, game)
+                except NoActiveLeagueError as e:
+                    gap_games.add(game)
+                    log.warning("meta job(%s): no active league (%s) -- league gap", game, e)
+                    _record_league_gap(publisher, game)
                 except Exception as e:
                     log.error("meta job(%s): failed entirely: %s", game, e, exc_info=True)
             if "skill" in parts:
                 try:
                     skill_results[game] = _run_skill_meta_for_game(http, publisher, cfg, game)
+                    _clear_league_gap(publisher, game)
+                except NoActiveLeagueError as e:
+                    gap_games.add(game)
+                    log.warning("skill meta job(%s): no active league (%s) -- league gap", game, e)
+                    _record_league_gap(publisher, game)
                 except Exception as e:
                     log.error("skill meta job(%s): failed: %s", game, e, exc_info=True)
 
+        settings = league_gap.GapSettings.from_cfg(cfg)
+        tolerated_gaps = _tolerated_gap_games(publisher, gap_games, settings)
+
         if "slot" not in parts or set(selected) != set(configured):
             log.info("meta job: partial run (games=%s, parts=%s) -- no healthcheck ping / status update", selected, parts)
-        elif _all_games_got_real_characters(cfg, results):
+        elif _all_games_got_real_characters(cfg, results, tolerated_gaps, settings):
             _ping_healthcheck(http, cfg.get("healthchecks", {}).get("meta_ping_url"), "meta")
         else:
             log.warning(
                 "meta job: skipping healthcheck ping -- at least one configured game got 0 characters "
-                "or failed entirely this cycle (sample_total by game: %s)",
-                {g: r.get("summary", {}).get("sample_total") for g, r in results.items()},
+                "or failed entirely this cycle (sample_total by game: %s, tolerated league gaps: %s)",
+                {g: r.get("summary", {}).get("sample_total") for g, r in results.items()}, sorted(tolerated_gaps),
             )
         if results:
             _update_meta_status(publisher, results)
@@ -1065,13 +1091,13 @@ def _run_meta_once_locked(
         if "skill" in parts:
             if set(selected) != set(configured):
                 log.info("skill meta job: partial run (games=%s) -- no healthcheck ping", selected)
-            elif _all_games_got_real_skill_characters(cfg, skill_results):
+            elif _all_games_got_real_skill_characters(cfg, skill_results, tolerated_gaps, settings):
                 _ping_healthcheck(http, cfg.get("healthchecks", {}).get("skill_meta_ping_url"), "skill_meta")
             else:
                 log.warning(
                     "skill meta job: skipping healthcheck ping -- at least one configured game got 0 characters "
-                    "or failed entirely this cycle (characters_distinct by game: %s)",
-                    {g: r.get("characters_distinct") for g, r in skill_results.items()},
+                    "or failed entirely this cycle (characters_distinct by game: %s, tolerated league gaps: %s)",
+                    {g: r.get("characters_distinct") for g, r in skill_results.items()}, sorted(tolerated_gaps),
                 )
 
         return {game: r["data"] for game, r in results.items()}
@@ -1079,28 +1105,128 @@ def _run_meta_once_locked(
         _mark_job_finished(publisher, "meta")
 
 
-def _all_games_got_real_characters(cfg: dict[str, Any], results: dict[str, dict[str, Any]]) -> bool:
+def _game_ok_for_ping(
+    game: str, result: Optional[dict[str, Any]], count: int, tolerated_gaps: "frozenset[str]",
+    first_snapshot_at: Any, settings: "league_gap.GapSettings", now: datetime,
+) -> Optional[bool]:
+    """How one game counts toward a Layer-1 ping: True = real characters, None = an accepted exception (a league
+    gap that is still within `settings.max_days`, or an empty sample inside the launch grace of the league's first
+    snapshot), False = blocks the ping. The exceptions exist because a game with no league (or a league that opened
+    minutes ago) is not the 2026-08-04 "silently empty" failure the 0-character rule was written for."""
+    if result is None:
+        return None if game in tolerated_gaps else False
+    if count > 0:
+        return True
+    if league_gap.in_launch_grace(first_snapshot_at, now, settings.launch_grace_hours):
+        return None
+    return False
+
+
+def _pings_allowed(verdicts: "list[Optional[bool]]") -> bool:
+    """Every game acceptable AND at least one with real characters: with all games excused the job produced nothing,
+    and a ping then would say "healthy" about a cycle that did no work."""
+    return all(v is not False for v in verdicts) and any(v is True for v in verdicts)
+
+
+def _all_games_got_real_characters(
+    cfg: dict[str, Any], results: dict[str, dict[str, Any]],
+    tolerated_gaps: "frozenset[str]" = frozenset(), settings: "Optional[league_gap.GapSettings]" = None,
+    now: Optional[datetime] = None,
+) -> bool:
     """The Layer-1 ping must never fire on a cycle where any configured game
     returned zero characters -- exactly the shape the 2026-08-04 ninja_builds
     schema break took: the job "succeeded" (published, pinged) every single
     cycle for ~43 days while the actual character sample was silently empty,
     so freshness/ping-success alone never caught it (see CLAUDE.md). A game
     missing from `results` entirely (its `_run_meta_for_game` call raised)
-    also fails this check, same as a present-but-empty one."""
+    also fails this check, same as a present-but-empty one.
+
+    Two bounded exceptions (2026-11-14, league gap; see `league_gap.py`): a game that has no active league
+    (`tolerated_gaps`, within `league_gap.max_days`) is skipped, and a game with 0 characters within
+    `league_gap.launch_grace_hours` of its league's first snapshot is skipped. Either way at least one other game
+    must have real characters. With the defaults (no gaps, no settings) this is the original rule."""
     configured = cfg.get("game_versions", ["poe2"])
-    if set(results) != set(configured):
-        return False
-    return all(r.get("summary", {}).get("sample_total", 0) > 0 for r in results.values())
+    settings = settings or league_gap.GapSettings()
+    now = now or datetime.now(timezone.utc)
+    verdicts: list[Optional[bool]] = []
+    for game in configured:
+        result = results.get(game)
+        summary = (result or {}).get("summary", {})
+        verdicts.append(_game_ok_for_ping(
+            game, result, summary.get("sample_total", 0), tolerated_gaps, summary.get("league_first_snapshot_at"),
+            settings, now,
+        ))
+    return _pings_allowed(verdicts)
 
 
-def _all_games_got_real_skill_characters(cfg: dict[str, Any], skill_results: dict[str, dict[str, Any]]) -> bool:
+def _all_games_got_real_skill_characters(
+    cfg: dict[str, Any], skill_results: dict[str, dict[str, Any]],
+    tolerated_gaps: "frozenset[str]" = frozenset(), settings: "Optional[league_gap.GapSettings]" = None,
+    now: Optional[datetime] = None,
+) -> bool:
     """Same rule as `_all_games_got_real_characters`, for the skill-centric
     ping: a game missing entirely (its `_run_skill_meta_for_game` call
-    raised) or present with zero distinct characters both fail the check."""
+    raised) or present with zero distinct characters both fail the check,
+    except for the same two bounded league-gap exceptions."""
     configured = cfg.get("game_versions", ["poe2"])
-    if set(skill_results) != set(configured):
-        return False
-    return all(r.get("characters_distinct", 0) > 0 for r in skill_results.values())
+    settings = settings or league_gap.GapSettings()
+    now = now or datetime.now(timezone.utc)
+    verdicts: list[Optional[bool]] = []
+    for game in configured:
+        result = skill_results.get(game)
+        verdicts.append(_game_ok_for_ping(
+            game, result, (result or {}).get("characters_distinct", 0), tolerated_gaps,
+            (result or {}).get("league_first_snapshot_at"), settings, now,
+        ))
+    return _pings_allowed(verdicts)
+
+
+def _record_league_gap(publisher: PricesPublisher, game: str) -> None:
+    """Writes `status["league_gap"][game]` (first-seen time kept across cycles). Best-effort: a status write
+    failing must not turn an expected gap into a job crash."""
+    try:
+        status = publisher.fetch_previous(STATUS_BLOB_PATH) or {"errors": []}
+        existed = isinstance(status.get("league_gap"), dict) and game in status["league_gap"]
+        entry = league_gap.note_gap(status, game, datetime.now(timezone.utc))
+        publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+        if not existed:
+            log.warning("league gap(%s): first seen now (last known league %r)", game, entry.get("last_league"))
+    except Exception as e:
+        log.warning("league gap(%s): could not record it in status.json: %s", game, e)
+
+
+def _clear_league_gap(publisher: PricesPublisher, game: str) -> None:
+    """Removes the gap entry once a job has a league again; a no-op (and no write) when there is none."""
+    try:
+        status = publisher.fetch_previous(STATUS_BLOB_PATH) or {}
+        removed = league_gap.clear_gap(status, game)
+        if removed is None:
+            return
+        publisher.publish(status, STATUS_BLOB_PATH, cache_control="no-cache")
+        age = league_gap.gap_age_days(removed, datetime.now(timezone.utc))
+        log.info("league gap(%s): over after %s days (since %s, last league %r)",
+                 game, f"{age:.1f}" if age is not None else "?", removed.get("since"), removed.get("last_league"))
+    except Exception as e:
+        log.warning("league gap(%s): could not clear it in status.json: %s", game, e)
+
+
+def _tolerated_gap_games(
+    publisher: PricesPublisher, gap_games: "set[str]", settings: "league_gap.GapSettings",
+) -> "frozenset[str]":
+    """Which of this cycle's gap games are still within `settings.max_days` (-> Layer-1 pings keep going for the
+    other games). One past the limit is loud, and no longer excused: the pings stop exactly as before the gap logic."""
+    if not gap_games:
+        return frozenset()
+    try:
+        status = publisher.fetch_previous(STATUS_BLOB_PATH) or {}
+    except Exception as e:
+        log.warning("league gap: could not read status.json (%s) -- treating the gap as not tolerated", e)
+        return frozenset()
+    tolerated, exceeded = league_gap.classify(status, gap_games, settings.max_days, datetime.now(timezone.utc))
+    for game, age in exceeded.items():
+        log.error("league gap(%s): no active league for %.1f days (> %s) -- no longer tolerated, Layer-1 pings stop",
+                  game, age, settings.max_days)
+    return tolerated
 
 
 def _mark_job_running(publisher: PricesPublisher, job_name: str) -> None:

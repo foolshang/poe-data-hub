@@ -600,6 +600,15 @@ class LocalDb:
         ).fetchone()
         return row[0] if row else None
 
+    def first_snapshot_created_at(self, game: str, league: str) -> Optional[str]:
+        """`created_at` (UTC ISO `...Z`) of the first snapshot this game ever recorded for `league`, or None.
+        The start of the launch grace in `league_gap.in_launch_grace`: a league that has only just opened may have
+        no characters on poe.ninja yet (Covens, 2026-11-13: first snapshot 19:03:58Z, 0 of them)."""
+        row = self._conn.execute(
+            "SELECT MIN(created_at) FROM snapshots WHERE game = ? AND league = ?", (game, league)
+        ).fetchone()
+        return row[0] if row and row[0] else None
+
     def iter_skill_mod_counts_for_league(self, game: str, league: str) -> list[tuple]:
         """Every skill_mod_counts row ever recorded for (game, league),
         joined to its snapshot's days_since_league_start -- used by
