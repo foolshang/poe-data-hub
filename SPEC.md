@@ -2040,7 +2040,7 @@ real (red) data:** check step `failure` (poe1 prices 5221 min old, poe1 hardcore
 `success`, log line `dead-man fail ping sent`. What that proves: the step now runs on a failed check and curl got a 2xx from
 `<secret>/fail`. What it does not prove: that healthchecks.io marked the check down and alerted; the owner reads that on their side.
 
-**League gap: the stretch between two challenge leagues (built 2026-11-14, local commits only, NOT deployed, NOT pushed).**
+**League gap: the stretch between two challenge leagues (built 2026-11-14; pushed and deployed to the VM the same day, see the deploy record below).**
 Incident: PoE1's Allflame ended 2026-11-09 and Covens opened 2026-11-13; in between poe.ninja's league list was
 `['Standard', 'Hardcore']`, so `LeagueDetector` raised "no eligible non-permanent league" for every PoE1 job on 11-11, 11-12 and
 (prices only) 11-13. The message was correct (checked live 2026-11-14: poe.ninja lists Covens, no Allflame). What broke was everything
@@ -2080,8 +2080,39 @@ Design (agreed with the owner 2026-11-14):
   verify `status.json` gets `league_gap` at the next gap (or run `run_prices_once` against a faked list in a dev shell). Only then push
   the heartbeat commit. `tests/test_league_gap.py` (hub) and `tests/test_league_gap_heartbeat.py` (heartbeat, also pins config.yaml to
   the heartbeat's own copy of 7 / 48) cover both halves; mutation-checked 2026-11-14 (8 mutations, each fails a named test).
+- **Deploy record (2026-11-14, owner-ordered whole chain in one push):** pushed `4e76131..0915517` (hub 2220dfb, heartbeat 62f0785,
+  docs, override 0915517); VM `git pull --ff-only` to 0915517, `systemctl restart poe-data-hub` at 08:53:15Z, `is-active` active,
+  0 tracebacks in the startup log (only the known scout errors). The restart re-runs the prices job (interval trigger): PoE1 prices
+  came back as Covens (`poe1/prices/latest.json` 08:57:01Z, hardcore 08:57:49Z). Heartbeat run 43578260982 (08:57Z, after that):
+  prices green; still red on `poe1: meta.meta_job_summary.sample_total is 0` because `status.json`'s PoE1 summary was written by the
+  old code on 2026-11-13 and has no `league_first_snapshot_at`, so the 48 h grace cannot apply yet; it applies from the first slot job
+  after the deploy (19:00Z). Nothing of the gap code has run in anger yet (no real gap since the restart): the first real test is the
+  next league end.
 - Not covered: the Layer-1 prices ping still fires during a gap with nothing published (by design: "the job ran"); Layer 2's prices
   freshness for a gap game is skipped, so a prices job that is dead AND in a gap is only noticed after 7 days.
+
+**Covens `start_at` was 7 days too early; config override + one-off data fix (2026-11-14).** `LeagueDatesFetcher._find_start` takes the
+date of the first Steam "Community Announcements" post whose title has "now available" and whose body names the league. For Covens
+that is "Path of Exile: Covens of Umbra is Now Available!" (gid 1848664643347678), dated 2026-11-06 23:00:24Z: the ExileCon reveal.
+The league opened 2026-11-13 (GGG post of 2026-11-01 "Play ... on November 13th PST"; Twitch Drops "from November 13th 11:00AM PST" =
+19:00Z in the post of 2026-11-12; the hub's detector first saw the league at 19:01Z). So `days_since_league_start` of every Covens
+snapshot was 6 instead of 0, and it is denormalized into the rows at insert time. Fix:
+- `league.start_overrides.<game>.<league>` in config.yaml beats Steam (`start_override_from_cfg`, `_detect_league_and_dates`); keyed by
+  league name so it expires by itself, only the start is overridden, an unparseable value is logged as an error and ignored. poe1
+  Covens = `2026-11-13T19:00:00Z`. Commit 0915517. Checked on the VM with the real code and config: `league start from config
+  override 2026-11-13 19:00:00+00:00 (Steam said 2026-11-06 23:00:24+00:00)`, `days_since_league_start = 0`.
+- Data (owner-approved for this step only), VM, 2026-11-14 08:54Z: before it, read-only, no Covens archive state existed anywhere
+  (`data/archive/` had no covens file, Firebase `archive/poe1-covens*.json` 404), so nothing had been merged with the wrong days. Rows with
+  days 6 counted: `snapshots` 2 (576, 577), `skill_stat_counts` 9,710, `skill_passive_counts` 88 (`skill_mod_counts` and
+  `keypassive_counts` hold no Covens rows; `skill_populations` has no such column). Exported in full to
+  `/opt/poe-data-hub/data/backups/covens-days-fix-20261114.jsonl.gz` (157,083 bytes, mode 600, sha256
+  `f7496555325795a9f075036cec3b022a810bb71bbc2bd9ac7fa92fe3d99aec73`, the `.sha256` file beside it; checked again with `sha256sum`), then one
+  `BEGIN IMMEDIATE` transaction set days to `(snapshot created_at - start).days` = 0 with per-table rowcount checks that had to equal
+  those numbers: 2 / 9,710 / 88 changed, COMMIT, then 0 rows with 6 left; `latest_finished_skill_run('poe1')` now returns days 0.
+  The hub was NOT stopped (no job writes SQLite then; WAL + 30 s busy timeout). To undo: the backup holds every old row.
+  The already-published `poe1/skills/index.json` and `meta/latest.json` still say 6 until the next publish (slot job 19:00Z, skill job
+  22:00Z, whose days now come from the override, 1 at 22:00Z on 11-14); the first archive merge of Covens is the weekly job of Sunday
+  2026-11-15 06:00Z, after the fix.
 
 ### Backlog (archive; do with the next VM deploy)
 
@@ -2110,6 +2141,13 @@ Design (agreed with the owner 2026-11-14):
   the runner to a named image (`ubuntu-26.04` or `ubuntu-24.04`) instead of the moving `ubuntu-latest`, keep `python-version: "3.12"`
   (already pinned, matches the VM), and check `pip install requests pyyaml` / the refresh scripts on the new image with a manual
   `workflow_dispatch` of each workflow before relying on the schedule.
+- **Take a league's `start_at` from when the hub first SAW it, and use Steam only to cross-check (backlog, owner decision 2026-11-14;
+  NOT built; do it before the next league).** Replaces reading announcement text for the date (the owner rejected parsing the
+  "Play ... on <date>" posts, "option B"): `start_at` = the first time the detector listed the league (recorded once per game and
+  league, e.g. the first snapshot's `created_at` or a `league_first_seen` entry in status/DB), and the Steam "Now Available" date is only
+  compared with it: a WARNING (and a `status.json` note) when they differ by more than 1 day. Known weakness to design around: a hub
+  that was down at launch dates the start late, so keep `league.start_overrides` as the manual escape hatch. The Covens case is the
+  test: Steam 2026-11-06 23:00Z vs first seen 2026-11-13 19:01Z must warn.
 
 ## Binding conditions (from project owner, still in force)
 
