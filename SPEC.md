@@ -2030,6 +2030,16 @@ echoed; `curl -fsS`, no `-v`). The latency of a red condition is still the gap t
 without making production red by running the step's shell logic once by hand with `CHECK_OUTCOME=failure` against a throw-away
 healthchecks.io check (never the real one), and reading the "fail" entry in that check's log.
 
+**Correction (2026-11-14): that hand test covered only the step's shell logic, NOT its `if:` condition, and the condition was wrong.**
+The step's `if:` was `steps.check.conclusion == 'success' || steps.check.conclusion == 'failure'` with no status-check function, so
+GitHub added an implicit `success() &&` and the step was *skipped* whenever the check failed: the `/fail` ping was never sent by any
+run since `348822b`. Found when the heartbeat had been red since 2026-11-12 01:13Z (PoE1 league gap, see below) and the red run
+43538894431 showed the step as `skipped` with no `dead-man` line in its log (runs 43499491103 and 43427905605 the same). Fixed in
+`4e76131` (`if: always() && (...)`). **Live test of the fixed path, 2026-11-14 07:55Z, manual `workflow_dispatch` run 43573341941 on the
+real (red) data:** check step `failure` (poe1 prices 5221 min old, poe1 hardcore 5220 min, poe1 `sample_total` 0), dead-man step
+`success`, log line `dead-man fail ping sent`. What that proves: the step now runs on a failed check and curl got a 2xx from
+`<secret>/fail`. What it does not prove: that healthchecks.io marked the check down and alerted; the owner reads that on their side.
+
 ### Backlog (archive; do with the next VM deploy)
 
 - **`lost_snapshot_ids` in `status.json` lists only the first 20 ids** (`archive_status.MAX_LISTED`, `archive_status.py:25`; used at `:145`), so
