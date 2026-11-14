@@ -29,7 +29,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.fetchers import deals, news, ninja_prices, scout_prices
-from src.fetchers.league_dates import LeagueDatesFetcher
+from src.fetchers.league_dates import LeagueDates, LeagueDatesFetcher, start_override_from_cfg
 from src.fetchers.league_detector import LeagueDetector, NoActiveLeagueError
 from src.fetchers.ninja_builds import NinjaBuildsFetcher
 from src.fetchers.ninja_chars import NinjaCharsFetcher, item_detail_from_dict
@@ -635,6 +635,11 @@ def _detect_league_and_dates(http: HttpClient, cfg: dict[str, Any], game: str):
     log.info("meta job(%s): detected league=%s events=%s", game, league, league_result.events)
 
     league_dates = LeagueDatesFetcher(http, game=game).fetch(league)
+    override = start_override_from_cfg(cfg, game, league)
+    if override is not None:
+        # config.yaml `league.start_overrides` beats Steam (see start_override_from_cfg); end_at stays Steam's
+        log.info("meta job(%s): league start from config override %s (Steam said %s)", game, override, league_dates.start_at)
+        league_dates = LeagueDates(start_at=override, end_at=league_dates.end_at)
     days_since_league_start: Optional[int] = (
         (datetime.now(timezone.utc) - league_dates.start_at).days if league_dates.start_at else None
     )

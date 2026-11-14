@@ -134,6 +134,29 @@ class LeagueDates:
     end_at: Optional[datetime]
 
 
+def start_override_from_cfg(cfg: dict[str, Any], game: str, league: str) -> Optional[datetime]:
+    """`league.start_overrides.<game>.<league>` of config.yaml (an ISO UTC timestamp) or None. Beats Steam: Steam's
+    "... is Now Available!" post can be an announcement, not the launch (Covens 2026-11: that post is dated
+    2026-11-06 23:00:24Z, the ExileCon reveal; the league opened 2026-11-13). Keyed by league name, so it stops
+    applying by itself when the league changes. A value that does not parse is reported loudly and IGNORED (the Steam
+    date is used): a typo must not stop the job, but must not pass silently either."""
+    raw = ((((cfg.get("league") or {}).get("start_overrides") or {}).get(game) or {}).get(league))
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, datetime):  # unquoted ISO values are parsed by YAML itself
+            parsed = raw
+        else:
+            parsed = dateutil_parser.isoparse(str(raw))
+        if parsed.tzinfo is None:
+            raise ValueError("no timezone (write it as ...Z)")
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as e:
+        log.error("league_dates(%s): league.start_overrides.%s.%s = %r is not a valid UTC timestamp (%s) -- ignored, using Steam",
+                  game, game, league, raw, e)
+        return None
+
+
 class LeagueDatesFetcher:
     def __init__(
         self,

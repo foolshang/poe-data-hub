@@ -22,6 +22,16 @@ league:
   # fallback league name if poe.ninja's league list ever failed to load. Only
   # set it again for a genuine overlap of two non-excluded leagues.
   poe1_override: ""
+  # Launch time of a league when Steam's "Now Available" post is NOT the launch (it beats Steam; keyed by game and league
+  # NAME, so it stops applying by itself when the league changes). Only ever add a line here after reading the real
+  # announcements. Values are UTC and must carry a timezone (write ...Z, in quotes).
+  start_overrides:
+    poe1:
+      # Steam's "Covens of Umbra is Now Available!" is dated 2026-11-06 23:00:24Z (ExileCon reveal); the league opened
+      # 2026-11-13 (GGG post of 2026-11-01 "Play ... on November 13th PST"; Twitch Drops from "November 13th 11:00AM PST"
+      # = 19:00Z in the post of 2026-11-12; the hub's detector first saw the league at 19:01Z). Without this its
+      # days_since_league_start was 7 days too high.
+      Covens: "2026-11-13T19:00:00Z"
   cache_ttl_seconds: 43200 # 12h
 
 # The "league gap": the stretch between one challenge league ending and the next opening, when poe.ninja lists no
