@@ -2036,6 +2036,15 @@ healthchecks.io check (never the real one), and reading the "fail" entry in that
   when `lost_count` exceeds 20 the surplus cannot be named or acknowledged and `check_archive_losses` stays red for it ("N more").
   Fix in the exporter side (list all ids, or at least a compact range form) together with the next VM deploy: it changes what the
   hub writes, so it needs a restart; the heartbeat needs no change.
+- **Delete stale `{game}/skills/**` files (backlog, owner request 2026-11-14; NOT built, nothing is deleted today).** Per-skill files of
+  skills that left the latest snapshot stay in the bucket forever: checked live 2026-11-14, PoE1 158 files not in `skills/index.json`
+  (24 skills in the Covens index; ~153 are Allflame's last publish of 2026-11-10, 5 older, the oldest 2026-09-27) and PoE2 11 of 443.
+  Planned rule: in the daily cleanup job, delete a `skills/{main|spirit}/*.json` blob that is not named by the current
+  `{game}/skills/index.json` AND whose GCS `updated` is older than 14 days; never touch `index.json` / `dictionary.json`. Guards:
+  skip the whole step unless the index is non-empty (`skills` list > 0) and its `generated_at` is fresh (< 30 h, same as the heartbeat);
+  log what would be deleted before deleting. Needs a restart of the hub (new job code), so do it with the next VM deploy. Consumers
+  already must read `index.json` and never list the folder, so this is housekeeping, not a contract change. The league's data is kept
+  in `archive/{game}-{league}.skills.json`, not in these files.
 
 ## Binding conditions (from project owner, still in force)
 
