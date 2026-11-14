@@ -38,7 +38,9 @@ jobs:
       # alerts), a passed one pings the plain URL. Never fails the job. The URL is a secret: it is only expanded
       # inside the shell, never echoed, and curl runs without -v.
       - name: Dead-man ping (healthchecks.io watches this heartbeat)
-        if: steps.check.conclusion == 'success' || steps.check.conclusion == 'failure'
+        # `always()` is required: without a status-check function GitHub wraps this in an implicit `success() &&`, so
+        # the step was SKIPPED exactly when the check failed and `/fail` was never sent (found 2026-11-14, run 43538894431).
+        if: always() && (steps.check.conclusion == 'success' || steps.check.conclusion == 'failure')
         env:
           HEARTBEAT_PING_URL: ${{ secrets.HEARTBEAT_PING_URL }}
           CHECK_OUTCOME: ${{ steps.check.conclusion }}
