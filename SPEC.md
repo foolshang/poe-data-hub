@@ -2114,6 +2114,38 @@ snapshot was 6 instead of 0, and it is denormalized into the rows at insert time
   22:00Z, whose days now come from the override, 1 at 22:00Z on 11-14); the first archive merge of Covens is the weekly job of Sunday
   2026-11-15 06:00Z, after the fix.
 
+### Age-bucket mapping is one day late at every edge (found 2026-11-14; plan A decided by the owner; NOT built)
+
+`days_since_league_start` is `(job time - start_at).days`, counted from 0 (the first 24 h of a league is 0). The archive's age buckets are
+named `1-21 / 22-60 / 61+` (league day, counted from 1), but `_age_bucket` (`archive_export.py:110`) and its SQL copy `_BUCKET_SQL`
+(`archive_stream.py:48`) compare the 0-based value against 1/21/22/60/61, so every edge is one day late and days 0 falls into `unknown`
+(`days < 1`), against the module's own docstring ("unknown = NULL"). Decided mapping: `unknown` only when days IS NULL (start_at unknown;
+`main.py:643` stores NULL only then); days <= -1 -> `1-21` but loudly (WARNING with snapshot id and league, counted in
+`status.json archive.negative_days_snapshots`: negative days means a wrong `start_at`); days 0..20 -> `1-21`; 21..59 -> `22-60`; >= 60 -> `61+`.
+Plan: one set of constants for the Python and the SQL form (a test that they agree), an `age_mapping` version in the state's `meta`
+(a state of another version is refused, never merged silently), `RENDER_VERSION` bump, tests on every edge incl. -1 in both forms,
+mutation check, rebuild of the three leagues on the dev machine, then stop and report before push/deploy/restart (runbook as 8.13).
+Order: the weekly job of Sunday 2026-11-15 06:00Z merges Covens with the OLD rule first (owner's call); the fix and the rebuild of all
+three leagues come after.
+
+Checked live 2026-11-14 (read-only on the VM): neither Allflame nor Forbidden Rites state holds `unknown` or any days 0/1 snapshot (their
+archive starts at days 58 / 16). Snapshots that move: Allflame id 383 (days 60, 22-60 -> 61+), Forbidden Rites id 400 (days 21, 1-21 ->
+22-60); Covens id 577 (days 0, unknown -> 1-21 once merged). `value_min/value_max` cannot be subtracted from an accumulated cell, so
+moving them means a rebuild. Their raw rows are gone from the live DB (0 rows for 379/383/387/396/400/404) and survive only in the
+insurance copies (`D:\Backups\poe-hub\*.sqlite3.gz`, up to Allflame 509 / FR 510), so the rebuild is copies + the live DB.
+
+**Deadlines (computed from `created_at` and `cleanup_old_skill_stat_counts`: cleanup runs 21:00Z daily and deletes snapshots with
+`created_at < now - 45 d`).** First snapshots in no insurance copy: Allflame 513 (2026-10-27T22:00:17Z) and Forbidden Rites 514
+(2026-10-27T22:24:10Z): the 12-11 21:00Z sweep has cutoff 10-27T21:00Z (keeps them), the **2026-12-12 21:00Z sweep deletes them**.
+The rebuild of Allflame and Forbidden Rites must be shipped before that; plan to finish by 2026-12-05. Covens snapshot 577
+(2026-11-13T22:00:16Z): deleted by the **2026-12-29 21:00Z sweep** (Covens' own rebuild must be done by then).
+
+**The 238 snapshots with `days_since_league_start` NULL (read-only check, VM, 2026-11-14):** all `legacy_slot_top100` (collection before
+2026-09-21): Allflame 173 of 222 (ids 30-374, 2026-07-25 .. 2026-09-21) and Forbidden Rites 65 of 117 (ids 245-373, 2026-09-04 ..
+2026-09-21); 0 NULL among all `skill_top100_v1` snapshots (49 + 1 Allflame/Covens, 52 FR) and among Mirage, Runes of Aldur and Covens
+legacy rows. So they are the old period when `_find_start` found no start (SPEC phase of "days NULL for every snapshot", see
+`league_dates.py` comment at line ~105) and are not in any skill archive state. Cause not re-derived beyond that comment.
+
 ### Backlog (archive; do with the next VM deploy)
 
 - **`lost_snapshot_ids` in `status.json` lists only the first 20 ids** (`archive_status.MAX_LISTED`, `archive_status.py:25`; used at `:145`), so
