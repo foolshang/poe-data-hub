@@ -55,6 +55,13 @@ is a completely separate file from `status.json`'s `meta.*` -- the
 skill-centric job has its own daily cron and its own Layer-1 healthchecks.io
 check (`skill_meta_ping_url`), independent of the slot job's `meta_ping_url`.
 
+League gap (2026-11-14): between two challenge leagues poe.ninja lists no league for a game, and that game's prices, meta and
+skills are stale or empty only because there is nothing to publish. The hub records it in `status.json["league_gap"]`; while the
+gap is at most `LEAGUE_GAP_MAX_DAYS` old the game's prices / meta / skills findings are printed as notices instead of failing
+(news, the weekly files and the other game keep full strictness), past that it is red again, and an empty `sample_total` is a
+notice for `LAUNCH_GRACE_HOURS` after the league's first snapshot. No key in status.json = the old strict behaviour.
+See `src/processing/league_gap.py` and SPEC.md.
+
 This is deliberately a second, independent system from the
 healthchecks.io dead-man-switch pings the hub sends itself (Layer 1, see
 src/main.py's _ping_healthcheck and CLAUDE.md): Layer 1 watches "is the
@@ -149,6 +156,15 @@ ARCHIVE_EXPORT_MAX_AGE_DAYS = 9
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.yaml"
 KNOWN_GEMS_SCHEMA_VERSION = 1
 KNOWN_ALIASES_SCHEMA_VERSION = 1
+# The league gap (src/processing/league_gap.py, config.yaml `league_gap`): the stretch between one challenge league
+# ending and the next opening. Same by-hand-copy rule as the other constants here (this script is independent of the
+# hub's code and config); tests/test_league_gap.py fails if either number drifts from config.yaml.
+LEAGUE_GAP_MAX_DAYS = 7
+# An empty sample is expected for this long after a league's first snapshot (status.meta.<game>.meta_job_summary
+# .league_first_snapshot_at), then it is the "silently empty" failure again.
+LAUNCH_GRACE_HOURS = 48
+# What a tolerated gap excuses for its game: the files that are stale or empty only because there is no league.
+GAP_EXCUSED_AREAS = frozenset({"prices", "meta", "skills"})
 
 
 def _parse_iso(ts: str) -> datetime:
@@ -206,6 +222,27 @@ def check_meta_sample_total(meta_job_summary: Optional[dict]) -> Optional[str]:
     if not sample_total:
         return f"meta.meta_job_summary.sample_total is {sample_total!r} (expected > 0)"
     return None
+
+
+def _launch_grace_notice(game: str, meta_job_summary: object, now: Optional[datetime] = None) -> Optional[str]:
+    """A notice (not a problem) when `sample_total` is empty but the league's first snapshot is at most
+    `LAUNCH_GRACE_HOURS` old; None otherwise -- including when the hub did not record the first snapshot (an old
+    status.json), so the strict check stays the default."""
+    now = now or datetime.now(timezone.utc)
+    summary = meta_job_summary if isinstance(meta_job_summary, dict) else {}
+    if summary.get("sample_total"):
+        return None
+    try:
+        first = _parse_iso(summary["league_first_snapshot_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    age_hours = (now - first).total_seconds() / 3600
+    if age_hours > LAUNCH_GRACE_HOURS:
+        return None
+    return (
+        f"{game}: sample_total is 0 but the league's first snapshot is only {age_hours:.1f} h old "
+        f"(launch grace {LAUNCH_GRACE_HOURS} h) -- not flagged yet"
+    )
 
 
 def check_skills_index_freshness(generated_at: str, now: Optional[datetime] = None) -> Optional[str]:
@@ -402,32 +439,67 @@ def check_per_category_health(source: str, per_category: dict) -> Optional[str]:
     return None
 
 
-def run() -> int:
+def check_league_gaps(status: object, now: Optional[datetime] = None) -> tuple[frozenset[str], list[str], list[str]]:
+    """Reads `status.json["league_gap"]` (the hub's record of a game that has no challenge league between two
+    leagues, see `src/processing/league_gap.py`). Returns `(tolerated games, problems, notices)`.
+
+    A game whose gap is at most `LEAGUE_GAP_MAX_DAYS` old is tolerated: the caller drops that game's prices / meta /
+    skills findings (they are stale because there is nothing to publish, not because something broke). One past the
+    limit is a problem of its own and is NOT tolerated, so its other findings stay too. A missing key, an unreadable
+    entry or an unparseable `since` all mean "no gap" -- the old strict behaviour, never a silent pass."""
+    now = now or datetime.now(timezone.utc)
+    gaps = status.get("league_gap") if isinstance(status, dict) else None
+    if not isinstance(gaps, dict):
+        return frozenset(), [], []
+    tolerated: set[str] = set()
     problems: list[str] = []
+    notices: list[str] = []
+    for game, entry in gaps.items():
+        try:
+            age_days = (now - _parse_iso(entry["since"])).total_seconds() / 86400
+        except (KeyError, TypeError, ValueError):
+            continue
+        last = entry.get("last_league")
+        if age_days > LEAGUE_GAP_MAX_DAYS:
+            problems.append(f"{game}: no active league for {age_days:.1f} days (> {LEAGUE_GAP_MAX_DAYS}), last league {last!r}")
+        else:
+            tolerated.add(game)
+            notices.append(
+                f"{game}: between leagues for {age_days:.1f} days (last league {last!r}, tolerated up to "
+                f"{LEAGUE_GAP_MAX_DAYS}) -- prices / meta / skills findings for it are skipped"
+            )
+    return frozenset(tolerated), problems, notices
+
+
+def run() -> int:
+    findings: list[tuple[Optional[str], str, str]] = []  # (game, area, text); area decides what a league gap excuses
+
+    def add(game: Optional[str], area: str, text: str) -> None:
+        findings.append((game, area, text))
 
     for game, url in PRICES_URLS.items():
         try:
             prices = requests.get(url, timeout=15).json()
             problem = check_prices_freshness(prices["generated_at"])
             if problem:
-                problems.append(f"{game}: {problem}")
+                add(game, "prices", f"{game}: {problem}")
 
             per_category_by_source = (prices.get("sample") or {}).get("per_category") or {}
             for source, per_category in per_category_by_source.items():
                 problem = check_per_category_health(source, per_category)
                 if problem:
-                    problems.append(f"{game}: {problem}")
+                    add(game, "prices", f"{game}: {problem}")
         except Exception as e:
-            problems.append(f"could not fetch/parse {url}: {e}")
+            add(game, "prices", f"could not fetch/parse {url}: {e}")
 
     for game, url in NEWS_URLS.items():
         try:
             news = requests.get(url, timeout=15).json()
             problem = check_news_freshness(news["generated_at"])
             if problem:
-                problems.append(f"{game}: {problem}")
+                add(game, "news", f"{game}: {problem}")
         except Exception as e:
-            problems.append(f"could not fetch/parse {url}: {e}")
+            add(game, "news", f"could not fetch/parse {url}: {e}")
 
     for game, url in INDEX_URLS.items():
         try:
@@ -436,46 +508,70 @@ def run() -> int:
             if hardcore:
                 problem = check_hardcore_freshness(hardcore["generated_at"])
                 if problem:
-                    problems.append(f"{game}: {problem}")
+                    add(game, "prices", f"{game}: {problem}")
         except Exception as e:
-            problems.append(f"could not fetch/parse {url}: {e}")
+            add(game, "prices", f"could not fetch/parse {url}: {e}")
 
+    tolerated_gaps: frozenset[str] = frozenset()
+    notices: list[str] = []
     try:
         status = requests.get(STATUS_URL, timeout=15).json()
         meta_by_game = status["meta"]
+        tolerated_gaps, gap_problems, notices = check_league_gaps(status)
+        for text in gap_problems:
+            add(None, "league_gap", text)
         if status.get("stats_cache_stale"):
-            problems.append("status.json: stats_cache_stale is true (the hub itself says its GGG stats table is stale)")
-        problems.extend(check_archive(status.get("archive"), acknowledged=load_acknowledged_lost()))
+            add(None, "status", "status.json: stats_cache_stale is true (the hub itself says its GGG stats table is stale)")
+        for text in check_archive(status.get("archive"), acknowledged=load_acknowledged_lost()):
+            add(None, "archive", text)
         for game in ("poe2", "poe1"):
             problem = check_meta_freshness(meta_by_game[game]["last_meta"])
             if problem:
-                problems.append(f"{game}: {problem}")
-            problem = check_meta_sample_total(meta_by_game[game].get("meta_job_summary"))
+                add(game, "meta", f"{game}: {problem}")
+            summary = meta_by_game[game].get("meta_job_summary")
+            problem = check_meta_sample_total(summary)
             if problem:
-                problems.append(f"{game}: {problem}")
+                grace = _launch_grace_notice(game, summary)
+                if grace:
+                    notices.append(grace)
+                else:
+                    add(game, "meta", f"{game}: {problem}")
     except Exception as e:
-        problems.append(f"could not fetch/parse {STATUS_URL}: {e}")
+        add(None, "status", f"could not fetch/parse {STATUS_URL}: {e}")
 
     for game, url in SKILLS_INDEX_URLS.items():
         try:
             skills_index = requests.get(url, timeout=15).json()
             problem = check_skills_index_freshness(skills_index["generated_at"])
             if problem:
-                problems.append(f"{game}: {problem}")
+                add(game, "skills", f"{game}: {problem}")
             problem = check_skills_index_population(skills_index.get("population_total"))
             if problem:
-                problems.append(f"{game}: {problem}")
+                add(game, "skills", f"{game}: {problem}")
         except Exception as e:
-            problems.append(f"could not fetch/parse {url}: {e}")
+            add(game, "skills", f"could not fetch/parse {url}: {e}")
 
     # the weekly-refresh artefacts: the stats table, the gems table and the public aliases
     for urls, check in ((STATS_CACHE_URLS, check_stats_cache), (GEMS_URLS, check_gems), (ALIASES_URLS, check_aliases)):
         for game, url in urls.items():
             try:
-                problems.extend(check(game, requests.get(url, timeout=30).json()))
+                for text in check(game, requests.get(url, timeout=30).json()):
+                    add(game, "weekly", text)
             except Exception as e:
-                problems.append(f"could not fetch/parse {url}: {e}")
+                add(game, "weekly", f"could not fetch/parse {url}: {e}")
 
+    # A game between two leagues (status.league_gap, <= LEAGUE_GAP_MAX_DAYS) has nothing new to publish: its prices,
+    # meta and skills findings are expected, not failures. Only those three areas -- news, the weekly artefacts, the
+    # archive and everything else are independent of the league and keep their full strictness.
+    problems: list[str] = []
+    for game, area, text in findings:
+        if game in tolerated_gaps and area in GAP_EXCUSED_AREAS:
+            notices.append(f"skipped (league gap): {text}")
+        else:
+            problems.append(text)
+
+    for n in notices:
+        print(f"::notice::{n}")
     if problems:
         for p in problems:
             print(f"::error::{p}")
