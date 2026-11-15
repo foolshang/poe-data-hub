@@ -301,9 +301,11 @@ def _stream(conn: sqlite3.Connection, sql: str, params: tuple, shape) -> Iterato
         cur.close()
 
 
-def _merge_snapshot(state: sqlite3.Connection, src: sqlite3.Connection, st: _SnapState, source_name: str) -> None:
-    """Adds one snapshot's rows to the running totals and records its id -- one transaction, all or nothing."""
-    bucket = _age_bucket(st.days)
+def _accumulate_snapshot(
+    state: sqlite3.Connection, src: sqlite3.Connection, st: _SnapState, source_name: str, bucket: str,
+) -> None:
+    """Adds one snapshot's rows to the running totals under `bucket`. No transaction handling and no `merged_snapshots`
+    row: the caller owns both (`_merge_snapshot` for a normal merge, `archive_migrate` when it re-sorts a bucket)."""
     sid = st.snapshot_id
     counted = {"stat": 0, "passive": 0, "pop": 0}
 
@@ -312,25 +314,31 @@ def _merge_snapshot(state: sqlite3.Connection, src: sqlite3.Connection, st: _Sna
             counted[kind] += 1
             yield row
 
+    state.executemany(_UPSERT_STAT, counting("stat", _stream(
+        src, """SELECT skill_type, skill, level_bracket, slot, stat_id, mod_kind, count, value_min, value_max
+                FROM skill_stat_counts WHERE snapshot_id = ?""", (sid,),
+        lambda r: (r[0], r[1], r[2], bucket, r[3], r[4], r[5], r[6], r[7], r[8]))))
+    state.executemany(_UPSERT_PASSIVE, counting("passive", _stream(
+        src, "SELECT skill_type, skill, level_bracket, keypassive, count FROM skill_passive_counts WHERE snapshot_id = ?",
+        (sid,), lambda r: (r[0], r[1], r[2], bucket, r[3], r[4]))))
+    state.executemany(_UPSERT_POP, counting("pop", _stream(
+        src, "SELECT skill_type, skill, level_bracket, population FROM skill_populations WHERE snapshot_id = ?",
+        (sid,), lambda r: (r[0], r[1], r[2], bucket, r[3]))))
+    if (counted["stat"], counted["passive"], counted["pop"]) != (st.stat_rows, st.passive_rows, st.pop_rows):
+        raise ArchiveStateError(
+            f"snapshot {sid} changed in {source_name} while it was being read "
+            f"(counted {counted}, expected {st.stat_rows}/{st.passive_rows}/{st.pop_rows}); nothing was merged"
+        )
+
+
+def _merge_snapshot(state: sqlite3.Connection, src: sqlite3.Connection, st: _SnapState, source_name: str) -> None:
+    """Adds one snapshot's rows to the running totals and records its id -- one transaction, all or nothing."""
+    sid = st.snapshot_id
     state.execute("BEGIN IMMEDIATE")
     try:
         if state.execute("SELECT 1 FROM merged_snapshots WHERE snapshot_id = ?", (sid,)).fetchone():
             raise ArchiveStateError(f"snapshot {sid} is already recorded as merged")
-        state.executemany(_UPSERT_STAT, counting("stat", _stream(
-            src, """SELECT skill_type, skill, level_bracket, slot, stat_id, mod_kind, count, value_min, value_max
-                    FROM skill_stat_counts WHERE snapshot_id = ?""", (sid,),
-            lambda r: (r[0], r[1], r[2], bucket, r[3], r[4], r[5], r[6], r[7], r[8]))))
-        state.executemany(_UPSERT_PASSIVE, counting("passive", _stream(
-            src, "SELECT skill_type, skill, level_bracket, keypassive, count FROM skill_passive_counts WHERE snapshot_id = ?",
-            (sid,), lambda r: (r[0], r[1], r[2], bucket, r[3], r[4]))))
-        state.executemany(_UPSERT_POP, counting("pop", _stream(
-            src, "SELECT skill_type, skill, level_bracket, population FROM skill_populations WHERE snapshot_id = ?",
-            (sid,), lambda r: (r[0], r[1], r[2], bucket, r[3]))))
-        if (counted["stat"], counted["passive"], counted["pop"]) != (st.stat_rows, st.passive_rows, st.pop_rows):
-            raise ArchiveStateError(
-                f"snapshot {sid} changed in {source_name} while it was being read "
-                f"(counted {counted}, expected {st.stat_rows}/{st.passive_rows}/{st.pop_rows}); nothing was merged"
-            )
+        _accumulate_snapshot(state, src, st, source_name, _age_bucket(st.days))
         state.execute(
             "INSERT INTO merged_snapshots VALUES (?,?,?,?,?,?,?,?)",
             (sid, source_name, st.created_at, st.days, st.stat_rows, st.passive_rows, st.pop_rows, _now_iso()),
