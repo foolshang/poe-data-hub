@@ -2114,19 +2114,37 @@ snapshot was 6 instead of 0, and it is denormalized into the rows at insert time
   22:00Z, whose days now come from the override, 1 at 22:00Z on 11-14); the first archive merge of Covens is the weekly job of Sunday
   2026-11-15 06:00Z, after the fix.
 
-### Age-bucket mapping is one day late at every edge (found 2026-11-14; plan A decided by the owner; NOT built)
+**Live check of the Covens fix and the 2026-11-14 deploy, 2026-11-15 21:35Z (read-only).** Slot jobs of 11-14 and 11-15 19:00Z logged `league start from config
+override 2026-11-13 19:00:00+00:00 (Steam said 2026-11-06 23:00:24+00:00)` and `league_dates start_at=2026-11-13 19:00:00+00:00`; `status.json` PoE1
+`meta_job_summary` has `league_first_snapshot_at` 2026-11-13T19:03:58Z and `sample_total` 2199 (PoE2 2192); the meta ping `meta job: healthcheck ping sent`
+fired 2026-11-14 19:44:42Z (first one since 11-10) and again 11-15 19:44:21Z. Heartbeat since 2026-11-14 09:00Z: one red run (15:27Z, `poe1: meta.meta_job_summary.sample_total is 0`,
+before the 19:00Z job), then green 20:17Z, 00:36Z, 07:25Z, 15:11Z, 20:42Z (run 43759567006: "OK: ... all games fresh and non-empty"). Published `poe1/skills/index.json`
+days 1 (generated 11-15 03:47Z), `poe1/meta/latest.json` days 2 (11-15 19:44Z). Weekly archive job 2026-11-15: Forbidden Rites ok, 6 merged / 45 already, `not_finished [472]`;
+Covens ok, 2 merged (577 days 0, 581 days 1 -- the state and the VM DB both carry the corrected days), file on Firebase; coverage `at_risk` 0 for Allflame and Covens, 1 for
+Forbidden Rites (snapshot 582, created 11-15T03:51:49Z, still running at 06:00Z; `retention_delete_at` 2026-12-30T21:00Z), `lost_count` 0 everywhere.
+
+### Age-bucket mapping was one day late at every edge (found 2026-11-14; code + dev migration done 2026-11-16, commits c73bc65 d09a864; NOT pushed, NOT deployed)
 
 `days_since_league_start` is `(job time - start_at).days`, counted from 0 (the first 24 h of a league is 0). The archive's age buckets are
-named `1-21 / 22-60 / 61+` (league day, counted from 1), but `_age_bucket` (`archive_export.py:110`) and its SQL copy `_BUCKET_SQL`
-(`archive_stream.py:48`) compare the 0-based value against 1/21/22/60/61, so every edge is one day late and days 0 falls into `unknown`
-(`days < 1`), against the module's own docstring ("unknown = NULL"). Decided mapping: `unknown` only when days IS NULL (start_at unknown;
-`main.py:643` stores NULL only then); days <= -1 -> `1-21` but loudly (WARNING with snapshot id and league, counted in
-`status.json archive.negative_days_snapshots`: negative days means a wrong `start_at`); days 0..20 -> `1-21`; 21..59 -> `22-60`; >= 60 -> `61+`.
-Plan: one set of constants for the Python and the SQL form (a test that they agree), an `age_mapping` version in the state's `meta`
-(a state of another version is refused, never merged silently), `RENDER_VERSION` bump, tests on every edge incl. -1 in both forms,
-mutation check, rebuild of the three leagues on the dev machine, then stop and report before push/deploy/restart (runbook as 8.13).
-Order: the weekly job of Sunday 2026-11-15 06:00Z merges Covens with the OLD rule first (owner's call); the fix and the rebuild of all
-three leagues come after.
+named `1-21 / 22-60 / 61+` (league day, counted from 1), but `_age_bucket` and its SQL copy `_BUCKET_SQL` compared the 0-based value
+against 1/21/22/60/61, so every edge was one day late and days 0 fell into `unknown` (`days < 1`), against the module's own docstring
+("unknown = NULL"). Mapping now in force in the code (owner-decided): `unknown` only when days IS NULL (start_at unknown; `main.py:643`
+stores NULL only then); days 0..20 -> `1-21`; 21..59 -> `22-60`; >= 60 -> `61+`; days <= -1 -> `1-21` but loud (see below).
+What changed (c73bc65, d09a864):
+- ONE definition: `archive_export.AGE_BUCKET_BOUNDS` (+ `AGE_MAPPING_VERSION = 2`, `UNKNOWN_BUCKET`, `AGE_BUCKET_LABELS`); `_age_bucket`
+  and the SQL `CASE` (`age_bucket_sql`, used by `archive_stream._bucket`) are generated from it; a test evaluates both for -40..199 and NULL.
+- The state's `meta` carries `age_mapping`; `open_state` REFUSES a state without it or with another value (`ArchiveStateError`, nothing is
+  merged); `restore_state_from_skills_file` refuses a skills file of another mapping; `skills_file_is_current` is false for one. Skills file
+  and base file headers carry `age_mapping` (additive); `RENDER_VERSION` 2 -> 3.
+- Negative days: counted in `1-21`, WARNING per export (league, up to 20 ids, "start_at is wrong") and per merged snapshot;
+  `last_export.{game}.negative_days_count` / `.negative_days_snapshots` and `status.json archive.negative_days_snapshots` (sum over the games).
+  NOT wired to the heartbeat (a red heartbeat for it is a possible follow-up).
+- `src/processing/archive_migrate.py` + `tools/migrate_age_mapping.py`: re-sorts a state of mapping 1 (see "Migration" below).
+- Tests: `tests/test_age_mapping.py` (26: every edge incl. -1 in Python and SQL, the real legacy + skill SQL paths, headers, state/file
+  refusal, negative reporting + status), `tests/test_archive_migrate.py` (13: migrated state == full rebuild row for row on four day sets,
+  dry run, missing source, restored state, totals rollback). Mutation checks (10 + 7) each failed a named test. Whole suite 928 passed.
+Order followed: the weekly job of Sunday 2026-11-15 06:00Z merged Covens with the OLD rule first (owner's call): the Covens state holds
+snapshot 577 (days 0) in `unknown` and 581 (days 1) in `1-21`.
 
 Checked live 2026-11-14 (read-only on the VM): neither Allflame nor Forbidden Rites state holds `unknown` or any days 0/1 snapshot (their
 archive starts at days 58 / 16). Snapshots that move: Allflame id 383 (days 60, 22-60 -> 61+), Forbidden Rites id 400 (days 21, 1-21 ->
@@ -2145,6 +2163,51 @@ The rebuild of Allflame and Forbidden Rites must be shipped before that; plan to
 2026-09-21); 0 NULL among all `skill_top100_v1` snapshots (49 + 1 Allflame/Covens, 52 FR) and among Mirage, Runes of Aldur and Covens
 legacy rows. So they are the old period when `_find_start` found no start (SPEC phase of "days NULL for every snapshot", see
 `league_dates.py` comment at line ~105) and are not in any skill archive state. Cause not re-derived beyond that comment.
+
+
+**Migration instead of a rebuild from scratch (done on the dev machine, 2026-11-16).** A state's cells are sums per bucket and do
+not remember snapshots, and `value_min/value_max` cannot be subtracted, so a bucket that LOSES a snapshot is recomputed from the snapshots
+that stay and a bucket that only GAINS one just receives it (`migrate_state`; `merged_snapshots.days` gives each snapshot's old and new
+bucket). That reads only the snapshots of the affected buckets, all of which are in the insurance copies, instead of the whole league
+(a full rebuild would need the ~40 live snapshots per league out of the 7GB production DB). Result on the real states (copies of the VM
+files taken 2026-11-15 21:44Z), checked by `D:\Work\age-mapping\verify.py`:
+- Allflame: moved `383` (22-60 -> 61+); recomputed `22-60` from 375, 379 (read from the copy); added 383 to `61+`. The recomputed bucket equals an
+  independent copy-only rebuild under the new rule (stat 212,164 / passive 3,112 / pop 169 rows); `61+` grew by exactly snapshot 383's own
+  counts (stat 1,544,602, passive 41,739, population 17,146), no value range narrowed; `1-21` / `unknown` empty as before; grand totals and the
+  49-id ledger unchanged; 358 -> 356 leaves in the skills file (two skills existed in `22-60` only through 383).
+- Forbidden Rites: moved `400` (1-21 -> 22-60); recomputed `1-21` from 377..400 (7 snapshots, copy); added 400 to `22-60` (stat 2,856,739,
+  passive 74,269, population 42,294, nothing narrowed); `61+` identical to the original; totals and the 51-id ledger unchanged.
+- Covens: NOT rehearsed on dev (its raw rows live only in the production DB). Plan: run the same tool on the VM against the live DB
+  (read-only; moves 577 `unknown` -> `1-21`; `unknown` empties) and compare with `--rebuild-archive` into a temporary directory (two
+  snapshots, seconds) before swapping.
+Artefacts (dev, `D:\Work\age-mapping\out\`): migrated states `poe1-allflame.skills.state.sqlite3.gz` (gz sha256 `7962fdac7b0f9d9f17fdc2649b2c75f6767a6481398a9d2596e998f5c1f88684`,
+state sha256 `5a1d5c3e6acf685bebc78647b4976b5af32c2b195673db0ceaac22330c4e127e`, ids 375..569, 49) and `poe2-forbidden-rites.skills.state.sqlite3.gz`
+(gz sha256 `686ca7fbea2f25ed234a5426b671f7a2dfb59c54b37295197c3b76d244d355df`, state sha256 `bdf6a55de9e67f47a2967ba7db3ca786e1c168d7a919a024f7d1a0a80554b366`,
+ids 377..578, 51). The originals as taken from the VM (`vm-states\`, state sha256 `d5752e937879644473d186dc724b46bd9f09e9ff04de1c7ab70960683f5d30bc` Allflame,
+`59e87b26f9a15babb625461239299cfbccda3afd64fb7259bbd30dbfb9ac56e2` FR, `8ccbfa7c1cfca945ed18c37cdffa0ab3693d59056ed88987c32ed4394afa5808` Covens) and the old
+Firebase bytes (`D:\Backups\poe-hub\archive-age-mapping-1\`, `SHA256SUMS`).
+
+**Runbook (NOT executed; the owner approves push / deploy / restart / state swap).**
+0. Precondition on the VM, read-only: the three state files still have the original sha256 above (they change only when a weekly job merges, Sunday 06:00Z;
+   after 2026-11-22 06:00Z they will have changed and the dev migration must be redone from fresh copies). Do not start between Sunday 05:30Z and 07:00Z.
+1. Dev: `git push` (c73bc65, d09a864, docs). VM: `git pull --ff-only` (no restart yet; the running process keeps the old code).
+2. Ship to a STAGING directory on the VM (`/home/Winai/age-mapping-stage/`, never `data/archive/`): the two migrated `.gz`; verify the gz sha256, gunzip, verify the
+   state sha256, `SELECT snapshot_id FROM merged_snapshots` equals the recorded ids, `meta.age_mapping = '2'`.
+3. Announce, then `sudo systemctl restart poe-data-hub`. The new code refuses every old state, so the archive is unusable until step 5; no archive job runs before
+   Sunday and a league-change export needs a league change. Check the new code is running (journal start line / `git rev-parse HEAD`).
+4. Preserve, never overwrite: for each of the three leagues copy the state, its `.bak`, the base json and the skills json to `*.age-mapping-1` (check the target does not
+   exist first). Firebase's old bytes are already on the dev machine.
+5. Swap one league at a time: `mv` the staged state over `data/archive/{game}-{slug}.skills.state.sqlite3`, remove the old `.bak` (mapping 1; step 4 keeps a copy), then under
+   `tools/run_capped.sh` (cap 150MB, `nice -n 19`): `python -m src.main --export-league-archive <game>:<league>` (no `--rebuild-archive`). Expected: merged 0 (or the snapshots
+   finished since), `already merged` 49 / 51, `unavailable []`, base file recomputed from the legacy tables under the new rule, skills file rendered (render_version 3).
+   Allflame and Forbidden Rites first (their deadline is 2026-12-12 21:00Z; plan by 2026-12-05). Check the cgroup peak, the journal for ERROR, and that the Firebase objects
+   changed (header `age_mapping` 2, `merged_snapshot_ids` equal to the state's).
+6. Covens: on the VM `python -m tools.migrate_age_mapping --state <COPY of the Covens state> --game poe1 --league Covens --source live=<db>` (dry run first, then `--apply`
+   on the copy), compare with a `--rebuild-archive` into a temporary `--archive-dir` cell by cell, then swap as in 5. Deadline 2026-12-29 21:00Z (snapshot 577).
+7. Afterwards: `status.json archive.last_export.*.status == ok`, `coverage` unchanged, `negative_days_snapshots` 0, heartbeat green; record dates and sha256 here,
+   in 8.13 and in memory.
+Rollback: before step 5 do nothing (old files untouched). After step 5 restore the `*.age-mapping-1` copies of that league AND check out the previous commit and restart,
+because the new code refuses a mapping-1 state.
 
 ### Backlog (archive; do with the next VM deploy)
 
