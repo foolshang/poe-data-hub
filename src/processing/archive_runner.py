@@ -26,7 +26,7 @@ from src.processing.archive_skills import (
     ArchiveStateError, LegacyArchiveError, MergeReport, Source, merge_snapshots, open_state, render_skills_file,
     skills_file_is_current,
 )
-from src.processing.archive_stream import build_league_archive_to_file
+from src.processing.archive_stream import build_league_archive_to_file, open_readonly
 from src.storage.publisher import sanitize_league_filename
 
 log = logging.getLogger(__name__)
@@ -44,6 +44,19 @@ class ExportResult:
     merge: MergeReport = field(default_factory=MergeReport)
     moved_to_legacy: list[Path] = field(default_factory=list)
     publish_errors: list[str] = field(default_factory=list)
+    # snapshots of this league with a negative days_since_league_start (= a wrong league start), any collection method
+    negative_days_snapshots: list[int] = field(default_factory=list)
+
+
+def negative_days_snapshot_ids(db_path: Path, game: str, league: str) -> list[int]:
+    """Ids of the league's snapshots whose `days_since_league_start` is negative. The `snapshots` table is tiny (one row
+    per run), so this is an index-free scan of a few hundred rows, not a count over a data table."""
+    conn = open_readonly(db_path)
+    try:
+        return [r[0] for r in conn.execute(
+            "SELECT id FROM snapshots WHERE game = ? AND league = ? AND days_since_league_start < 0 ORDER BY id", (game, league))]
+    finally:
+        conn.close()
 
 
 def archive_paths(archive_dir: Path, game: str, league: str) -> tuple[Path, Path, Path]:
@@ -99,6 +112,13 @@ def export_league_archive_streaming(
             result.moved_to_legacy.append(moved)
             log.warning("archive: kept the pre-existing %s as %s", base_path, moved)
 
+    negative = negative_days_snapshot_ids(db_path, game, league)
+    if negative:
+        log.warning(
+            "archive: %s/%s has %d snapshot(s) with a NEGATIVE days_since_league_start (ids %s): the league start used when they "
+            "were taken is later than the snapshots, so start_at is wrong (check config league.start_overrides / Steam); "
+            "they are counted in the first age bucket", game, league, len(negative), negative[:20])
+
     # 1. the three legacy dimensions, from the legacy tables: a full recompute is exact (retention never touches them)
     info = build_league_archive_to_file(db_path, game, league, base_path, include_skills=False)
     result.base_bytes = info["bytes"]
@@ -115,6 +135,7 @@ def export_league_archive_streaming(
     finally:
         state.close()
     m = result.merge
+    result.negative_days_snapshots = sorted(set(negative) | set(m.negative_days))
     log.info(
         "archive: %s/%s merged %d new snapshot(s), %d already merged, %d unavailable, %d stale running, base %.1fMB, skills %.1fMB",
         game, league, len(m.merged), m.already_merged, len(m.unavailable), len(m.stale_running),

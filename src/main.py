@@ -1442,6 +1442,9 @@ def _publish_archive_status(
             last_export[game] = outcome
         if last_export:
             archive_status["last_export"] = last_export
+            # a negative days_since_league_start means a wrong league start (SPEC "Age-bucket mapping"): never silent
+            archive_status["negative_days_snapshots"] = sum(
+                int((o or {}).get("negative_days_count") or 0) for o in last_export.values())
         if coverage is not None:
             archive_status["coverage"] = coverage
         elif previous.get("coverage") is not None:
@@ -1499,6 +1502,7 @@ def _export_league_to_archive(
         outcome.update(
             status="ok", snapshots_merged=len(m.merged), already_merged=m.already_merged, unavailable=m.unavailable,
             stale_running=m.stale_running, not_finished=m.not_finished, publish_errors=result.publish_errors,
+            negative_days_count=len(result.negative_days_snapshots), negative_days_snapshots=result.negative_days_snapshots[:20],
         )
         if m.unavailable:
             log.error("archive(%s): snapshot(s) %s are finished but no source holds their rows -- permanently lost", game, m.unavailable)

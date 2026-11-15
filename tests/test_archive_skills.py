@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from src.processing.archive_export import build_league_archive
+from src.processing.archive_export import AGE_MAPPING_VERSION, build_league_archive
 from src.processing.archive_runner import export_league_archive_streaming
 from src.processing.archive_skills import (
-    ArchiveStateError, LegacyArchiveError, SnapshotConflictError, SourceNotIndexedError, open_state,
+    RENDER_VERSION, ArchiveStateError, LegacyArchiveError, SnapshotConflictError, SourceNotIndexedError, open_state,
     restore_state_from_skills_file, render_skills_file,
 )
 from src.processing.archive_stream import build_league_archive_to_file
@@ -390,7 +390,8 @@ def test_nothing_new_leaves_the_rendered_file_alone_and_anything_else_renders_ag
     assert first.skills_path.read_bytes() == before
     monkeypatch.setattr(runner, "render_skills_file", real_render)
     # a truncated file, a file of another layout, or one listing other snapshots must be rendered again
-    for damaged in (before[:-10], before.replace(b'"render_version":2', b'"render_version":1', 1),
+    for damaged in (before[:-10], before.replace(f'"render_version":{RENDER_VERSION}'.encode(), b'"render_version":1', 1),
+                        before.replace(f'"age_mapping":{AGE_MAPPING_VERSION}'.encode(), b'"age_mapping":1', 1),
                     before.replace(b'"merged_snapshot_ids":[', b'"merged_snapshot_ids":[999999,', 1)):
         first.skills_path.write_bytes(damaged)
         fixed = _export(tmp_path, live)

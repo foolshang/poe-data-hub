@@ -110,8 +110,10 @@ def test_null_days_since_league_start_lands_in_unknown_bucket_not_dropped(tmp_pa
 
 
 def test_boundary_days_land_in_expected_buckets(tmp_path):
+    """days are 0-based (day 0 = the first 24 h of the league); the names count league days from 1: "1-21" = days 0..20."""
     db = LocalDb(tmp_path / "test.sqlite3")
-    for days in (1, 21, 22, 60, 61):
+    days_list = (-1, 0, 1, 20, 21, 22, 59, 60, 61)
+    for days in days_list:
         snap = db.insert_snapshot(game="poe2", league="L", days_since_league_start=days, sample_total=1, unique_characters_fetched=1, fetch_failed=0)
         db.insert_mod_counts(snap, [_mod_row(stat_id=f"stat_{days}")])
 
@@ -122,11 +124,12 @@ def test_boundary_days_land_in_expected_buckets(tmp_path):
     for bucket, rows in archive["mod_counts"]["ring"]["spell-fire"].items():
         for r in rows:
             by_stat[r["stat_id"]] = bucket
-    assert by_stat["stat_1"] == "1-21"
-    assert by_stat["stat_21"] == "1-21"
-    assert by_stat["stat_22"] == "22-60"
-    assert by_stat["stat_60"] == "22-60"
-    assert by_stat["stat_61"] == "61+"
+    assert by_stat == {
+        "stat_-1": "1-21", "stat_0": "1-21", "stat_1": "1-21", "stat_20": "1-21",
+        "stat_21": "22-60", "stat_22": "22-60", "stat_59": "22-60",
+        "stat_60": "61+", "stat_61": "61+",
+    }
+    assert "unknown" not in archive["mod_counts"]["ring"]["spell-fire"]
 
 
 def test_does_not_leak_other_games_or_leagues(tmp_path):

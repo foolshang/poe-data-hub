@@ -41,7 +41,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional, Sequence
 
-from src.processing.archive_export import SCHEMA_VERSION, _age_bucket, _now_iso
+from src.processing.archive_export import (
+    AGE_BUCKET_LABELS, AGE_MAPPING_VERSION, SCHEMA_VERSION, _age_bucket, _now_iso,
+)
 from src.processing.archive_stream import _NestedJsonWriter, assemble_skill_leaves, open_readonly
 from src.storage.local_db import COLLECTION_METHOD_SKILL
 from src.storage.publisher import sanitize_league_filename
@@ -49,7 +51,8 @@ from src.storage.publisher import sanitize_league_filename
 log = logging.getLogger(__name__)
 
 STATE_SCHEMA_VERSION = 1
-RENDER_VERSION = 2  # bump when the rendered file's layout changes: an up-to-date file of an older layout is rendered again
+RENDER_VERSION = 3  # bump when the rendered file's layout changes: an up-to-date file of an older layout is rendered again
+# (3, 2026-11: the header carries `age_mapping`; the bucket bounds moved by one day, see archive_export.AGE_MAPPING_VERSION)
 _BATCH = 5000
 
 _STATE_DDL = """
@@ -145,6 +148,8 @@ class MergeReport:
     stale_running: list[int] = field(default_factory=list)   # 'running' older than resume_max_age_hours, treated as abandoned
     active_running: list[int] = field(default_factory=list)  # 'running' and young: left for the next cycle
     not_finished: list[int] = field(default_factory=list)    # failed / abandoned / no run row
+    # merged snapshots whose days_since_league_start is negative (a wrong league start): counted in the first bucket, reported
+    negative_days: list[int] = field(default_factory=list)
     # snapshot ids each source can still supply rows for (finished + rows), for the "covered through" report
     source_snapshots: dict[str, list[int]] = field(default_factory=dict)
 
@@ -169,7 +174,7 @@ def open_state(path: Path, game: str, league: str, create: bool) -> sqlite3.Conn
             conn.executescript(_STATE_DDL)
             conn.executemany("INSERT INTO meta VALUES (?, ?)", [
                 ("schema_version", str(STATE_SCHEMA_VERSION)), ("game", game), ("league", league),
-                ("created_at", _now_iso()),
+                ("age_mapping", str(AGE_MAPPING_VERSION)), ("created_at", _now_iso()),
             ])
             return conn
         try:
@@ -183,6 +188,13 @@ def open_state(path: Path, game: str, league: str, create: bool) -> sqlite3.Conn
             raise ArchiveStateError(f"state file {path} has schema_version {meta.get('schema_version')!r}")
         if (meta.get("game"), meta.get("league")) != (game, league):
             raise ArchiveStateError(f"state file {path} belongs to {meta.get('game')}/{meta.get('league')}")
+        if meta.get("age_mapping") != str(AGE_MAPPING_VERSION):
+            # cells accumulated under another bucket rule cannot be re-sorted (value_min/max are not subtractable): merging
+            # new snapshots under this rule would mix two meanings in one cell. Ship a state rebuilt under the current rule.
+            raise ArchiveStateError(
+                f"state file {path} was accumulated under age_mapping {meta.get('age_mapping')!r}, this code writes "
+                f"{AGE_MAPPING_VERSION}; it must be rebuilt (SPEC 'Age-bucket mapping'), nothing was merged"
+            )
         return conn
     except sqlite3.DatabaseError as e:
         conn.close()
@@ -383,6 +395,12 @@ def merge_snapshots(
                         f"snapshot {sid} differs between {base_name} {base.fingerprint()} and "
                         f"{other_name} {other.fingerprint()} (created_at, days, stat/passive/population rows)"
                     )
+            if base.days is not None and base.days < 0:
+                log.warning(
+                    "archive: %s/%s snapshot %d (created %s) has days_since_league_start=%d: the league start in force when it "
+                    "was taken was LATER than the snapshot, i.e. start_at is wrong; counted in the first age bucket",
+                    game, league, sid, base.created_at, base.days)
+                report.negative_days.append(sid)
             if not backed_up:
                 backup_state(_state_path(state))  # first real change of this run: keep the state as it was
                 backed_up = True
@@ -448,7 +466,7 @@ def render_skills_file(
             header = {
                 "schema_version": SCHEMA_VERSION, "kind": "skills", "game": game, "league": league,
                 "league_slug": sanitize_league_filename(league), "exported_at": exported_at or _now_iso(),
-                "age_buckets": ["1-21", "22-60", "61+", "unknown"], "render_version": RENDER_VERSION,
+                "age_buckets": list(AGE_BUCKET_LABELS), "age_mapping": AGE_MAPPING_VERSION, "render_version": RENDER_VERSION,
                 "merged_snapshot_ids": ids,
             }
             fh.write(json.dumps(header, ensure_ascii=False, separators=(",", ":"))[:-1])
@@ -494,9 +512,10 @@ def skills_file_is_current(path: Path, state: sqlite3.Connection) -> bool:
     try:
         version = decoder.raw_decode(head, head.index('"render_version":') + len('"render_version":'))[0]
         ids = decoder.raw_decode(head, head.index('"merged_snapshot_ids":') + len('"merged_snapshot_ids":'))[0]
+        mapping = decoder.raw_decode(head, head.index('"age_mapping":') + len('"age_mapping":'))[0]
     except ValueError:
         return False
-    return version == RENDER_VERSION and ids == merged_snapshot_ids(state)
+    return version == RENDER_VERSION and mapping == AGE_MAPPING_VERSION and ids == merged_snapshot_ids(state)
 
 
 # ---- disaster recovery --------------------------------------------------------------------
@@ -511,6 +530,10 @@ def restore_state_from_skills_file(json_path: Path, state_path: Path) -> dict[st
     ids = data.get("merged_snapshot_ids")
     if not isinstance(ids, list):
         raise LegacyArchiveError(f"{json_path} has no merged_snapshot_ids; it cannot seed a state file")
+    if data.get("age_mapping") != AGE_MAPPING_VERSION:
+        raise ArchiveStateError(
+            f"{json_path} was rendered under age_mapping {data.get('age_mapping')!r}, this code uses {AGE_MAPPING_VERSION}: "
+            "its buckets mean something else, so it cannot seed a state file")
     state = open_state(Path(state_path), data["game"], data["league"], create=True)
     counts = {"leaves": 0, "stat_rows": 0, "passive_rows": 0}
     try:

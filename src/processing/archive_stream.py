@@ -36,7 +36,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from src.processing.archive_export import SCHEMA_VERSION, _now_iso
+from src.processing.archive_export import AGE_BUCKET_LABELS, AGE_MAPPING_VERSION, SCHEMA_VERSION, _now_iso, age_bucket_sql
 from src.storage.local_db import COLLECTION_METHOD_LEGACY, COLLECTION_METHOD_SKILL
 from src.storage.publisher import sanitize_league_filename
 
@@ -44,15 +44,10 @@ log = logging.getLogger(__name__)
 
 _FETCH_BATCH = 5000
 
-# Same bounds as archive_export._age_bucket ("1-21", "22-60", "61+", else "unknown").
-_BUCKET_SQL = (
-    "CASE WHEN {d} IS NULL OR {d} < 1 THEN 'unknown' "
-    "WHEN {d} <= 21 THEN '1-21' WHEN {d} <= 60 THEN '22-60' ELSE '61+' END"
-)
-
 
 def _bucket(expr: str) -> str:
-    return _BUCKET_SQL.format(d=expr)
+    """The SQL form of `archive_export._age_bucket`, generated from the same bounds (`age_bucket_sql`)."""
+    return age_bucket_sql(expr)
 
 
 def open_readonly(path: Path) -> sqlite3.Connection:
@@ -330,7 +325,7 @@ def build_league_archive_to_file(
             header = {
                 "schema_version": SCHEMA_VERSION, "game": game, "league": league,
                 "league_slug": sanitize_league_filename(league), "exported_at": exported_at or _now_iso(),
-                "age_buckets": ["1-21", "22-60", "61+", "unknown"],
+                "age_buckets": list(AGE_BUCKET_LABELS), "age_mapping": AGE_MAPPING_VERSION,
             }
             fh.write(json.dumps(header, ensure_ascii=False, separators=(",", ":"))[:-1])
             dims = (

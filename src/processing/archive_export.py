@@ -100,7 +100,18 @@ log = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 DEFAULT_ARCHIVE_DIR = Path("data/archive")
 
-_AGE_BUCKET_BOUNDS = [("1-21", 1, 21), ("22-60", 22, 60), ("61+", 61, None)]
+# ---- age buckets: the ONE definition (Python `_age_bucket` and the SQL `CASE` in archive_stream are both built from it) ----
+# `days_since_league_start` is `(job time - start_at).days`, counted from 0: the first 24 h of a league is 0. The bucket
+# names count league days from 1 ("1-21" = league days 1..21 = days 0..20), so the bounds below are in DAYS (0-based).
+# Until 2026-11 the bounds were compared as if days were 1-based, one day late at every edge, and days 0 fell into
+# "unknown" (SPEC "Age-bucket mapping"). Bump AGE_MAPPING_VERSION on any change: a state file records the version it was
+# accumulated under and is refused under another one (merging two rules into one set of cells cannot be undone).
+AGE_MAPPING_VERSION = 2
+UNKNOWN_BUCKET = "unknown"
+AGE_BUCKET_BOUNDS = (("1-21", 0, 20), ("22-60", 21, 59), ("61+", 60, None))  # (label, first day, last day | None)
+AGE_BUCKET_LABELS = [b[0] for b in AGE_BUCKET_BOUNDS] + [UNKNOWN_BUCKET]
+assert all(AGE_BUCKET_BOUNDS[i][2] + 1 == AGE_BUCKET_BOUNDS[i + 1][1] for i in range(len(AGE_BUCKET_BOUNDS) - 1))
+assert AGE_BUCKET_BOUNDS[-1][2] is None
 
 
 def _now_iso() -> str:
@@ -108,13 +119,25 @@ def _now_iso() -> str:
 
 
 def _age_bucket(days_since_league_start: Optional[int]) -> str:
-    if days_since_league_start is None or days_since_league_start < 1:
-        return "unknown"
-    for label, lo, hi in _AGE_BUCKET_BOUNDS:
+    """`unknown` ONLY when the start of the league is unknown (days is NULL: `_detect_league_and_dates` stores NULL exactly
+    when `start_at` is empty). A negative value means the start is later than the snapshot, i.e. a wrong `start_at`: it is
+    counted in the first bucket (the league has started as far as the data is concerned) and the CALLERS report it
+    (`negative_days_snapshot_ids`), it is never swallowed silently."""
+    if days_since_league_start is None:
+        return UNKNOWN_BUCKET
+    for label, _lo, hi in AGE_BUCKET_BOUNDS:
         if hi is None or days_since_league_start <= hi:
-            if days_since_league_start >= lo:
-                return label
-    return "unknown"  # unreachable given the bounds above, but never crash
+            return label
+    return UNKNOWN_BUCKET  # unreachable (the last bucket has no upper bound), but never crash
+
+
+def age_bucket_sql(expr: str) -> str:
+    """The same mapping as `_age_bucket` as a SQL `CASE` over the column expression `expr` (tests evaluate both)."""
+    parts = [f"CASE WHEN {expr} IS NULL THEN '{UNKNOWN_BUCKET}'"]
+    for label, _lo, hi in AGE_BUCKET_BOUNDS[:-1]:
+        parts.append(f"WHEN {expr} <= {hi} THEN '{label}'")
+    parts.append(f"ELSE '{AGE_BUCKET_BOUNDS[-1][0]}' END")
+    return " ".join(parts)
 
 
 def _build_skill_mod_archive(rows: list[tuple]) -> dict[str, Any]:
@@ -355,7 +378,8 @@ def build_league_archive(
         "league": league,
         "league_slug": sanitize_league_filename(league),
         "exported_at": _now_iso(),
-        "age_buckets": ["1-21", "22-60", "61+", "unknown"],
+        "age_buckets": list(AGE_BUCKET_LABELS),
+        "age_mapping": AGE_MAPPING_VERSION,
         **merged,
     }
 
