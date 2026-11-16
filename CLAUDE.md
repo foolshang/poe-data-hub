@@ -233,7 +233,7 @@ Full spec: see project owner for `SPEC: poe-data-hub v2`.
     early, so `days_since_league_start` (denormalized into every row at insert) was 7 too high. `league.start_overrides.<game>.<league>`
     in config.yaml beats Steam; check the date of a new league against the announcements before trusting it (SPEC.md "Covens
     `start_at`"). Planned: date the start from when the hub first saw the league, Steam only as a cross-check (SPEC backlog).
-  - **Archive age buckets (2026-11-16, code done, NOT deployed; SPEC "Age-bucket mapping"):** `days_since_league_start` is 0-based, the bucket names
+  - **Archive age buckets (2026-11-16, deployed and states migrated the same day; SPEC "Age-bucket mapping"):** `days_since_league_start` is 0-based, the bucket names
     (`1-21 / 22-60 / 61+`) count league days from 1, so the bounds are days 0..20 / 21..59 / 60+ and `unknown` means NULL only (one definition in
     `archive_export.AGE_BUCKET_BOUNDS`, the SQL is generated from it). A state records `age_mapping`; the new code REFUSES a state of another mapping, so
     the states must be swapped (`tools/migrate_age_mapping.py`, SPEC runbook) right after the restart, never the other way round. A negative days value

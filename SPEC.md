@@ -2123,7 +2123,7 @@ days 1 (generated 11-15 03:47Z), `poe1/meta/latest.json` days 2 (11-15 19:44Z). 
 Covens ok, 2 merged (577 days 0, 581 days 1 -- the state and the VM DB both carry the corrected days), file on Firebase; coverage `at_risk` 0 for Allflame and Covens, 1 for
 Forbidden Rites (snapshot 582, created 11-15T03:51:49Z, still running at 06:00Z; `retention_delete_at` 2026-12-30T21:00Z), `lost_count` 0 everywhere.
 
-### Age-bucket mapping was one day late at every edge (found 2026-11-14; code + dev migration done 2026-11-16, commits c73bc65 d09a864; NOT pushed, NOT deployed)
+### Age-bucket mapping was one day late at every edge (found 2026-11-14; fixed and DEPLOYED 2026-11-16, commits c73bc65 d09a864 73524a0; see the executed record below)
 
 `days_since_league_start` is `(job time - start_at).days`, counted from 0 (the first 24 h of a league is 0). The archive's age buckets are
 named `1-21 / 22-60 / 61+` (league day, counted from 1), but `_age_bucket` and its SQL copy `_BUCKET_SQL` compared the 0-based value
@@ -2187,7 +2187,7 @@ ids 377..578, 51). The originals as taken from the VM (`vm-states\`, state sha25
 `59e87b26f9a15babb625461239299cfbccda3afd64fb7259bbd30dbfb9ac56e2` FR, `8ccbfa7c1cfca945ed18c37cdffa0ab3693d59056ed88987c32ed4394afa5808` Covens) and the old
 Firebase bytes (`D:\Backups\poe-hub\archive-age-mapping-1\`, `SHA256SUMS`).
 
-**Runbook (NOT executed; the owner approves push / deploy / restart / state swap).**
+**Runbook (executed 2026-11-16, record after it; kept as the procedure for a future mapping change).**
 0. Precondition on the VM, read-only: the three state files still have the original sha256 above (they change only when a weekly job merges, Sunday 06:00Z;
    after 2026-11-22 06:00Z they will have changed and the dev migration must be redone from fresh copies). Do not start between Sunday 05:30Z and 07:00Z.
 1. Dev: `git push` (c73bc65, d09a864, docs). VM: `git pull --ff-only` (no restart yet; the running process keeps the old code).
@@ -2208,6 +2208,29 @@ Firebase bytes (`D:\Backups\poe-hub\archive-age-mapping-1\`, `SHA256SUMS`).
    in 8.13 and in memory.
 Rollback: before step 5 do nothing (old files untouched). After step 5 restore the `*.age-mapping-1` copies of that league AND check out the previous commit and restart,
 because the new code refuses a mapping-1 state.
+
+**Executed 2026-11-16 (owner approved the runbook; window 07:00-16:00Z, done 07:00-07:13Z).** Checked live at each step:
+- Before the restart, answered from the code: `compute_archive_coverage` reads a state only through `_merged_ids` (`SELECT snapshot_id FROM merged_snapshots`,
+  `archive_status.py:50-61`), never `open_state`, so an old-mapping state still counts as merged (no raise, at_risk/lost unchanged) and the startup call
+  (`main.py:2044`) is wrapped in try/except (`main.py:1533`). `ArchiveStateError` is raised only by an export (`archive_skills.py:191-197`, called at
+  `archive_runner.py:127`) and recorded as `status: failed` (`main.py:1512`). Note `archive_runner.py:123` rewrites the local base json BEFORE `open_state`.
+- Step 0: the three VM states, copied with the backup API, hashed to the recorded originals (the recorded values are hashes of backup-API copies, not of the live
+  files, so compare like with like); ledgers 49 / 2 / 51; `running_jobs` empty; VM at `0915517`, git clean.
+- Step 1: pushed `73524a0`; VM `git pull --ff-only` (no restart). Step 2: staged gz and state sha256 matched, ids 49 (375..569) / 51 (377..578), `age_mapping` 2, integrity ok.
+- Step 3: restart 07:02Z, service active on `73524a0`, no traceback from the archive. Step 4: 12 files copied to `data/archive/*.age-mapping-1` (states through the
+  backup API, others byte copies, sha256 checked). KEEP these until the owner says otherwise; so does `D:\Work\age-mapping\`.
+- Step 5, under `tools/run_capped.sh` (cap 150MB): Allflame merged 0, already merged 49, unavailable 0, peak anon 51MB, state sha256 unchanged by the export;
+  Forbidden Rites merged 2 (snapshots 582 and 586, finished after the weekly job, merged under the new rule), already merged 51, peak anon 60MB.
+- Step 6, Covens on the VM against the live DB: migrated a backup-API copy (`live` source, dry run then `--apply`, peak anon 2MB), exported the catch-up (merged 585, days 2),
+  and built `--rebuild-archive --no-publish` into another directory: `stat_acc` 249,943 / `passive_acc` 2,995 / `pop_acc` 354 rows EQUAL, ledger [577, 581, 585] EQUAL,
+  base and skills json byte-identical except `exported_at`. Swapped; export: merged 0, already merged 3, peak anon 48MB. No fallback to the rebuild was needed.
+- `--run-archive-once` (peak anon 63MB): `last_export` ok for both games, `unavailable []`, `publish_errors []`, at_risk 0 and lost 0 for all three leagues
+  (582 is no longer at risk), `archive.negative_days_snapshots` 0. Firebase: all six `archive/*` objects carry `age_mapping` 2; skills files `render_version` 3 with
+  49 / 53 / 3 `merged_snapshot_ids`. Heartbeat dispatched once (run 43822171119): `OK: ... all games fresh and non-empty`.
+- New state sha256 (live files): Allflame `5a1d5c3e6acf685bebc78647b4976b5af32c2b195673db0ceaac22330c4e127e` (the migrated file; unchanged by the exports),
+  Forbidden Rites `9bea8327d0db97ebe1f8d7245eb5d05b92e298d1526be757b9f20fef67a2a7aa` (53 ids), Covens `69ee82ea565f4d4bdd4f9d44f7de8568961f85c649972a52b57428b67990cbd6` (3 ids).
+- The deadlines (Allflame 513 / Forbidden Rites 514 on 2026-12-12 21:00Z, Covens 577 on 2026-12-29 21:00Z) are closed for the mapping: those snapshots are in the migrated states.
+- Not done: wiring `negative_days_snapshots` into the heartbeat with the same acknowledgement as `lost` (backlog, owner's call).
 
 ### Backlog (archive; do with the next VM deploy)
 
