@@ -2188,7 +2188,10 @@ ids 377..578, 51). The originals as taken from the VM (`vm-states\`, state sha25
 Firebase bytes (`D:\Backups\poe-hub\archive-age-mapping-1\`, `SHA256SUMS`).
 
 **Runbook (executed 2026-11-16, record after it; kept as the procedure for a future mapping change).**
-0. Precondition on the VM, read-only: the three state files still have the original sha256 above (they change only when a weekly job merges, Sunday 06:00Z;
+0. Precondition on the VM, read-only. COMPUTE EVERY STATE sha256 FROM A COPY MADE WITH SQLITE'S BACKUP API (`src.backup(dst)`, source opened `mode=ro`), never from the live
+   file: the recorded originals are hashes of backup-API copies (the copy is what was shipped to dev), and a backup is a rewritten file, so its bytes differ from the live file even
+   when the content is identical (2026-11-16: the live files hashed differently, the fresh backup-API copies hashed exactly to the recorded values). Hashing the live file is a false
+   mismatch; a live file may also be mid-write. Remove the temporary copies afterwards. The three state files still have the original sha256 above (they change only when a weekly job merges, Sunday 06:00Z;
    after 2026-11-22 06:00Z they will have changed and the dev migration must be redone from fresh copies). Do not start between Sunday 05:30Z and 07:00Z.
 1. Dev: `git push` (c73bc65, d09a864, docs). VM: `git pull --ff-only` (no restart yet; the running process keeps the old code).
 2. Ship to a STAGING directory on the VM (`/home/Winai/age-mapping-stage/`, never `data/archive/`): the two migrated `.gz`; verify the gz sha256, gunzip, verify the
@@ -2234,6 +2237,11 @@ because the new code refuses a mapping-1 state.
 
 ### Backlog (archive; do with the next VM deploy)
 
+- **`archive_runner.export_league_archive_streaming` writes the base file before it validates the state (owner, 2026-11-16; NOT built).** `archive_runner.py:123`
+  (`build_league_archive_to_file`) runs before `open_state` at `:127`, so when the export then fails on the state (`ArchiveStateError`: another `age_mapping`, damaged file,
+  wrong league) the base json on disk and in the previous skills file are from different runs, and nothing is published but the local base file is already replaced. Fix: open and
+  verify the state first (and the `LegacyArchiveError` check), write no file until it passed. Do it with the next VM deploy (changes what the hub does, needs a restart);
+  add a test that a refused state leaves every file in the archive directory byte-identical.
 - **`lost_snapshot_ids` in `status.json` lists only the first 20 ids** (`archive_status.MAX_LISTED`, `archive_status.py:25`; used at `:145`), so
   when `lost_count` exceeds 20 the surplus cannot be named or acknowledged and `check_archive_losses` stays red for it ("N more").
   Fix in the exporter side (list all ids, or at least a compact range form) together with the next VM deploy: it changes what the
